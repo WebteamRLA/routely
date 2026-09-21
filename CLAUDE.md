@@ -238,8 +238,11 @@ Application-level rules enforced in `experiment.service.ts`:
   URLs and accounts for PREFIX overlap.
 - **URLs are fixed once an experiment has started.** Visitors are already bucketed against the
   old configuration.
-- **Traffic split is pinned to 50** server-side (`MVP_VARIANT_SPLIT`) so a crafted submission
-  cannot skew a running test. The column is an Int, so uneven splits need no migration.
+- **Traffic is split by weight, across any number of variants.** `Experiment.controlWeight` and
+  each `ExperimentVariant.weight` are *relative* numbers normalised at draw time, kept separate
+  from `trafficAllocation` so neither can drift from the other. `lib/traffic.ts` composes the
+  two into percentages of total traffic for display, and `applyShare` is what the editor uses to
+  set one of those percentages exactly while keeping the set at 100.
 
 ### Ingestion never trusts client-supplied ownership
 

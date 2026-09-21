@@ -96,8 +96,9 @@ export default async function SharedResultsPage({
           <CardHeader>
             <CardTitle>What is being tested</CardTitle>
             <CardDescription>
-              Visitors arriving at the control are split evenly. Reaching the conversion URL counts
-              as a conversion for whichever version they saw.
+              Visitors arriving at the control are divided between the versions below, in the shares
+              shown. Reaching the conversion URL counts as a conversion for whichever version they
+              saw.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

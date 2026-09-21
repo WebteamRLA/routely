@@ -199,6 +199,13 @@ export async function updateExperiment(
 ): Promise<Experiment> {
   const existing = await getExperiment(actorUserId, experimentId);
 
+  // Spreading a key whose value is `undefined` still overwrites — `{a: 1, ...{a: undefined}}`
+  // is `{a: undefined}` — so "not submitted" has to be dropped before the merge rather than
+  // relied on to fall through to the stored value.
+  const supplied = Object.fromEntries(
+    Object.entries(changes).filter(([, value]) => value !== undefined),
+  );
+
   const merged = parseOrThrow(
     updateExperimentSchema,
     {
@@ -218,7 +225,7 @@ export async function updateExperiment(
       conversionMatchType: existing.conversionMatchType,
       primaryMetric: existing.primaryMetric,
       trafficAllocation: existing.trafficAllocation,
-      ...changes,
+      ...supplied,
     },
     "Check the experiment setup.",
   );

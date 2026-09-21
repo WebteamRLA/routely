@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { Fragment, useActionState, useState } from "react";
 import { useFormToast } from "@/hooks/use-form-toast";
 import Link from "next/link";
 import { Plus, Target, X } from "lucide-react";
@@ -174,7 +174,7 @@ export function ExperimentForm({
         <div className="space-y-1">
           <h3 className="text-sm font-medium">Pages to compare</h3>
           <p className="text-sm text-muted-foreground">
-            Traffic is split evenly across the control and every variant below.
+            Each arm&rsquo;s share of traffic is set under Traffic Distribution below.
           </p>
         </div>
 
@@ -219,9 +219,6 @@ export function ExperimentForm({
 
           {variants.map((variant, index) => (
             <div key={variant.id ?? `new-${index}`} className="flex items-end gap-2">
-              {/* Paired with `variantUrl` by document order — see `readVariants` in the action. */}
-              <input type="hidden" name="variantId" value={variant.id ?? ""} />
-              <input type="hidden" name="variantWeight" value={variant.weight} />
               <div className="flex-1">
                 <Field
                   name="variantUrl"
@@ -316,6 +313,34 @@ export function ExperimentForm({
           </Select>
         </div>
       </fieldset>
+
+      {/*
+       * Outside the fieldset on purpose. **A disabled fieldset submits none of its controls**,
+       * and the one above is disabled once an experiment has started — so anything a running
+       * experiment still needs to send has to live out here.
+       *
+       * Weights belong here permanently: re-weighting is explicitly allowed while a test runs
+       * (see `updateExperiment`), and it was impossible before, because `variantWeight` sat
+       * inside the locked block and never reached the server.
+       *
+       * The URLs are mirrored only while locked, where they cannot have changed. That keeps
+       * the payload complete without letting a hidden field become a second, editable copy of
+       * a visible one.
+       */}
+      {variants.map((variant, index) => (
+        <Fragment key={`weight-${variant.id ?? index}`}>
+          {/* Paired with `variantUrl` by document order — see `readVariants` in the action. */}
+          <input type="hidden" name="variantId" value={variant.id ?? ""} />
+          <input type="hidden" name="variantWeight" value={variant.weight} />
+          {urlsLocked ? <input type="hidden" name="variantUrl" value={variant.url} /> : null}
+        </Fragment>
+      ))}
+      {urlsLocked ? (
+        <>
+          <input type="hidden" name="controlUrl" value={defaults.controlUrl} />
+          <input type="hidden" name="conversionUrl" value={defaults.conversionUrl} />
+        </>
+      ) : null}
 
       <div className="space-y-5 border-t border-border/70 pt-5">
         <div className="space-y-1">

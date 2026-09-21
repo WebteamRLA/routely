@@ -17,6 +17,25 @@ import * as experimentService from "@/server/services/experiment.service";
  * belonging to someone else resolves to "not found".
  */
 
+/**
+ * Reads a field that may not have been submitted at all.
+ *
+ * A **disabled `<fieldset>` submits none of its controls**, and the edit form disables the URL
+ * fields once an experiment has started — so on a running experiment `controlUrl`,
+ * `conversionUrl` and every variant row are simply absent. `formData.get` returns `null` for
+ * those, and passing `null` on to a partial update overwrites the stored value with nothing.
+ * `undefined` is what "unchanged" looks like to `updateExperiment`, which merges the changes
+ * over the stored record.
+ *
+ * That is why re-weighting a running experiment used to fail with "expected string, received
+ * null" and "At least one variant is required", despite weights deliberately being outside the
+ * URL lock.
+ */
+function submittedText(formData: FormData, name: string): string | undefined {
+  const value = formData.get(name);
+  return typeof value === "string" ? value : undefined;
+}
+
 /** Reads an optional text field, treating an empty submission as absent rather than as "". */
 function optionalText(formData: FormData, name: string): string | undefined {
   const value = formData.get(name);
@@ -39,11 +58,16 @@ function numberField(formData: FormData, name: string): number {
  */
 function readVariants(
   formData: FormData,
-): { id?: string; url: FormDataEntryValue; weight: number }[] {
+): { id?: string; url: FormDataEntryValue; weight: number }[] | undefined {
+  const urls = formData.getAll("variantUrl");
+  // No rows at all means the fieldset holding them was disabled, not that the customer removed
+  // every variant — which the schema would reject outright. See `submittedText`.
+  if (urls.length === 0) return undefined;
+
   const ids = formData.getAll("variantId").map(String);
   const weights = formData.getAll("variantWeight");
 
-  return formData.getAll("variantUrl").map((url, index) => ({
+  return urls.map((url, index) => ({
     id: ids[index] || undefined,
     url,
     weight: Number(weights[index]),
@@ -69,7 +93,6 @@ export async function createExperimentAction(
       conversionMatchType: formData.get("conversionMatchType"),
       primaryMetric: formData.get("primaryMetric"),
       trafficAllocation: numberField(formData, "trafficAllocation"),
-      // Traffic is split evenly across every arm — not part of the form, derived server-side.
     }),
   );
 
@@ -90,16 +113,18 @@ export async function updateExperimentAction(
   const experimentId = String(formData.get("experimentId") ?? "");
 
   const result = await runAction(() =>
+    // Only what was actually submitted: anything absent stays as stored, which is what lets a
+    // running experiment be re-weighted while its URLs are locked.
     experimentService.updateExperiment(user.id, experimentId, {
-      name: formData.get("name"),
+      name: submittedText(formData, "name"),
       description: optionalText(formData, "description"),
-      controlUrl: formData.get("controlUrl"),
-      controlMatchType: formData.get("controlMatchType"),
+      controlUrl: submittedText(formData, "controlUrl"),
+      controlMatchType: submittedText(formData, "controlMatchType"),
       controlWeight: numberField(formData, "controlWeight"),
       variants: readVariants(formData),
-      conversionUrl: formData.get("conversionUrl"),
-      conversionMatchType: formData.get("conversionMatchType"),
-      primaryMetric: formData.get("primaryMetric"),
+      conversionUrl: submittedText(formData, "conversionUrl"),
+      conversionMatchType: submittedText(formData, "conversionMatchType"),
+      primaryMetric: submittedText(formData, "primaryMetric"),
       trafficAllocation: numberField(formData, "trafficAllocation"),
     }),
   );

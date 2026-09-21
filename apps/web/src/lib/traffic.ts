@@ -70,3 +70,85 @@ export function armShares(input: {
 
   return { control, variants: variants.slice(0, input.variantWeights.length), excluded };
 }
+
+/**
+ * Scales `values` so they sum to exactly `target`, keeping every entry a whole number.
+ *
+ * Largest-remainder again, so the leftover point lands on the value with the strongest claim.
+ * An all-zero input has no proportions to preserve, so it is split evenly — otherwise a set
+ * that had been driven to zero could never take traffic back.
+ */
+function proportionally(values: number[], target: number): number[] {
+  if (values.length === 0) return [];
+  if (target <= 0) return values.map(() => 0);
+
+  const total = values.reduce((sum, value) => sum + Math.max(value, 0), 0);
+  const scaled =
+    total > 0
+      ? values.map((value) => (Math.max(value, 0) / total) * target)
+      : values.map(() => target / values.length);
+
+  return roundToTotal(scaled, target);
+}
+
+/**
+ * Sets one segment of a distribution to an exact value and rebalances the rest to total 100.
+ *
+ * **The typed value is kept exactly.** That is the whole point of this function, and the
+ * reason it exists rather than the caller rescaling everything proportionally: doing that
+ * rewrites the segments the customer typed a moment ago. With two arms it is invisible — the
+ * single other segment simply absorbs the whole remainder, so the result is always exact —
+ * but from three arms upward the change is smeared across the others and the earlier entries
+ * visibly drift. Typing `25 / 25 / 20 / 30` used to store `26 / 25 / 19 / 30`.
+ *
+ * The change is taken from `absorbIndex` — the excluded slot — before any other segment,
+ * because that is the one with no meaning of its own: it is whatever is left over. A set of
+ * arm values that already totals 100 therefore leaves every arm exactly as typed, which is
+ * what someone entering a planned split expects.
+ *
+ * Only when excluded runs out of room do the other arms give way, proportionally. That case
+ * cannot be avoided — the total is fixed at 100 — but it is at least predictable.
+ */
+export function applyShare(
+  percents: number[],
+  index: number,
+  value: number,
+  absorbIndex: number,
+): number[] {
+  if (index < 0 || index >= percents.length) return [...percents];
+
+  const next = Math.round(Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 100));
+  const out = percents.map((percent) => Math.max(Math.round(percent), 0));
+  out[index] = next;
+
+  /** What every segment other than the edited one must now add up to. */
+  const remaining = 100 - next;
+  const donors = out.map((_, i) => i).filter((i) => i !== index);
+
+  if (donors.length === 0) return out;
+
+  // Editing the excluded slot itself has no separate absorber, so the arms take the change.
+  if (index === absorbIndex || absorbIndex < 0 || absorbIndex >= out.length) {
+    const scaled = proportionally(
+      donors.map((i) => out[i]!),
+      remaining,
+    );
+    donors.forEach((i, position) => (out[i] = scaled[position]!));
+    return out;
+  }
+
+  const rest = donors.filter((i) => i !== absorbIndex);
+  const restTotal = rest.reduce((sum, i) => sum + out[i]!, 0);
+
+  // Excluded takes the whole change where it can, which is what keeps the other arms untouched.
+  const absorbed = Math.min(Math.max(remaining - restTotal, 0), remaining);
+  out[absorbIndex] = absorbed;
+
+  const scaled = proportionally(
+    rest.map((i) => out[i]!),
+    remaining - absorbed,
+  );
+  rest.forEach((i, position) => (out[i] = scaled[position]!));
+
+  return out;
+}

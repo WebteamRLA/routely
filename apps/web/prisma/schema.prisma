@@ -175,8 +175,9 @@ model Website {
 // Experiments
 // ---------------------------------------------------------------------------
 
-/// A redirect test: visitors on `controlUrl` are split evenly across staying put and being
-/// sent to one of `variants`; reaching `conversionUrl` counts as a conversion.
+/// A redirect test: visitors on `controlUrl` are divided between staying put and being sent to
+/// one of `variants`, in the proportions given by `controlWeight` and each variant's `weight`;
+/// reaching `conversionUrl` counts as a conversion.
 model Experiment {
   id          String  @id @default(cuid())
   websiteId   String

@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 
 import { Input } from "@/components/ui/input";
-import { roundToTotal } from "@/lib/traffic";
+import { applyShare, roundToTotal } from "@/lib/traffic";
 import { cn } from "@/lib/utils";
 
 /**
@@ -120,24 +120,21 @@ export function TrafficDistribution({
     window.addEventListener("pointerup", stop);
   }
 
-  /** Typing an exact value keeps the total at 100 by taking the difference out of the other
-   * segments proportionally — so one box can be set precisely without the rest silently
-   * drifting out of a valid distribution. */
+  /**
+   * Typing an exact value keeps that value exactly, and takes the difference out of the
+   * excluded slot before any other arm — see `applyShare`.
+   *
+   * This used to rescale every other segment proportionally, which quietly rewrote the boxes
+   * the customer had just filled in. With two arms it was invisible, because the single other
+   * segment absorbs the whole remainder and the result is exact either way; from three arms
+   * upward the change was smeared across the rest and earlier entries drifted. Typing
+   * `25 / 25 / 20 / 30` stored `26 / 25 / 19 / 30`.
+   */
   function setSegment(index: number, raw: number) {
-    const next = Math.round(Math.min(Math.max(raw, 0), 100));
     const percents = segments.map((segment) => segment.percent);
-    const others = percents.reduce((sum, value, i) => (i === index ? sum : sum + value), 0);
-    const remaining = 100 - next;
-
-    percents[index] = next;
-    for (let i = 0; i < percents.length; i += 1) {
-      if (i === index) continue;
-      // With nothing left to scale, spread the remainder evenly rather than dividing by zero.
-      percents[i] =
-        others > 0 ? (percents[i]! / others) * remaining : remaining / (percents.length - 1);
-    }
-
-    emit(percents);
+    // Excluded is always the last segment; it is the one with no meaning of its own, so it is
+    // the right place for a change to come from.
+    emit(applyShare(percents, index, raw, percents.length - 1));
   }
 
   function resetToEqual() {

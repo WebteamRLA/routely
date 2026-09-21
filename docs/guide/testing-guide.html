@@ -1,354 +1,651 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Routely — Testing Guide</title>
-<style>
-  @page { size: A4; margin: 18mm 16mm; }
-  * { box-sizing: border-box; }
-  body {
-    font: 10.5pt/1.55 "Helvetica Neue", Helvetica, Arial, sans-serif;
-    color: #1a1a1a; margin: 0;
-  }
-  h1 { font-size: 25pt; margin: 0 0 6pt; letter-spacing: -0.4pt; }
-  h2 {
-    font-size: 13pt; margin: 22pt 0 8pt; padding-bottom: 4pt;
-    border-bottom: 1.5pt solid #1a1a1a; letter-spacing: -0.2pt;
-    page-break-after: avoid; page-break-inside: avoid;
-  }
-  h3 { page-break-after: avoid; }
-  table { page-break-inside: avoid; }
-  tr { page-break-inside: avoid; }
-  h3 { font-size: 11pt; margin: 14pt 0 4pt; }
-  p { margin: 0 0 8pt; }
-  .lede { font-size: 11.5pt; color: #444; margin-bottom: 14pt; }
-  .meta { font-size: 9pt; color: #666; margin-bottom: 20pt; }
+  <head>
+    <meta charset="utf-8" />
+    <title>Routely — Testing Guide</title>
+    <style>
+      @page {
+        size: A4;
+        margin: 18mm 16mm;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font:
+          10.5pt/1.55 "Helvetica Neue",
+          Helvetica,
+          Arial,
+          sans-serif;
+        color: #1a1a1a;
+        margin: 0;
+      }
+      h1 {
+        font-size: 25pt;
+        margin: 0 0 6pt;
+        letter-spacing: -0.4pt;
+      }
+      h2 {
+        font-size: 13pt;
+        margin: 22pt 0 8pt;
+        padding-bottom: 4pt;
+        border-bottom: 1.5pt solid #1a1a1a;
+        letter-spacing: -0.2pt;
+        page-break-after: avoid;
+        page-break-inside: avoid;
+      }
+      h3 {
+        page-break-after: avoid;
+      }
+      table {
+        page-break-inside: avoid;
+      }
+      tr {
+        page-break-inside: avoid;
+      }
+      h3 {
+        font-size: 11pt;
+        margin: 14pt 0 4pt;
+      }
+      p {
+        margin: 0 0 8pt;
+      }
+      .lede {
+        font-size: 11.5pt;
+        color: #444;
+        margin-bottom: 14pt;
+      }
+      .meta {
+        font-size: 9pt;
+        color: #666;
+        margin-bottom: 20pt;
+      }
 
-  .box { border: 1pt solid #ccc; border-radius: 4pt; padding: 10pt 12pt; margin: 10pt 0;
-    page-break-inside: avoid; }
-  .box.warn { border-color: #b26a00; background: #fff8ee; }
-  .box.info { background: #f6f6f6; border-color: #ddd; }
-  .box h3 { margin-top: 0; }
+      .box {
+        border: 1pt solid #ccc;
+        border-radius: 4pt;
+        padding: 10pt 12pt;
+        margin: 10pt 0;
+        page-break-inside: avoid;
+      }
+      .box.warn {
+        border-color: #b26a00;
+        background: #fff8ee;
+      }
+      .box.info {
+        background: #f6f6f6;
+        border-color: #ddd;
+      }
+      .box h3 {
+        margin-top: 0;
+      }
 
-  /* A test: number, title, then do / expect. */
-  .test { margin: 0 0 14pt; page-break-inside: avoid; }
-  .test-head { display: flex; align-items: baseline; gap: 8pt; margin-bottom: 5pt; }
-  .num {
-    flex: 0 0 auto; width: 18pt; height: 18pt; border: 1.2pt solid #1a1a1a;
-    border-radius: 50%; text-align: center; font-weight: 700; font-size: 9.5pt; line-height: 16pt;
-  }
-  .test-title { font-weight: 700; font-size: 11.5pt; }
-  .test-body { margin-left: 26pt; }
-  .expect {
-    border-left: 2.5pt solid #1a1a1a; padding: 4pt 0 4pt 9pt; margin: 6pt 0 0;
-    background: #fafafa;
-  }
-  .expect .label { display: block; font-size: 8.5pt; text-transform: uppercase;
-    letter-spacing: 0.6pt; color: #666; margin-bottom: 2pt; font-weight: 700; }
-  .result { margin-top: 6pt; font-size: 9.5pt; color: #555; }
-  .tick { display: inline-block; width: 10pt; height: 10pt; border: 1pt solid #777;
-    margin-right: 4pt; vertical-align: -1pt; }
+      /* A test: number, title, then do / expect. */
+      .test {
+        margin: 0 0 14pt;
+        page-break-inside: avoid;
+      }
+      .test-head {
+        display: flex;
+        align-items: baseline;
+        gap: 8pt;
+        margin-bottom: 5pt;
+      }
+      .num {
+        flex: 0 0 auto;
+        width: 18pt;
+        height: 18pt;
+        border: 1.2pt solid #1a1a1a;
+        border-radius: 50%;
+        text-align: center;
+        font-weight: 700;
+        font-size: 9.5pt;
+        line-height: 16pt;
+      }
+      .test-title {
+        font-weight: 700;
+        font-size: 11.5pt;
+      }
+      .test-body {
+        margin-left: 26pt;
+      }
+      .expect {
+        border-left: 2.5pt solid #1a1a1a;
+        padding: 4pt 0 4pt 9pt;
+        margin: 6pt 0 0;
+        background: #fafafa;
+      }
+      .expect .label {
+        display: block;
+        font-size: 8.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.6pt;
+        color: #666;
+        margin-bottom: 2pt;
+        font-weight: 700;
+      }
+      .result {
+        margin-top: 6pt;
+        font-size: 9.5pt;
+        color: #555;
+      }
+      .tick {
+        display: inline-block;
+        width: 10pt;
+        height: 10pt;
+        border: 1pt solid #777;
+        margin-right: 4pt;
+        vertical-align: -1pt;
+      }
 
-  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9.5pt;
-    background: #f0f0f0; padding: 1pt 3pt; border-radius: 2pt; }
-  pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 8.5pt;
-    background: #f6f6f6; border: 1pt solid #e0e0e0; border-radius: 3pt;
-    padding: 8pt; overflow-wrap: anywhere; white-space: pre-wrap; margin: 6pt 0; }
-  ul, ol { margin: 0 0 8pt; padding-left: 16pt; }
-  li { margin-bottom: 4pt; }
-  table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 9.5pt; }
-  th, td { text-align: left; padding: 5pt 6pt; border-bottom: 0.75pt solid #ddd; vertical-align: top; }
-  th { font-size: 10pt; font-weight: 700; color: #1a1a1a; }
-  table.cols th { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #666; }
-  .page-break { page-break-before: always; }
-  .footnote { font-size: 9pt; color: #666; }
-  .signoff { margin-top: 14pt; border-top: 0.75pt solid #ddd; padding-top: 8pt;
-    page-break-before: avoid; }
-</style>
-</head>
-<body>
+      code {
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+        font-size: 9.5pt;
+        background: #f0f0f0;
+        padding: 1pt 3pt;
+        border-radius: 2pt;
+      }
+      pre {
+        font-family: "SF Mono", Menlo, Consolas, monospace;
+        font-size: 8.5pt;
+        background: #f6f6f6;
+        border: 1pt solid #e0e0e0;
+        border-radius: 3pt;
+        padding: 8pt;
+        overflow-wrap: anywhere;
+        white-space: pre-wrap;
+        margin: 6pt 0;
+      }
+      ul,
+      ol {
+        margin: 0 0 8pt;
+        padding-left: 16pt;
+      }
+      li {
+        margin-bottom: 4pt;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 8pt 0;
+        font-size: 9.5pt;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 5pt 6pt;
+        border-bottom: 0.75pt solid #ddd;
+        vertical-align: top;
+      }
+      th {
+        font-size: 10pt;
+        font-weight: 700;
+        color: #1a1a1a;
+      }
+      table.cols th {
+        font-size: 8.5pt;
+        text-transform: uppercase;
+        letter-spacing: 0.5pt;
+        color: #666;
+      }
+      .page-break {
+        page-break-before: always;
+      }
+      .footnote {
+        font-size: 9pt;
+        color: #666;
+      }
+      .signoff {
+        margin-top: 14pt;
+        border-top: 0.75pt solid #ddd;
+        padding-top: 8pt;
+        page-break-before: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Routely — Testing Guide</h1>
+    <p class="lede">
+      A step-by-step walkthrough for checking that Routely works. No technical knowledge assumed —
+      but you will need someone who can add a line of code to your website for one step, and that
+      step is clearly marked.
+    </p>
+    <p class="meta">
+      Test site: <strong>https://routely-nine.vercel.app</strong> &nbsp;·&nbsp; Print this and tick
+      as you go. Allow about 45 minutes.
+    </p>
 
-<h1>Routely — Testing Guide</h1>
-<p class="lede">A step-by-step walkthrough for checking that Routely works. No technical
-knowledge assumed — but you will need someone who can add a line of code to your website
-for one step, and that step is clearly marked.</p>
-<p class="meta">Test site: <strong>https://routely-nine.vercel.app</strong> &nbsp;·&nbsp;
-Print this and tick as you go. Allow about 45 minutes.</p>
-
-<h2>What Routely does</h2>
-<p>Routely answers one question: <strong>if I send half my visitors to a different page, do more
-of them do the thing I want?</strong></p>
-<p>You give it three web addresses:</p>
-<table>
-  <tr><th style="width:26%">The control page</th><td>The page you have now. Half your visitors carry on seeing it.</td></tr>
-  <tr><th>The variant page</th><td>The alternative you want to try. The other half get sent here instead.</td></tr>
-  <tr><th>The goal page</th><td>The page that means success — a thank-you page, an order confirmation. Reaching it counts as a win.</td></tr>
-</table>
-<p>Routely then tells you which half reached the goal more often.</p>
-
-<h2>Before you start</h2>
-<p>Please have these ready. Without them you will get stuck at test 3.</p>
-<ul>
-  <li><strong>A Google account</strong> to sign in with.</li>
-  <li><strong>A website you can edit.</strong> You need to be able to add a small piece of code
-      to it — or have someone nearby who can. A WordPress site, Wix, Squarespace or a normal
-      HTML site all work.</li>
-  <li><strong>Three pages on that website</strong>, all real pages that open in a browser:
-      the page you want to test, an alternative version of it, and a page that counts as
-      success. For example <code>/pricing</code>, <code>/pricing-new</code> and
-      <code>/thank-you</code>.</li>
-</ul>
-
-<div class="box warn">
-  <h3>The most common reason testing fails</h3>
-  <p style="margin:0">All three pages must <strong>already exist and open normally in your browser</strong>
-  before you start. If typing the address into a browser gives you a "page not found", Routely
-  cannot test it — and no amount of setup will fix that. Open all three in a browser now and
-  confirm each one loads.</p>
-</div>
-
-<div class="box info">
-  <h3>One thing to check first (ask whoever set this up)</h3>
-  <p style="margin:0">Signing in uses Google. For that to work, this specific web address has to be
-  registered with Google beforehand. If test 1 shows a Google error page mentioning
-  <em>"redirect_uri_mismatch"</em>, that registration is missing — it is a five-minute setup job,
-  not a fault you can fix from your side. Report it and stop.</p>
-</div>
-
-<h2>The tests</h2>
-
-<div class="test">
-  <div class="test-head"><span class="num">1</span><span class="test-title">Sign in</span></div>
-  <div class="test-body">
-    <p>Go to <strong>https://routely-nine.vercel.app</strong> and choose
-    <strong>Continue with Google</strong>.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      Google asks which account to use. After choosing, you land on a page called
-      <strong>Get started</strong>.</div>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">2</span><span class="test-title">Add your website</span></div>
-  <div class="test-body">
-    <p>Press <strong>Add website</strong>. Give it any name you like, and type your website's
-    address — just the domain, like <code>example.com</code>, not a full page address.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      Your website appears in the list, with its status showing <strong>Not connected</strong>.
-      That is correct at this stage — nothing is installed yet.</div>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">3</span><span class="test-title">Install the tracking code
-    <span class="footnote">(the one technical step)</span></span></div>
-  <div class="test-body">
-    <p>Press <strong>Set up pixel</strong> on your website's row. A window opens showing two small
-    blocks of code. Press <strong>Copy</strong>.</p>
-    <p>That code needs to be pasted into your website's <code>&lt;head&gt;</code> section, on
-    <strong>every page you want to test — including the goal page</strong>. How you do that
-    depends on your website:</p>
-    <ul>
-      <li><strong>WordPress:</strong> most themes have a "header scripts" or "custom code" box in
-          the theme settings, or you can use a free plugin such as <em>WPCode</em>.</li>
-      <li><strong>Wix / Squarespace / Shopify:</strong> look for "Custom code", "Code injection"
-          or "Header" in the site settings.</li>
-      <li><strong>A hand-built site:</strong> paste it just before the closing
-          <code>&lt;/head&gt;</code> tag.</li>
-    </ul>
-    <p>If none of that is familiar, this is the moment to ask whoever looks after your website.
-    Show them this page — it is a routine five-minute job for them.</p>
-    <p>Save your changes and make sure the site is published, not just saved as a draft.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      Nothing visible changes on your website. Visitors see exactly what they saw before.</div>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">4</span><span class="test-title">Check the code is really there</span></div>
-  <div class="test-body">
-    <p>Back in Routely, press <strong>Next: verify installation</strong>. It suggests a page
-    address — you can change it to any page you pasted the code onto. Press
-    <strong>Verify installation</strong>.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      A green confirmation, then a <strong>Done</strong> button. Your website's status becomes
-      <strong>Connected</strong>.</div>
-    <p><em>If it says the snippet was not found:</em> the usual causes are that the change was not
-    published, that a caching plugin is still serving the old version (clear the cache), or that
-    the code went onto a different page from the one being checked. Fix and press it again.</p>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">5</span><span class="test-title">Create an experiment</span></div>
-  <div class="test-body">
-    <p>Press <strong>New experiment</strong> and work through the six steps. Only three things
-    really matter:</p>
+    <h2>What Routely does</h2>
+    <p>
+      Routely answers one question:
+      <strong
+        >if I send half my visitors to a different page, do more of them do the thing I
+        want?</strong
+      >
+    </p>
+    <p>You give it three web addresses:</p>
     <table>
-      <tr><th style="width:30%">Control URL</th><td>The full address of the page you have now</td></tr>
-      <tr><th>Variant URL</th><td>The full address of the alternative page</td></tr>
-      <tr><th>Conversion URL</th><td>The full address of your success page</td></tr>
+      <tr>
+        <th style="width: 26%">The control page</th>
+        <td>The page you have now. Half your visitors carry on seeing it.</td>
+      </tr>
+      <tr>
+        <th>The variant page</th>
+        <td>The alternative you want to try. The other half get sent here instead.</td>
+      </tr>
+      <tr>
+        <th>The goal page</th>
+        <td>
+          The page that means success — a thank-you page, an order confirmation. Reaching it counts
+          as a win.
+        </td>
+      </tr>
     </table>
-    <p>All three must be on the website you added. Use full addresses including
-    <code>https://</code>.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      You reach a <strong>Summary</strong> step listing everything back to you.</div>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
+    <p>Routely then tells you which half reached the goal more often.</p>
 
-<div class="test">
-  <div class="test-head"><span class="num">6</span><span class="test-title">The pre-publish check</span></div>
-  <div class="test-body">
-    <p>Press <strong>Review &amp; create</strong>. Routely runs four checks and shows the results.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      Ticks against all four. Then press <strong>Acknowledge &amp; create</strong>.</div>
-    <p><em>If "Script installation" shows a warning:</em> read it carefully — it names the exact
-    problem. "Returned HTTP 404" means that page does not exist, and you need to correct the
-    address rather than reinstall anything. Otherwise press <strong>Set up pixel</strong> right
-    there, install the code on that page, then press the <strong>refresh</strong> button beside it.
-    The check runs again without closing the window.</p>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">7</span><span class="test-title">Start it running</span></div>
-  <div class="test-body">
-    <p>Your experiment is created as a draft — it is not doing anything yet. Open it and press
-    <strong>Publish</strong>.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      The status changes to <strong>Running</strong>.</div>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">8</span><span class="test-title">Watch it work — the important one</span></div>
-  <div class="test-body">
-    <p>Open a <strong>private / incognito window</strong> and go to your control page address.
-    Repeat several times, using a fresh private window each time.</p>
-    <p><span class="footnote">A private window matters: Routely remembers each visitor's side of
-    the test on purpose, so a normal window will keep showing you the same one.</span></p>
-    <div class="expect"><span class="label">What should happen</span>
-      Roughly half the time you stay on the page you asked for. The other half, the address bar
-      changes to the variant page. Both are correct — that <em>is</em> the test running.</div>
-    <p>Try about eight private windows. You should see both outcomes.</p>
-    <p class="result"><span class="tick"></span> Both outcomes seen &nbsp;&nbsp;
-       <span class="tick"></span> Only ever one — note which:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">9</span><span class="test-title">Record a success</span></div>
-  <div class="test-body">
-    <p>In one of those private windows, after landing on either page, navigate to your goal page.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      Nothing visible. Routely records it quietly in the background.</div>
-    <p class="result"><span class="tick"></span> Done &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">10</span><span class="test-title">Read the results</span></div>
-  <div class="test-body">
-    <p>Back in Routely, open your experiment. Wait a few seconds and refresh the page.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      Visitor numbers appear for both sides, and any goals you reached show as conversions.
-      The numbers should roughly match how many private windows you opened.</div>
-    <p class="result"><span class="tick"></span> Numbers look right &nbsp;&nbsp;
-       <span class="tick"></span> Numbers look wrong — write down what you did and what it showed:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">11</span><span class="test-title">Share the results</span></div>
-  <div class="test-body">
-    <p>On the experiment page, find the sharing section and create a share link. Open it in a
-    private window.</p>
-    <div class="expect"><span class="label">What should happen</span>
-      The results open <strong>without asking anyone to sign in</strong>, and show only this one
-      experiment — no other experiments, no account details, nothing editable.</div>
-    <p class="result"><span class="tick"></span> Worked &nbsp;&nbsp;
-       <span class="tick"></span> Problem — note what you saw:</p>
-  </div>
-</div>
-
-<div class="test">
-  <div class="test-head"><span class="num">12</span><span class="test-title">Have a look around</span></div>
-  <div class="test-body">
-    <p>Click through the rest and note anything confusing, broken or ugly:</p>
+    <h2>Before you start</h2>
+    <p>Please have these ready. Without them you will get stuck at test 3.</p>
     <ul>
-      <li><strong>Get started</strong> — your numbers and charts at the top</li>
-      <li><strong>Experiments</strong> — everything you have created, with search and tabs</li>
-      <li><strong>Metrics</strong> — your goal pages, with Edit and Delete</li>
-      <li><strong>Sign out</strong> — at the bottom of the left-hand menu</li>
+      <li><strong>A Google account</strong> to sign in with.</li>
+      <li>
+        <strong>A website you can edit.</strong> You need to be able to add a small piece of code to
+        it — or have someone nearby who can. A WordPress site, Wix, Squarespace or a normal HTML
+        site all work.
+      </li>
+      <li>
+        <strong>Three pages on that website</strong>, all real pages that open in a browser: the
+        page you want to test, an alternative version of it, and a page that counts as success. For
+        example <code>/pricing</code>, <code>/pricing-new</code> and <code>/thank-you</code>.
+      </li>
     </ul>
-    <p class="result"><span class="tick"></span> Nothing to report &nbsp;&nbsp;
-       <span class="tick"></span> Notes overleaf</p>
-  </div>
-</div>
 
-<h2>Things that look wrong but are not</h2>
-<p>Please do not report these — they are known and intended.</p>
-<table>
-  <tr>
-    <th style="width:38%">You only get redirected once per browser</th>
-    <td>Deliberate. A visitor who kept flipping between two pages would ruin the measurement.
-        Use a fresh private window to be treated as a new visitor.</td>
-  </tr>
-  <tr>
-    <th>A brief blank moment before the redirect</th>
-    <td>Routely hides the page for a fraction of a second so a redirected visitor never glimpses
-        the wrong page. On a slow connection you may notice it.</td>
-  </tr>
-  <tr>
-    <th>"0 of 100,000" tracked users</th>
-    <td>There is no billing yet. That figure is a placeholder, not a real plan limit.</td>
-  </tr>
-  <tr>
-    <th>Results take a few seconds</th>
-    <td>Visits are sent in the background and the page does not update by itself. Refresh it.</td>
-  </tr>
-  <tr>
-    <th>No "winner" declared</th>
-    <td>Intentional. Routely says which side is <em>currently</em> ahead and states plainly that
-        this is not proof. It will not claim a winner it cannot stand behind.</td>
-  </tr>
-  <tr>
-    <th>A goal on a different website records nothing</th>
-    <td>The goal page must be on the same website as the test, and must have the tracking code
-        on it too.</td>
-  </tr>
-</table>
+    <div class="box warn">
+      <h3>The most common reason testing fails</h3>
+      <p style="margin: 0">
+        All three pages must <strong>already exist and open normally in your browser</strong> before
+        you start. If typing the address into a browser gives you a "page not found", Routely cannot
+        test it — and no amount of setup will fix that. Open all three in a browser now and confirm
+        each one loads.
+      </p>
+    </div>
 
-<h2>If something goes wrong</h2>
-<p>A useful report answers four things. Screenshots are worth more than descriptions.</p>
-<ol>
-  <li><strong>Which test number</strong> you were on.</li>
-  <li><strong>What you did</strong> — the exact buttons and the exact addresses you typed.</li>
-  <li><strong>What you expected</strong>, and <strong>what actually happened</strong>.</li>
-  <li><strong>A screenshot of the whole window</strong>, including the address bar.</li>
-</ol>
-<p>Also say which browser you used, and whether you were in a private window. If a message
-appeared on screen, copy it out word for word — the wording usually identifies the cause
-immediately.</p>
+    <div class="box info">
+      <h3>One thing to check first (ask whoever set this up)</h3>
+      <p style="margin: 0">
+        Signing in uses Google. For that to work, this specific web address has to be registered
+        with Google beforehand. If test 1 shows a Google error page mentioning
+        <em>"redirect_uri_mismatch"</em>, that registration is missing — it is a five-minute setup
+        job, not a fault you can fix from your side. Report it and stop.
+      </p>
+    </div>
 
-<p class="footnote signoff">
-Routely testing guide · Tester: ______________________ · Date: ______________
-</p>
+    <h2>The tests</h2>
 
-</body>
+    <div class="test">
+      <div class="test-head"><span class="num">1</span><span class="test-title">Sign in</span></div>
+      <div class="test-body">
+        <p>
+          Go to <strong>https://routely-nine.vercel.app</strong> and choose
+          <strong>Continue with Google</strong>.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span>
+          Google asks which account to use. After choosing, you land on a page called
+          <strong>Get started</strong>.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">2</span><span class="test-title">Add your website</span>
+      </div>
+      <div class="test-body">
+        <p>
+          Press <strong>Add website</strong>. Give it any name you like, and type your website's
+          address — just the domain, like <code>example.com</code>, not a full page address.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> Your website appears in the list, with its
+          status showing <strong>Not connected</strong>. That is correct at this stage — nothing is
+          installed yet.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">3</span
+        ><span class="test-title"
+          >Install the tracking code <span class="footnote">(the one technical step)</span></span
+        >
+      </div>
+      <div class="test-body">
+        <p>
+          Press <strong>Set up pixel</strong> on your website's row. A window opens showing two
+          small blocks of code. Press <strong>Copy</strong>.
+        </p>
+        <p>
+          That code needs to be pasted into your website's <code>&lt;head&gt;</code> section, on
+          <strong>every page you want to test — including the goal page</strong>. How you do that
+          depends on your website:
+        </p>
+        <ul>
+          <li>
+            <strong>WordPress:</strong> most themes have a "header scripts" or "custom code" box in
+            the theme settings, or you can use a free plugin such as <em>WPCode</em>.
+          </li>
+          <li>
+            <strong>Wix / Squarespace / Shopify:</strong> look for "Custom code", "Code injection"
+            or "Header" in the site settings.
+          </li>
+          <li>
+            <strong>A hand-built site:</strong> paste it just before the closing
+            <code>&lt;/head&gt;</code> tag.
+          </li>
+        </ul>
+        <p>
+          If none of that is familiar, this is the moment to ask whoever looks after your website.
+          Show them this page — it is a routine five-minute job for them.
+        </p>
+        <p>Save your changes and make sure the site is published, not just saved as a draft.</p>
+        <div class="expect">
+          <span class="label">What should happen</span> Nothing visible changes on your website.
+          Visitors see exactly what they saw before.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">4</span><span class="test-title">Check the code is really there</span>
+      </div>
+      <div class="test-body">
+        <p>
+          Back in Routely, press <strong>Next: verify installation</strong>. It suggests a page
+          address — you can change it to any page you pasted the code onto. Press
+          <strong>Verify installation</strong>.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> A green confirmation, then a
+          <strong>Done</strong> button. Your website's status becomes <strong>Connected</strong>.
+        </div>
+        <p>
+          <em>If it says the snippet was not found:</em> the usual causes are that the change was
+          not published, that a caching plugin is still serving the old version (clear the cache),
+          or that the code went onto a different page from the one being checked. Fix and press it
+          again.
+        </p>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">5</span><span class="test-title">Create an experiment</span>
+      </div>
+      <div class="test-body">
+        <p>
+          Press <strong>New experiment</strong> and work through the six steps. Only three things
+          really matter:
+        </p>
+        <table>
+          <tr>
+            <th style="width: 30%">Control URL</th>
+            <td>The full address of the page you have now</td>
+          </tr>
+          <tr>
+            <th>Variant URL</th>
+            <td>The full address of the alternative page</td>
+          </tr>
+          <tr>
+            <th>Conversion URL</th>
+            <td>The full address of your success page</td>
+          </tr>
+        </table>
+        <p>
+          All three must be on the website you added. Use full addresses including
+          <code>https://</code>.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> You reach a <strong>Summary</strong> step
+          listing everything back to you.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">6</span><span class="test-title">The pre-publish check</span>
+      </div>
+      <div class="test-body">
+        <p>
+          Press <strong>Review &amp; create</strong>. Routely runs four checks and shows the
+          results.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> Ticks against all four. Then press
+          <strong>Acknowledge &amp; create</strong>.
+        </div>
+        <p>
+          <em>If "Script installation" shows a warning:</em> read it carefully — it names the exact
+          problem. "Returned HTTP 404" means that page does not exist, and you need to correct the
+          address rather than reinstall anything. Otherwise press
+          <strong>Set up pixel</strong> right there, install the code on that page, then press the
+          <strong>refresh</strong> button beside it. The check runs again without closing the
+          window.
+        </p>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">7</span><span class="test-title">Start it running</span>
+      </div>
+      <div class="test-body">
+        <p>
+          Your experiment is created as a draft — it is not doing anything yet. Open it and press
+          <strong>Publish</strong>.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> The status changes to
+          <strong>Running</strong>.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">8</span><span class="test-title">Watch it work — the important one</span>
+      </div>
+      <div class="test-body">
+        <p>
+          Open a <strong>private / incognito window</strong> and go to your control page address.
+          Repeat several times, using a fresh private window each time.
+        </p>
+        <p>
+          <span class="footnote"
+            >A private window matters: Routely remembers each visitor's side of the test on purpose,
+            so a normal window will keep showing you the same one.</span
+          >
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> Roughly half the time you stay on the page
+          you asked for. The other half, the address bar changes to the variant page. Both are
+          correct — that <em>is</em> the test running.
+        </div>
+        <p>Try about eight private windows. You should see both outcomes.</p>
+        <p class="result">
+          <span class="tick"></span> Both outcomes seen &nbsp;&nbsp; <span class="tick"></span> Only
+          ever one — note which:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">9</span><span class="test-title">Record a success</span>
+      </div>
+      <div class="test-body">
+        <p>
+          In one of those private windows, after landing on either page, navigate to your goal page.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> Nothing visible. Routely records it quietly
+          in the background.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Done &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">10</span><span class="test-title">Read the results</span>
+      </div>
+      <div class="test-body">
+        <p>Back in Routely, open your experiment. Wait a few seconds and refresh the page.</p>
+        <div class="expect">
+          <span class="label">What should happen</span> Visitor numbers appear for both sides, and
+          any goals you reached show as conversions. The numbers should roughly match how many
+          private windows you opened.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Numbers look right &nbsp;&nbsp;
+          <span class="tick"></span> Numbers look wrong — write down what you did and what it
+          showed:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">11</span><span class="test-title">Share the results</span>
+      </div>
+      <div class="test-body">
+        <p>
+          On the experiment page, find the sharing section and create a share link. Open it in a
+          private window.
+        </p>
+        <div class="expect">
+          <span class="label">What should happen</span> The results open
+          <strong>without asking anyone to sign in</strong>, and show only this one experiment — no
+          other experiments, no account details, nothing editable.
+        </div>
+        <p class="result">
+          <span class="tick"></span> Worked &nbsp;&nbsp; <span class="tick"></span> Problem — note
+          what you saw:
+        </p>
+      </div>
+    </div>
+
+    <div class="test">
+      <div class="test-head">
+        <span class="num">12</span><span class="test-title">Have a look around</span>
+      </div>
+      <div class="test-body">
+        <p>Click through the rest and note anything confusing, broken or ugly:</p>
+        <ul>
+          <li><strong>Get started</strong> — your numbers and charts at the top</li>
+          <li><strong>Experiments</strong> — everything you have created, with search and tabs</li>
+          <li><strong>Metrics</strong> — your goal pages, with Edit and Delete</li>
+          <li><strong>Sign out</strong> — at the bottom of the left-hand menu</li>
+        </ul>
+        <p class="result">
+          <span class="tick"></span> Nothing to report &nbsp;&nbsp; <span class="tick"></span> Notes
+          overleaf
+        </p>
+      </div>
+    </div>
+
+    <h2>Things that look wrong but are not</h2>
+    <p>Please do not report these — they are known and intended.</p>
+    <table>
+      <tr>
+        <th style="width: 38%">You only get redirected once per browser</th>
+        <td>
+          Deliberate. A visitor who kept flipping between two pages would ruin the measurement. Use
+          a fresh private window to be treated as a new visitor.
+        </td>
+      </tr>
+      <tr>
+        <th>A brief blank moment before the redirect</th>
+        <td>
+          Routely hides the page for a fraction of a second so a redirected visitor never glimpses
+          the wrong page. On a slow connection you may notice it.
+        </td>
+      </tr>
+      <tr>
+        <th>"0 of 100,000" tracked users</th>
+        <td>There is no billing yet. That figure is a placeholder, not a real plan limit.</td>
+      </tr>
+      <tr>
+        <th>Results take a few seconds</th>
+        <td>
+          Visits are sent in the background and the page does not update by itself. Refresh it.
+        </td>
+      </tr>
+      <tr>
+        <th>No "winner" declared</th>
+        <td>
+          Intentional. Routely says which side is <em>currently</em> ahead and states plainly that
+          this is not proof. It will not claim a winner it cannot stand behind.
+        </td>
+      </tr>
+      <tr>
+        <th>A goal on a different website records nothing</th>
+        <td>
+          The goal page must be on the same website as the test, and must have the tracking code on
+          it too.
+        </td>
+      </tr>
+    </table>
+
+    <h2>If something goes wrong</h2>
+    <p>A useful report answers four things. Screenshots are worth more than descriptions.</p>
+    <ol>
+      <li><strong>Which test number</strong> you were on.</li>
+      <li><strong>What you did</strong> — the exact buttons and the exact addresses you typed.</li>
+      <li><strong>What you expected</strong>, and <strong>what actually happened</strong>.</li>
+      <li><strong>A screenshot of the whole window</strong>, including the address bar.</li>
+    </ol>
+    <p>
+      Also say which browser you used, and whether you were in a private window. If a message
+      appeared on screen, copy it out word for word — the wording usually identifies the cause
+      immediately.
+    </p>
+
+    <p class="footnote signoff">
+      Routely testing guide · Tester: ______________________ · Date: ______________
+    </p>
+  </body>
 </html>

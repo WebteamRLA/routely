@@ -147,8 +147,9 @@ export default async function ExperimentPage({
         <CardHeader>
           <CardTitle>What this test does</CardTitle>
           <CardDescription>
-            Visitors arriving at the control are split evenly. Reaching the conversion URL counts as
-            a conversion for whichever version they saw.
+            Visitors arriving at the control are divided between the versions below, in the shares
+            you set. Reaching the conversion URL counts as a conversion for whichever version they
+            saw.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
