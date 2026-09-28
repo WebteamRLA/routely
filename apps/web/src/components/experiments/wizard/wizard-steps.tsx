@@ -321,19 +321,16 @@ export function MetricsStep({
   conversionMatchType,
   primaryMetric,
   onChangeText,
-  onChangeMatch,
-  onChangeMetric,
   origin,
   errors,
   onNext,
   onBack,
 }: {
   conversionUrl: string;
+  /** Carried for the hidden fields below; there is no control for either on this step. */
   conversionMatchType: WizardValues["conversionMatchType"];
   primaryMetric: WizardValues["primaryMetric"];
   onChangeText: (value: string) => void;
-  onChangeMatch: (value: WizardValues["conversionMatchType"]) => void;
-  onChangeMetric: (value: WizardValues["primaryMetric"]) => void;
   /** Scheme + host, e.g. `https://acme.com` — used for URL placeholders. */
   origin?: string;
   errors: FieldErrors;
@@ -343,7 +340,7 @@ export function MetricsStep({
   return (
     <WizardStepCard
       title="Metrics setup"
-      description="Define what counts as a conversion, then choose which measurement the results page should highlight."
+      description="Define what counts as a conversion."
       onNext={onNext}
       onBack={onBack}
     >
@@ -374,49 +371,12 @@ export function MetricsStep({
           )}
         </Field>
 
-        <Field
-          name="conversionMatchType"
-          label="Goal match type"
-          hint="Exact matches only this page; prefix also matches anything beneath it."
-          errors={errors?.conversionMatchType}
-        >
-          {(props) => (
-            <Select value={conversionMatchType} onValueChange={onChangeMatch}>
-              <SelectTrigger id={props.id} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="EXACT">Exact page</SelectItem>
-                <SelectItem value="PREFIX">This page and anything beneath it</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-        </Field>
+        {/*
+         * The goal match type and the primary metric no longer have controls on this step, but
+         * both are still required by the schema — so they submit from here at their defaults
+         * (exact match, conversion rate). Both remain editable on the experiment's own page.
+         */}
         <input type="hidden" name="conversionMatchType" value={conversionMatchType} />
-      </div>
-
-      <div className="space-y-5 border-t border-border/70 pt-5">
-        <h3 className="text-sm font-medium">Primary metric</h3>
-
-        <Field
-          name="primaryMetric"
-          label="Highlight on the results page"
-          hint="Every metric is always measured — this only picks which one the results page treats as 'currently ahead'."
-          errors={errors?.primaryMetric}
-        >
-          {(props) => (
-            <Select value={primaryMetric} onValueChange={onChangeMetric}>
-              <SelectTrigger id={props.id} className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="CONVERSION_RATE">Conversion rate</SelectItem>
-                <SelectItem value="TIME_ON_PAGE">Average time on page</SelectItem>
-                <SelectItem value="PAGE_VIEWS">Page views per visitor</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-        </Field>
         <input type="hidden" name="primaryMetric" value={primaryMetric} />
       </div>
     </WizardStepCard>

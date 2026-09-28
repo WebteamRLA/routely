@@ -369,8 +369,6 @@ export function ExperimentWizard({
             conversionMatchType={values.conversionMatchType}
             primaryMetric={values.primaryMetric}
             onChangeText={(value) => set("conversionUrl", value)}
-            onChangeMatch={(value) => set("conversionMatchType", value)}
-            onChangeMetric={(value) => set("primaryMetric", value)}
             origin={origin}
             errors={fieldErrors}
             onNext={advance}
