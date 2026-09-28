@@ -3,7 +3,6 @@
 import { Check, Plus, X } from "lucide-react";
 
 import { AudienceSegments } from "@/components/experiments/wizard/audience-segments";
-import { ConfigurationExtras } from "@/components/experiments/wizard/configuration-extras";
 import { GoalTypes } from "@/components/experiments/wizard/goal-types";
 import {
   TrafficDistribution,
@@ -19,13 +18,6 @@ import type {
 import { Field } from "@/components/common/field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -390,15 +382,14 @@ export function MetricsStep({
 export function ConfigurationStep({
   controlMatchType,
   distribution,
-  onChangeMatch,
   onChangeDistribution,
   errors,
   onNext,
   onBack,
 }: {
+  /** Carried for the hidden field below; there is no control for it on this step. */
   controlMatchType: WizardValues["controlMatchType"];
   distribution: { arms: DistributionArm[]; excluded: number };
-  onChangeMatch: (value: WizardValues["controlMatchType"]) => void;
   onChangeDistribution: (next: { arms: DistributionArm[]; excluded: number }) => void;
   errors: FieldErrors;
   onNext: () => void;
@@ -407,31 +398,15 @@ export function ConfigurationStep({
   return (
     <WizardStepCard
       title="Configuration"
-      description="How the control URL is matched, and how traffic is divided between the arms."
+      description="How traffic is divided between the arms."
       onNext={onNext}
       onBack={onBack}
     >
-      <Field
-        name="controlMatchType"
-        label="Control URL match type"
-        hint="Exact matches only this page; prefix also matches anything beneath it — useful when the control has its own sub-pages."
-        errors={errors?.controlMatchType}
-      >
-        {(props) => (
-          <Select value={controlMatchType} onValueChange={onChangeMatch}>
-            <SelectTrigger id={props.id} className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="EXACT">Exact page</SelectItem>
-              <SelectItem value="PREFIX">This page and anything beneath it</SelectItem>
-            </SelectContent>
-          </Select>
-        )}
-      </Field>
+      {/* No control for the match type on this step any more, but the schema still requires it,
+       * so it submits from here at its default. It stays editable on the experiment's page. */}
       <input type="hidden" name="controlMatchType" value={controlMatchType} />
 
-      <div className="border-t border-border/70 pt-5">
+      <div>
         <TrafficDistribution
           arms={distribution.arms}
           excluded={distribution.excluded}
@@ -441,8 +416,6 @@ export function ConfigurationStep({
           <p className="mt-2 text-xs text-destructive">{errors.controlWeight.join(" ")}</p>
         ) : null}
       </div>
-
-      <ConfigurationExtras />
     </WizardStepCard>
   );
 }

@@ -380,7 +380,6 @@ export function ExperimentWizard({
           <ConfigurationStep
             controlMatchType={values.controlMatchType}
             distribution={distribution}
-            onChangeMatch={(value) => set("controlMatchType", value)}
             onChangeDistribution={applyDistribution}
             errors={fieldErrors}
             onNext={advance}
