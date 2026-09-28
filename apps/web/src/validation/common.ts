@@ -8,13 +8,24 @@ import { z } from "zod";
  * arrives from.
  */
 
-/** A cuid produced by `@default(cuid())`. Rejects path traversal and injection attempts. */
+/**
+ * A record identifier, as produced by `@default(cuid())`.
+ *
+ * Hyphens and underscores are allowed as well as alphanumerics, because the id formats this
+ * database actually contains are wider than cuid alone: UUIDs carry hyphens, and nanoid uses
+ * both. The previous alphanumeric-only rule rejected every UUID, which made any experiment
+ * holding a UUID variant id impossible to save — the form submitted an id the schema refused.
+ *
+ * Still deliberately narrow: no dots, no slashes, no whitespace, capped at 64 characters, so
+ * path traversal and injection-shaped input are rejected. The real protection is that ids only
+ * ever reach Prisma as bound parameters; this is the sanity check in front of it.
+ */
 export const idSchema = z
   .string()
   .trim()
   .min(1, "Required")
   .max(64, "Too long")
-  .regex(/^[a-z0-9]+$/i, "Invalid identifier");
+  .regex(/^[a-z0-9_-]+$/i, "Invalid identifier");
 
 /** Public site identifier embedded in the tracking snippet. Not a secret — it is visible in
  * page source by design, and grants no access beyond appending events to that website. */

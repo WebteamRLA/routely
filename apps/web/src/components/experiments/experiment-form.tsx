@@ -78,8 +78,12 @@ export function ExperimentForm({
   const [state, formAction] = useActionState(action, IDLE);
   useFormToast(state);
   const [controlMatchType, setControlMatchType] = useState(defaults.controlMatchType);
-  const [conversionMatchType, setConversionMatchType] = useState(defaults.conversionMatchType);
-  const [primaryMetric, setPrimaryMetric] = useState(defaults.primaryMetric);
+  // Neither has a control on this form any more, so neither can change while it is open —
+  // they are carried straight through to their hidden fields so an update cannot blank them.
+  // The goal's match type stays editable on its Metrics page; the primary metric is fixed at
+  // whatever the experiment was created with.
+  const conversionMatchType = defaults.conversionMatchType;
+  const primaryMetric = defaults.primaryMetric;
   const [trafficAllocation, setTrafficAllocation] = useState(defaults.trafficAllocation);
   const [controlWeight, setControlWeight] = useState(defaults.controlWeight);
   const [variants, setVariants] = useState(defaults.variants);
@@ -295,23 +299,6 @@ export function ExperimentForm({
             />
           )}
         </Field>
-
-        <div className="space-y-2">
-          <Label htmlFor="edit-conversion-match">Goal match type</Label>
-          <Select
-            value={conversionMatchType}
-            onValueChange={(value) => setConversionMatchType(value as UrlMatchType)}
-            disabled={urlsLocked}
-          >
-            <SelectTrigger id="edit-conversion-match" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="EXACT">Exact page</SelectItem>
-              <SelectItem value="PREFIX">This page and anything beneath it</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
       </fieldset>
 
       {/*
@@ -343,14 +330,6 @@ export function ExperimentForm({
       ) : null}
 
       <div className="space-y-5 border-t border-border/70 pt-5">
-        <div className="space-y-1">
-          <h3 className="text-sm font-medium">Traffic &amp; metrics</h3>
-          <p className="text-sm text-muted-foreground">
-            These can be changed at any time, even once the experiment is running — re-weighting
-            only affects visitors who have not been bucketed yet.
-          </p>
-        </div>
-
         <input type="hidden" name="trafficAllocation" value={trafficAllocation} />
         <TrafficDistribution
           arms={[
@@ -368,27 +347,6 @@ export function ExperimentForm({
         {state.fieldErrors?.["controlWeight"]?.length ? (
           <p className="text-xs text-destructive">{state.fieldErrors["controlWeight"].join(" ")}</p>
         ) : null}
-
-        <div className="space-y-2">
-          <Label htmlFor="edit-primary-metric">Primary metric</Label>
-          <Select
-            value={primaryMetric}
-            onValueChange={(value) => setPrimaryMetric(value as PrimaryMetric)}
-          >
-            <SelectTrigger id="edit-primary-metric" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CONVERSION_RATE">Conversion rate</SelectItem>
-              <SelectItem value="TIME_ON_PAGE">Average time on page</SelectItem>
-              <SelectItem value="PAGE_VIEWS">Page views per visitor</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Every metric is always measured — this only picks which one the results page treats as
-            &ldquo;currently ahead&rdquo;.
-          </p>
-        </div>
       </div>
 
       {urlsLocked ? (
