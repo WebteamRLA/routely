@@ -5,6 +5,7 @@ import { AlertCircle, CheckCircle2, Sheet } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { ConnectGoogleButton } from "@/components/integrations/connect-google-button";
 import { DisconnectDialog } from "@/components/integrations/disconnect-dialog";
+import { SheetStatus, sheetHealth, sheetStatusLabel } from "@/components/integrations/sheet-status";
 import { WebsiteSheetCard } from "@/components/integrations/website-sheet-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -85,11 +86,16 @@ export default async function IntegrationsPage({
               </CardDescription>
             </div>
             {overview.connection ? (
-              <Badge
-                variant={overview.connection.status === "CONNECTED" ? "secondary" : "destructive"}
-              >
-                {overview.connection.status === "CONNECTED" ? "Connected" : "Needs reconnecting"}
-              </Badge>
+              overview.connection.status === "CONNECTED" ? (
+                // Explicit emerald rather than a Badge variant: `components/ui` is generated, so a
+                // variant added there is lost the next time the primitive is regenerated.
+                <Badge className="gap-1.5 border-emerald-500/20 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400">
+                  <span className="inline-block size-1.5 rounded-full bg-emerald-500" aria-hidden />
+                  Connected
+                </Badge>
+              ) : (
+                <Badge variant="destructive">Needs reconnecting</Badge>
+              )
             ) : null}
           </div>
         </CardHeader>
@@ -194,6 +200,23 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
   const attached = overview.websites.filter((website) => website.destination !== null);
   const canSync = connection.status === "CONNECTED" && connection.canUseSheets;
 
+  /*
+   * Two websites pointing at one spreadsheet tab overwrite each other on every refresh — silently,
+   * repeatedly, and undiagnosably from the spreadsheet itself, where the numbers simply flicker
+   * between two sites. Cheap to detect here, so it is surfaced rather than left to be discovered.
+   */
+  const websitesBySheet = new Map<string, string[]>();
+  for (const website of attached) {
+    const key = `${website.destination?.spreadsheetId}::${website.destination?.sheetTitle}`;
+    websitesBySheet.set(key, [...(websitesBySheet.get(key) ?? []), website.websiteName]);
+  }
+
+  const sharedWith = (website: (typeof overview.websites)[number]): string[] => {
+    if (!website.destination) return [];
+    const key = `${website.destination.spreadsheetId}::${website.destination.sheetTitle}`;
+    return (websitesBySheet.get(key) ?? []).filter((name) => name !== website.websiteName);
+  };
+
   const sheetProps = {
     developerKey: env.NEXT_PUBLIC_GOOGLE_API_KEY,
     projectNumber: env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER,
@@ -240,9 +263,13 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
           <dd className="font-medium">{formatDateTime(connection.connectedAt)} UTC</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Websites syncing</dt>
+          <dt className="text-muted-foreground">Websites publishing</dt>
           <dd className="font-medium">
-            {attached.length} of {overview.websites.length}
+            {attached.length}
+            <span className="font-normal text-muted-foreground">
+              {" "}
+              of {overview.websites.length}
+            </span>
           </dd>
         </div>
       </dl>
@@ -268,24 +295,26 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
             </Button>
           </div>
         ) : (
-          <ul className="space-y-4">
+          <ul className="divide-y divide-border/60 rounded-lg border border-border/70">
             {overview.websites.map((website) => (
-              <li
-                key={website.websiteId}
-                className="space-y-3 rounded-lg border border-border/70 p-4"
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <li key={website.websiteId} className="space-y-2 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <Link
                     href={routes.websites.detail(website.websiteId)}
-                    className="font-medium hover:underline"
+                    className="truncate text-sm font-medium hover:underline"
                   >
                     {website.websiteName}
                   </Link>
+                  <SheetStatus
+                    health={sheetHealth(website.destination)}
+                    label={sheetStatusLabel(website.destination)}
+                  />
                 </div>
 
                 <WebsiteSheetCard
                   websiteId={website.websiteId}
                   destination={website.destination}
+                  sharedWith={sharedWith(website)}
                   {...sheetProps}
                 />
               </li>

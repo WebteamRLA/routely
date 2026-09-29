@@ -1,29 +1,21 @@
 "use client";
 
-import { useActionState } from "react";
-import { ExternalLink, Sheet, Unplug } from "lucide-react";
-
-import { formatDateTime } from "@/lib/format";
+import { useActionState, useState } from "react";
+import { ExternalLink } from "lucide-react";
 
 import { AttachSheetControls } from "@/components/integrations/attach-sheet-controls";
 import { RefreshSheetButton } from "@/components/integrations/refresh-sheet-button";
 import { Button } from "@/components/ui/button";
 import { useFormToast } from "@/hooks/use-form-toast";
+import { type SheetDestination } from "@/components/integrations/sheet-status";
+import { formatDateTime } from "@/lib/format";
 import { IDLE, type FormState } from "@/lib/form-state";
 import type { AttachResult, PickerTokenResult } from "@/server/actions/integration.actions";
 
-export interface SheetDestination {
-  spreadsheetId: string;
-  spreadsheetName: string | null;
-  sheetTitle: string;
-  createdByRoutely: boolean;
-  refreshedAt: Date | null;
-  rowCount: number;
-  lastError: string | null;
-}
+export type { SheetDestination };
 
 /**
- * One website's Google Sheets destination: what it is, how to change it, how to stop.
+ * One website's Google Sheets destination: what it is, and what you can do with it.
  *
  * Shared by the website's own page and the integrations page, so the two can never describe the same
  * state differently.
@@ -39,6 +31,7 @@ export function WebsiteSheetCard({
   detachSheetAction,
   refreshSheetAction,
   canSync,
+  sharedWith,
 }: {
   websiteId: string;
   destination: SheetDestination | null;
@@ -49,90 +42,93 @@ export function WebsiteSheetCard({
   createSheetAction: (state: FormState, formData: FormData) => Promise<FormState>;
   detachSheetAction: (state: FormState, formData: FormData) => Promise<FormState>;
   refreshSheetAction: (state: FormState, formData: FormData) => Promise<FormState>;
-  /** False while the grant needs reconnecting — syncing would only fail. */
+  /** False while the grant needs reconnecting — refreshing would only fail. */
   canSync: boolean;
+  /** Other websites writing to this same tab, which would overwrite each other. */
+  sharedWith?: string[];
 }) {
   const [detachState, detachFormAction] = useActionState(detachSheetAction, IDLE);
   useFormToast(detachState);
+  const [changing, setChanging] = useState(false);
 
   if (!destination) {
     return (
-      <div className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          No spreadsheet yet. Choose one of yours, or let Routely create one. It then keeps the last
-          30 days of results up to date, within seconds of a visit or a conversion.
-        </p>
-        <AttachSheetControls
-          websiteId={websiteId}
-          developerKey={developerKey}
-          projectNumber={projectNumber}
-          getPickerToken={getPickerToken}
-          attachSheet={attachSheet}
-          createSheetAction={createSheetAction}
-        />
-      </div>
+      <AttachSheetControls
+        websiteId={websiteId}
+        developerKey={developerKey}
+        projectNumber={projectNumber}
+        getPickerToken={getPickerToken}
+        attachSheet={attachSheet}
+        createSheetAction={createSheetAction}
+      />
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <p className="flex items-center gap-2 text-sm font-medium">
-            <Sheet className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="truncate">
-              {destination.spreadsheetName ?? destination.spreadsheetId}
-            </span>
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Writing to the <span className="font-medium">{destination.sheetTitle}</span> tab
-            {destination.createdByRoutely ? " · spreadsheet created by Routely" : ""}
-          </p>
-          {destination.lastError ? (
-            <p className="text-xs text-destructive">{destination.lastError}</p>
-          ) : destination.refreshedAt ? (
-            <p className="text-xs text-muted-foreground">
-              Updated {formatDateTime(destination.refreshedAt)} UTC · {destination.rowCount}{" "}
-              {destination.rowCount === 1 ? "row" : "rows"}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Waiting for the first visitor — the tab fills in within seconds of one arriving.
-            </p>
-          )}
-        </div>
+  const meta = [
+    destination.rowCount > 0
+      ? `${destination.rowCount} ${destination.rowCount === 1 ? "row" : "rows"}`
+      : null,
+    destination.refreshedAt ? `updated ${formatDateTime(destination.refreshedAt)} UTC` : null,
+  ].filter(Boolean);
 
-        <Button variant="ghost" size="sm" asChild>
-          {/* Opens the customer's own spreadsheet. Built from the id rather than stored, so a
-           * renamed or moved file still opens. */}
-          <a
-            href={`https://docs.google.com/spreadsheets/d/${encodeURIComponent(destination.spreadsheetId)}/edit`}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Open in Sheets
-            <ExternalLink aria-hidden />
-          </a>
-        </Button>
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <a
+          // Built from the id rather than a stored URL, so a renamed or moved file still opens.
+          href={`https://docs.google.com/spreadsheets/d/${encodeURIComponent(destination.spreadsheetId)}/edit`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 font-medium hover:underline"
+        >
+          {destination.spreadsheetName ?? destination.spreadsheetId}
+          <ExternalLink className="size-3 text-muted-foreground" aria-hidden />
+        </a>
+        <span className="text-xs text-muted-foreground">
+          {destination.sheetTitle} tab{meta.length > 0 ? ` · ${meta.join(" · ")}` : ""}
+        </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      {destination.lastError ? (
+        <p className="text-xs text-destructive">{destination.lastError}</p>
+      ) : null}
+
+      {/* Two websites on one tab overwrite each other on every refresh — silently, and impossible to
+       * diagnose from the spreadsheet, where the numbers simply flicker between sites. */}
+      {sharedWith && sharedWith.length > 0 ? (
+        <p className="text-xs text-amber-700 dark:text-amber-500">
+          Also written to by {sharedWith.join(" and ")} — they will overwrite each other. Give each
+          website its own spreadsheet.
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-1">
         {canSync ? <RefreshSheetButton action={refreshSheetAction} websiteId={websiteId} /> : null}
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setChanging((open) => !open)}
+        >
+          {changing ? "Cancel" : "Change"}
+        </Button>
 
         <form action={detachFormAction}>
           <input type="hidden" name="websiteId" value={websiteId} />
-          <Button type="submit" variant="ghost" size="sm">
-            <Unplug aria-hidden />
-            Stop syncing
+          <Button
+            type="submit"
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground hover:text-destructive"
+          >
+            Stop
           </Button>
         </form>
       </div>
 
-      <details className="text-sm">
-        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-          Use a different spreadsheet
-        </summary>
-        <div className="pt-3">
+      {changing ? (
+        <div className="pt-1">
           <AttachSheetControls
             websiteId={websiteId}
             developerKey={developerKey}
@@ -141,11 +137,8 @@ export function WebsiteSheetCard({
             attachSheet={attachSheet}
             createSheetAction={createSheetAction}
           />
-          <p className="pt-2 text-xs text-muted-foreground">
-            The old spreadsheet is left exactly as it is; Routely simply stops updating it.
-          </p>
         </div>
-      </details>
+      ) : null}
     </div>
   );
 }
