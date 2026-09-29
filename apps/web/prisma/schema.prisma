@@ -170,8 +170,7 @@ model Website {
   events      Event[]
 
   /// At most one Google Sheets destination per website.
-  sheetTarget   WebsiteSheetTarget?
-  sheetSyncRuns SheetsSyncRun[]
+  sheetTarget WebsiteSheetTarget?
 
   // Dashboard lists a user's websites newest-first.
   @@index([userId, createdAt])
@@ -407,25 +406,6 @@ enum SheetsConnectionStatus {
   NEEDS_RECONNECT
 }
 
-/// Outcome of one day's write.
-enum SheetsSyncStatus {
-  /// Claimed, outcome not yet recorded. Also the state a crashed process leaves behind, which
-  /// is why a stale PENDING is only reclaimed after a lease expires.
-  PENDING
-
-  SUCCEEDED
-
-  /// The append definitely did not happen: the request was rejected, or was never sent. Safe to
-  /// retry, because Sheets applies an append atomically per request — a rejection is proof that
-  /// nothing landed.
-  FAILED
-
-  /// The request was sent and the outcome is unknown: a timeout, or the process dying in
-  /// flight. Deliberately distinct from FAILED, because retrying this could append a day twice.
-  /// Never retried automatically — only by a human who has looked at the spreadsheet.
-  UNKNOWN
-}
-
 /// One Google authorisation per Routely account.
 ///
 /// This row is the *grant*, not the destination. The customer authorises Google once; each of
@@ -482,121 +462,56 @@ model SheetsConnection {
   @@map("sheets_connections")
 }
 
-/// One attempt to write one website's rows for one day.
+
+/// Where one website's results are published, and the state of the tab holding them.
 ///
-/// The unique key on [websiteId, day] is the whole idempotency mechanism: a run is claimed
-/// *before* the append, so a cron that fires twice, or a "Sync now" racing the cron, writes the
-/// day once. See docs/INTEGRATIONS.md for the one failure mode this does not remove — it is not
-/// exactly-once, and nothing here should claim that it is.
+/// Per website, not per account: someone running several sites — an agency especially — wants each
+/// site's numbers in its own spreadsheet, often one they will hand to a different client. The Google
+/// *authorisation* stays per account (see SheetsConnection), so attaching a sheet needs no consent
+/// screen of its own.
 ///
-/// Keyed on the website rather than on the Google grant, because the website is what owns a
-/// destination now. That also means disconnecting and reconnecting Google does not lose the record
-/// of which days were already written — which would otherwise re-send every one of them.
-model SheetsSyncRun {
-  id        String @id @default(cuid())
-  websiteId String
-
-  /// The UTC calendar day this run covers, as `YYYY-MM-DD`.
-  ///
-  /// Deliberately text, not `date`: this is a label for a day, not an instant, and a date column
-  /// round-tripped through a driver that applies a local timezone is one of the quietest ways to
-  /// write the wrong day into a customer's spreadsheet. ISO-8601 sorts lexicographically, so
-  /// ordering is not given up.
-  day String
-
-  status   SheetsSyncStatus @default(PENDING)
-  attempts Int              @default(1)
-
-  /// Rows Google reports it appended. Null while the outcome is unknown.
-  rowsWritten Int?
-
-  /// The A1 range Google reports it wrote, e.g. `Daily!A2:F7`. Independent evidence of what
-  /// actually landed, which is what makes a suspected duplicate checkable by a human.
-  updatedRange String?
-
-  /// Failure reason in plain words, shown to the customer. Never a raw provider payload.
-  error String?
-
-  /// Destination at the time of this run, so changing spreadsheet later does not rewrite what
-  /// the history says happened.
-  spreadsheetId String?
-  sheetTitle    String?
-
-  startedAt  DateTime  @default(now())
-  finishedAt DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-
-  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
-
-  /// One row per website per day: the claim that makes a day's rows land once.
-  @@unique([websiteId, day])
-  /// Serves the integrations page — the most recent runs for one website.
-  @@index([websiteId, day])
-  @@map("sheets_sync_runs")
-}
-
-/// Where one website's daily results are written.
-///
-/// Per website, not per account: a customer running several sites — an agency especially — wants
-/// each site's numbers in its own spreadsheet, often one they will hand to a different client.
-/// The Google *authorisation* stays per account (see SheetsConnection), so attaching a sheet to a
-/// website needs no consent screen of its own.
-///
-/// A website with no row here is simply not synced. That is deliberate: choosing a sheet is
-/// optional, so adding a website never depends on Google being reachable, and a customer who does
-/// not want Sheets is never blocked by it.
+/// A website with no row here is simply not published. That is deliberate: choosing a spreadsheet is
+/// optional, so adding a website never depends on Google being reachable.
 model WebsiteSheetTarget {
   id String @id @default(cuid())
 
-  /// One destination per website. The uniqueness *is* the "one sheet per website" rule.
+  /// One destination per website. The uniqueness *is* the "one spreadsheet per website" rule.
   websiteId String @unique
 
   /// The spreadsheet, as Google's file id.
   ///
-  /// Reachable under the `drive.file` scope only because the customer either picked this file in
-  /// the Google Picker or Routely created it — the app has no access to anything else in their
-  /// Drive, by design.
+  /// Reachable under the `drive.file` scope only because the customer either picked this file in the
+  /// Google Picker or Routely created it — the app has no access to anything else in their Drive.
   spreadsheetId String
 
   /// Spreadsheet name as last read from Google. A display cache, never trusted as input.
   spreadsheetName String?
 
-  /// The worksheet's stable numeric id — its `gid` — and the source of truth for which tab to
-  /// write to. Renaming a tab in Sheets changes its title and notifies nobody, so the title is
-  /// resolved from this before every write. 0 is a legitimate gid for the first tab.
-  sheetId Int
-
-  /// Worksheet title as last resolved from Google. A cache, for display and for the A1 range.
+  /// The tab Routely writes to, by its stable numeric id (`gid`).
+  ///
+  /// **Routely creates this tab and owns it.** The customer chooses a spreadsheet, not a tab, because
+  /// every refresh *overwrites* this tab wholesale — pointing that at a tab holding their own work
+  /// would destroy it. Renaming a tab in Sheets changes its title and notifies nobody, so the title
+  /// is resolved from the gid before every write and the title below is only a cache.
+  sheetId    Int
   sheetTitle String
 
-  /// When the header row was written here. Null means the next write looks for one first —
-  /// cheaper than checking daily, and it lets a customer who deleted the header get it back by
-  /// choosing the destination again.
-  headerWrittenAt DateTime?
+  /// How many rows the tab last held, so a refresh can blank the difference when the row count
+  /// shrinks. Without it, an experiment being deleted would leave its stale rows on display.
+  rowCount Int @default(0)
 
-  /// True when Routely created this spreadsheet rather than the customer picking an existing one.
-  /// Only used to word the UI honestly ("we made this for you" vs "you chose this").
+  /// When the tab was last written. This is the throttle: a refresh is claimed by a compare-and-set
+  /// against this column, so however much traffic arrives, the tab is rewritten at most once per
+  /// interval per website — which keeps a busy site inside Google's write quota of 60 per minute per
+  /// user.
+  refreshedAt DateTime?
+
+  /// Why the last refresh failed, in the customer's words. Null when the last one succeeded.
+  lastError String?
+
+  /// True when Routely created the spreadsheet rather than the customer picking an existing one.
+  /// Only used to word the UI honestly.
   createdByRoutely Boolean @default(false)
-
-  /// The "Routely live" tab: today's running totals, rewritten as traffic arrives.
-  ///
-  /// A *separate* tab from the daily history on purpose. The history is append-only and must never
-  /// be rewritten — a customer may have built formulas against those rows. This tab is one Routely
-  /// owns outright and overwrites in place, so "live" and "permanent" never fight over the same
-  /// cells. Null until the first live refresh creates it.
-  liveSheetId    Int?
-  liveSheetTitle String?
-
-  /// How many rows the live tab last held, so a refresh can blank the difference when today's arm
-  /// count shrinks. Without it, deleting an experiment would leave its stale rows on display.
-  liveRowCount Int @default(0)
-
-  /// When the live tab was last written. This is the throttle: a refresh is claimed by a
-  /// compare-and-set against this column, so however much traffic arrives, the tab is rewritten at
-  /// most once per interval per website — which is what keeps a busy site inside Google's write
-  /// quota of 60 per minute per user.
-  liveRefreshedAt DateTime?
 
   attachedAt DateTime @default(now())
   createdAt  DateTime @default(now())

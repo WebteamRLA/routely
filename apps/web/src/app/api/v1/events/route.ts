@@ -3,7 +3,7 @@ import { after, type NextRequest } from "next/server";
 import { isBot } from "@/server/http/bot-filter";
 import { clientAddress, rateLimit } from "@/server/http/rate-limit";
 import { ingest } from "@/server/services/ingest.service";
-import { refreshLiveTab } from "@/server/services/sheets-sync.service";
+import { refreshSheet } from "@/server/services/sheets-sync.service";
 
 /**
  * Public event ingestion for the tracking SDK.
@@ -116,14 +116,14 @@ export async function POST(request: NextRequest) {
     const result = await ingest(payload);
 
     /*
-     * Keep the customer's "Routely live" spreadsheet tab current, **after the response is sent**.
+     * Keep the customer's spreadsheet current, **after the response is sent**.
      *
      * `after()` is what makes this acceptable on the hot path. A visitor's beacon is answered
      * immediately and the Google write happens once this function is no longer holding the
      * response open, so ingestion latency is unchanged and a slow or unreachable Google cannot
      * delay — or fail — the recording of a page view.
      *
-     * `refreshLiveTab` is itself throttled by a compare-and-set and never throws, so a burst of
+     * `refreshSheet` is itself throttled by a compare-and-set and never throws, so a burst of
      * traffic produces at most one write per interval per website rather than one per event. That
      * matters: Google allows 60 write requests a minute per user, which a per-event write would
      * exceed at about one visitor a second.
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
      */
     if (result.websiteId && result.accepted > 0) {
       const websiteId = result.websiteId;
-      after(() => refreshLiveTab(websiteId));
+      after(() => refreshSheet(websiteId));
     }
   } catch (error) {
     // A failure here must never surface on a customer's page.

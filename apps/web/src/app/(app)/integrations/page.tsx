@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AlertCircle, CheckCircle2, Clock, HelpCircle, Sheet, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Sheet } from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
 import { ConnectGoogleButton } from "@/components/integrations/connect-google-button";
@@ -21,14 +21,12 @@ import {
   detachSheetAction,
   disconnectSheetsAction,
   getPickerTokenAction,
-  listWorksheetsAction,
-  syncDayAction,
+  refreshSheetAction,
 } from "@/server/actions/integration.actions";
 import { requireUser } from "@/server/auth/session";
 import {
   getIntegrationOverview,
   type IntegrationOverview,
-  type WebsiteSheetSummary,
 } from "@/server/services/sheets-sync.service";
 
 export const metadata: Metadata = { title: "Integrations" };
@@ -82,8 +80,8 @@ export default async function IntegrationsPage({
                 Google Sheets
               </CardTitle>
               <CardDescription>
-                Once a day, Routely appends yesterday&rsquo;s results to a spreadsheet you choose —
-                one per website.
+                Routely keeps a spreadsheet up to date with the last 30 days of results — one per
+                website, refreshed within seconds of a visit or a conversion.
               </CardDescription>
             </div>
             {overview.connection ? (
@@ -135,7 +133,7 @@ function NotConnected() {
       <div className="space-y-2">
         <h3 className="text-sm font-medium">What gets written</h3>
         <p className="text-sm text-muted-foreground">
-          One row per experiment arm per day, appended to the bottom of a tab you choose:
+          One row per experiment arm per day, for the last 30 days, in a tab Routely keeps current:
         </p>
         <div className="overflow-x-auto rounded-md border border-border/70">
           <table className="w-full text-xs">
@@ -178,8 +176,9 @@ function NotConnected() {
           picker, and Google grants access to just that file.
         </p>
         <p className="text-xs text-muted-foreground">
-          Days run to UTC midnight, the same boundary every date in Routely uses. Rows are only
-          appended — nothing already in your spreadsheet is edited or removed.
+          Days run to UTC midnight, the same boundary every date in Routely uses. Routely creates
+          and maintains its own tab inside the spreadsheet you choose; nothing else in that file is
+          touched.
         </p>
       </div>
 
@@ -200,10 +199,9 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
     projectNumber: env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER,
     getPickerToken: getPickerTokenAction,
     attachSheet: attachPickedSheetAction,
-    listWorksheets: listWorksheetsAction,
     createSheetAction,
     detachSheetAction,
-    syncDayAction,
+    refreshSheetAction,
     canSync,
   };
 
@@ -255,8 +253,8 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
         <div className="space-y-1">
           <h3 className="text-sm font-medium">Spreadsheet per website</h3>
           <p className="text-sm text-muted-foreground">
-            Each website writes to its own spreadsheet. A website with none attached is simply not
-            synced.
+            Each website has its own spreadsheet. A website with none attached is simply not
+            published.
           </p>
         </div>
 
@@ -283,14 +281,6 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
                   >
                     {website.websiteName}
                   </Link>
-                  {website.lastRun ? (
-                    <span className="text-xs">
-                      <span className="font-mono text-muted-foreground">{website.lastRun.day}</span>{" "}
-                      <RunSummary run={website.lastRun} />
-                    </span>
-                  ) : website.destination ? (
-                    <span className="text-xs text-muted-foreground">Not yet run</span>
-                  ) : null}
                 </div>
 
                 <WebsiteSheetCard
@@ -320,51 +310,6 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * One run's outcome in a sentence.
- *
- * `UNKNOWN` gets the longest treatment on purpose: it is the one state where Routely genuinely does
- * not know what happened, and saying so — with what to check — is better than a reassuring label
- * that might be wrong.
- */
-function RunSummary({ run }: { run: NonNullable<WebsiteSheetSummary["lastRun"]> }) {
-  if (run.status === "SUCCEEDED") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-        <CheckCircle2 className="size-3.5" aria-hidden />
-        {run.rowsWritten === 0
-          ? "nothing to write"
-          : `${run.rowsWritten} ${run.rowsWritten === 1 ? "row" : "rows"} written`}
-      </span>
-    );
-  }
-
-  if (run.status === "PENDING") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-        <Clock className="size-3.5" aria-hidden />
-        in progress
-      </span>
-    );
-  }
-
-  if (run.status === "UNKNOWN") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-amber-700 dark:text-amber-500">
-        <HelpCircle className="size-3.5" aria-hidden />
-        interrupted — check the spreadsheet
-      </span>
-    );
-  }
-
-  return (
-    <span className="inline-flex items-center gap-1.5 text-destructive">
-      <XCircle className="size-3.5" aria-hidden />
-      {run.error ?? "failed"}
-    </span>
   );
 }
 

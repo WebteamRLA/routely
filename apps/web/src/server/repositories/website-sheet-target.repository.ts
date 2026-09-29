@@ -69,8 +69,10 @@ export function attachTarget(
 ): Promise<WebsiteSheetTarget> {
   return client.websiteSheetTarget.upsert({
     where: { websiteId },
-    create: { websiteId, ...data, headerWrittenAt: null },
-    update: { ...data, headerWrittenAt: null, attachedAt: new Date() },
+    // rowCount resets because a new tab holds nothing yet; leaving a stale count would make the
+    // next refresh pad blank rows over cells it never wrote.
+    create: { websiteId, ...data, rowCount: 0, refreshedAt: null, lastError: null },
+    update: { ...data, rowCount: 0, refreshedAt: null, lastError: null, attachedAt: new Date() },
   });
 }
 
@@ -82,18 +84,6 @@ export function detachTarget(
 ): Promise<Prisma.BatchPayload> {
   return client.websiteSheetTarget.deleteMany({
     where: { websiteId, website: { userId } },
-  });
-}
-
-/** Records that the header row now exists at this destination. */
-export function markHeaderWritten(
-  targetId: string,
-  at: Date,
-  client: DbClient = db,
-): Promise<Prisma.BatchPayload> {
-  return client.websiteSheetTarget.updateMany({
-    where: { id: targetId },
-    data: { headerWrittenAt: at },
   });
 }
 
@@ -114,18 +104,18 @@ export function listSyncableTargets(client: DbClient = db): Promise<TargetWithWe
 }
 
 /**
- * Claims the right to refresh one website's live tab, or reports that someone else has it.
+ * Claims the right to refresh one website's tab, or reports that someone else has it.
  *
  * This is the throttle, and it is a compare-and-set rather than a read-then-write on purpose.
  * Ingestion is concurrent by nature — several beacons can arrive in the same second, across several
  * instances — and a read-then-write would let all of them decide to refresh. `updateMany` with the
- * previously observed `liveRefreshedAt` in the `where` means exactly one wins: the others match zero
+ * previously observed `refreshedAt` in the `where` means exactly one wins: the others match zero
  * rows and skip. The same structural trick the sync-run claim uses.
  *
  * Returns the target when the claim succeeded, `null` when it did not or when the interval has not
  * elapsed. A caller that gets `null` must do nothing at all.
  */
-export async function claimLiveRefresh(
+export async function claimRefresh(
   websiteId: string,
   minIntervalMs: number,
   now: Date = new Date(),
@@ -138,22 +128,37 @@ export async function claimLiveRefresh(
 
   if (!target) return null;
 
-  const last = target.liveRefreshedAt?.getTime() ?? 0;
+  const last = target.refreshedAt?.getTime() ?? 0;
   if (now.getTime() - last < minIntervalMs) return null;
 
   const claimed = await client.websiteSheetTarget.updateMany({
-    where: { id: target.id, liveRefreshedAt: target.liveRefreshedAt },
-    data: { liveRefreshedAt: now },
+    where: { id: target.id, refreshedAt: target.refreshedAt },
+    data: { refreshedAt: now },
   });
 
   return claimed.count === 1 ? target : null;
 }
 
-/** Records the shape of what the live tab now holds, so the next refresh can blank the difference. */
-export function recordLiveWrite(
+/** Records what the tab now holds, so the next refresh can blank rows it no longer needs. */
+export function recordWrite(
   targetId: string,
-  data: { liveSheetId: number; liveSheetTitle: string; liveRowCount: number },
+  data: { sheetId: number; sheetTitle: string; rowCount: number },
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
-  return client.websiteSheetTarget.updateMany({ where: { id: targetId }, data });
+  return client.websiteSheetTarget.updateMany({
+    where: { id: targetId },
+    data: { ...data, lastError: null },
+  });
+}
+
+/** Records why the last refresh failed, so the UI can say so instead of showing stale numbers. */
+export function recordError(
+  targetId: string,
+  message: string,
+  client: DbClient = db,
+): Promise<Prisma.BatchPayload> {
+  return client.websiteSheetTarget.updateMany({
+    where: { id: targetId },
+    data: { lastError: message },
+  });
 }

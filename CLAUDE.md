@@ -263,7 +263,6 @@ These constraints carry the product's guarantees. **Do not weaken them.**
 | `experiments.shareToken` unique | Safe to look up a public results page by token alone |
 | `sheets_connections.userId` unique | One Google *authorisation* per account (not a destination) |
 | `website_sheet_targets.websiteId` unique | One spreadsheet per website |
-| `sheets_sync_runs (websiteId, day)` unique | **A day's rows are appended once per website**, claimed before the write |
 
 Enum values: `ExperimentStatus` (DRAFT/ACTIVE/PAUSED/ARCHIVED), `UrlMatchType` (EXACT/PREFIX),
 `Variant` (CONTROL/VARIANT), `EventType` (`page_view`, `assignment`, `time_on_page`,
@@ -471,14 +470,20 @@ i.e. the digits before the dash in the client id) — without the latter, a pick
 associated with the app and the write that follows 404s. In the Google console, *Authorized redirect
 URIs* and *Authorized JavaScript origins* are **different fields** and both are needed.
 
-**The Sheets live tab is triggered by traffic but throttled, never per-event.** Google allows 60
+**The Sheets tab is rewritten from source, not appended to.** Every refresh recomputes the last 30
+days and overwrites one tab, which is why there is no claim mechanism: overwriting is idempotent, so
+a duplicated run writes the same cells. An earlier design appended completed days to one tab and kept
+today in another; it put the same date in two places with different numbers and was replaced. Routely
+creates and owns the tab (`Routely`) — the customer picks a *spreadsheet*, because a full overwrite
+aimed at a tab holding their own work would destroy it.
+
+**The Sheets refresh is triggered by traffic but throttled, never per-event.** Google allows 60
 write requests per minute per user, which a write-per-page-view would exceed at about one visitor a
-second. `/api/v1/events` schedules `refreshLiveTab` with Next's `after()` so it runs *after* the
+second. `/api/v1/events` schedules `refreshSheet` with Next's `after()` so it runs *after* the
 response — ingestion must stay fast and must never fail because a spreadsheet is unreachable, so
 that function swallows every error. The throttle is a compare-and-set on
-`WebsiteSheetTarget.liveRefreshedAt`; do not replace it with a read-then-write, or concurrent
-beacons will each fire a write. The live tab is overwritten in place and is deliberately *not* the
-same tab as the append-only daily history.
+`WebsiteSheetTarget.refreshedAt`; do not replace it with a read-then-write, or concurrent
+beacons will each fire a write. 
 
 **Sheets rows must be written with `valueInputOption=RAW`.** `USER_ENTERED` parses a leading `=`
 as a formula, and experiment names are customer-controlled text — so a name like
@@ -523,10 +528,10 @@ Working: Google sign-in · website CRUD · install snippet · experiment create/
 config and ingestion endpoints with rate limiting and bot filtering · results dashboard · date
 ranges · relative change · public share links · experiments list.
 
-· **Google Sheets daily sync** — one Google grant per account, one spreadsheet per website,
-chosen through the Google Picker or created by Routely; non-sensitive `drive.file` scope only, so no
-Google verification review; encrypted refresh token, per-(website, day) claim row, Vercel cron plus a
-CLI script.
+· **Google Sheets export** — one Google grant per account, one spreadsheet per website, chosen
+through the Google Picker or created by Routely; non-sensitive `drive.file` scope only, so no Google
+verification review; encrypted refresh token; a single tab holding the last 30 days, rewritten within
+seconds of a visit or conversion and on a schedule.
 
 **Not built:** the production Docker Compose stack and Dockerfile (only `docker-compose.dev.yml`
 and reference Nginx configs exist) · statistical significance · click / custom-JS / form goals ·

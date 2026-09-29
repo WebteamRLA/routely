@@ -358,6 +358,128 @@ export interface DailyArmRow {
   conversionRate: number | null;
 }
 
+/**
+ * Every arm of every experiment on one website, for each day in a window, oldest day first.
+ *
+ * This is what the Google Sheets tab is rebuilt from. A tab that is overwritten on every refresh has
+ * to be recomputed from source data each time, which is precisely what makes it impossible for the
+ * spreadsheet to disagree with the dashboard — there is no accumulated state to drift.
+ *
+ * Buckets by UTC day in memory rather than in SQL. Prisma cannot group by a date-truncated column,
+ * and the alternative — one pair of grouped queries per day — is sixty round trips for a thirty-day
+ * window. `overview.service.ts` takes the same approach for the same reason and carries the same
+ * caveat: this is a place that has to become raw SQL if a single website's traffic over the window
+ * ever outgrows memory. At the volumes this product is built for, it does not.
+ */
+export interface DatedArmRow extends DailyArmRow {
+  /** The UTC day this row describes, as `YYYY-MM-DD`. */
+  day: string;
+}
+
+export async function getArmRowsByDay(
+  actorUserId: string,
+  range: DateRange,
+  websiteId?: string,
+): Promise<DatedArmRow[]> {
+  const owned = {
+    website: { userId: actorUserId, ...(websiteId ? { id: websiteId } : {}) },
+  };
+
+  const [assignments, conversions] = await Promise.all([
+    db.assignment.findMany({
+      where: { experiment: owned, assignedAt: { gte: range.from, lte: range.to } },
+      select: { experimentId: true, variantId: true, assignedAt: true },
+    }),
+    db.conversion.findMany({
+      where: { experiment: owned, occurredAt: { gte: range.from, lte: range.to } },
+      select: { experimentId: true, variantId: true, occurredAt: true },
+    }),
+  ]);
+
+  const touchedIds = [
+    ...new Set([
+      ...assignments.map((row) => row.experimentId),
+      ...conversions.map((row) => row.experimentId),
+    ]),
+  ];
+
+  if (touchedIds.length === 0) return [];
+
+  const experiments = await db.experiment.findMany({
+    where: { id: { in: touchedIds }, ...owned },
+    select: {
+      id: true,
+      name: true,
+      variants: { select: { id: true }, orderBy: { position: "asc" } },
+    },
+    orderBy: { name: "asc" },
+  });
+
+  const utcDay = (at: Date): string => at.toISOString().slice(0, 10);
+
+  // day -> experimentId -> variantId -> count
+  const assigned = new Map<string, Map<string, Map<string | null, number>>>();
+  const converted = new Map<string, Map<string, Map<string | null, number>>>();
+
+  const bump = (
+    into: Map<string, Map<string, Map<string | null, number>>>,
+    day: string,
+    experimentId: string,
+    variantId: string | null,
+  ): void => {
+    const byExperiment = into.get(day) ?? new Map<string, Map<string | null, number>>();
+    const byVariant = byExperiment.get(experimentId) ?? new Map<string | null, number>();
+    byVariant.set(variantId, (byVariant.get(variantId) ?? 0) + 1);
+    byExperiment.set(experimentId, byVariant);
+    into.set(day, byExperiment);
+  };
+
+  for (const row of assignments)
+    bump(assigned, utcDay(row.assignedAt), row.experimentId, row.variantId);
+  for (const row of conversions)
+    bump(converted, utcDay(row.occurredAt), row.experimentId, row.variantId);
+
+  const days = [...new Set([...assigned.keys(), ...converted.keys()])].sort();
+  const rows: DatedArmRow[] = [];
+
+  for (const day of days) {
+    for (const experiment of experiments) {
+      const dayAssigned = assigned.get(day)?.get(experiment.id) ?? new Map<string | null, number>();
+      const dayConverted =
+        converted.get(day)?.get(experiment.id) ?? new Map<string | null, number>();
+
+      // An experiment with no activity on this day contributes no rows to it — the same rule as the
+      // single-day query, applied per day rather than once.
+      if (dayAssigned.size === 0 && dayConverted.size === 0) continue;
+
+      const orderedVariantIds = experiment.variants.map((variant) => variant.id);
+      const configuredArms: (string | null)[] = [null, ...orderedVariantIds];
+      const strayArms = [...new Set([...dayAssigned.keys(), ...dayConverted.keys()])].filter(
+        (variantId) => !configuredArms.includes(variantId),
+      );
+
+      for (const variantId of [...configuredArms, ...strayArms]) {
+        const assignedVisitors = dayAssigned.get(variantId) ?? 0;
+        const conversionCount = dayConverted.get(variantId) ?? 0;
+
+        rows.push({
+          day,
+          experimentId: experiment.id,
+          experimentName: experiment.name,
+          variantId,
+          variantLabel: armLabel(variantId, orderedVariantIds),
+          assignedVisitors,
+          conversions: conversionCount,
+          // Identical to `armStats` — assigned visitors, not visitors who loaded a page.
+          conversionRate: assignedVisitors > 0 ? conversionCount / assignedVisitors : null,
+        });
+      }
+    }
+  }
+
+  return rows;
+}
+
 export async function getDailyArmRows(
   actorUserId: string,
   range: DateRange,

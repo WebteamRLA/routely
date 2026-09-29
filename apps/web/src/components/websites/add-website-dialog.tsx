@@ -25,7 +25,6 @@ import {
   attachPickedSheetAction,
   createSheetAction,
   getPickerTokenAction,
-  listWorksheetsAction,
 } from "@/server/actions/integration.actions";
 import {
   createWebsiteInlineAction,
@@ -213,7 +212,6 @@ export function AddWebsiteDialog({
                 projectNumber={sheetStep.projectNumber}
                 getPickerToken={getPickerTokenAction}
                 attachSheet={attachPickedSheetAction}
-                listWorksheets={listWorksheetsAction}
                 createSheetAction={createSheetAction}
               />
             ) : (

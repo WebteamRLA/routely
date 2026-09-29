@@ -60,7 +60,6 @@ export type AttachResult =
 export async function attachPickedSheetAction(input: {
   websiteId: string;
   spreadsheetId: string;
-  sheetId: number;
 }): Promise<AttachResult> {
   const user = await requireUser();
 
@@ -73,33 +72,6 @@ export async function attachPickedSheetAction(input: {
   revalidateSheetViews(input.websiteId);
 
   return { ok: true, ...result.data };
-}
-
-export type WorksheetListResult =
-  | {
-      ok: true;
-      spreadsheetId: string;
-      spreadsheetName: string;
-      worksheets: { sheetId: number; title: string }[];
-    }
-  | { ok: false; message: string };
-
-/** The tabs of a spreadsheet, so the customer can choose which one to append to. */
-export async function listWorksheetsAction(spreadsheetId: string): Promise<WorksheetListResult> {
-  const user = await requireUser();
-
-  const result = await runAction(() => sheetsSync.listWorksheets(user.id, spreadsheetId));
-
-  if (!result.ok) {
-    return { ok: false, message: result.state.message ?? "We couldn't open that spreadsheet." };
-  }
-
-  return {
-    ok: true,
-    spreadsheetId: result.data.spreadsheetId,
-    spreadsheetName: result.data.spreadsheetName,
-    worksheets: result.data.worksheets,
-  };
 }
 
 /** Creates a new spreadsheet for a website and attaches it. */
@@ -152,43 +124,40 @@ export async function detachSheetAction(
 }
 
 /**
- * Writes one day's rows for one website now.
+ * Refreshes one website's spreadsheet now, ignoring the throttle.
  *
- * The day is a form field rather than always "yesterday", because always-yesterday is useless on the
- * day someone sets this up: a website connected today has no data for yesterday, so the only thing
- * the button could report is "nothing to write" — which reads exactly like a broken integration.
- * Defaults to yesterday when the field is absent, which is what the scheduled sweep writes.
- *
- * Throttled per customer. A sync is several Google round trips and a write to somebody's
- * spreadsheet, so an impatient double-click should not queue four of them — and the claim row makes
- * the extra attempts no-ops anyway, which would report "already synced" and read like a bug.
+ * Traffic refreshes the tab on its own, so this is for the impatient case and for confirming the
+ * connection works while someone is looking at it. Throttled per customer all the same: a refresh is
+ * several Google round trips, and an impatient double-click should not queue four of them.
  */
-export async function syncDayAction(_previous: FormState, formData: FormData): Promise<FormState> {
+export async function refreshSheetAction(
+  _previous: FormState,
+  formData: FormData,
+): Promise<FormState> {
   const user = await requireUser();
   const websiteId = String(formData.get("websiteId") ?? "");
-  const day = String(formData.get("day") ?? "").trim();
 
-  const limit = rateLimit(`sheets-sync:${user.id}`, 5, 60_000);
+  const limit = rateLimit(`sheets-refresh:${user.id}`, 10, 60_000);
 
   if (!limit.allowed) {
     return {
       status: "error",
-      message: `Too many sync attempts. Try again in ${limit.retryAfter} seconds.`,
+      message: `Too many refreshes. Try again in ${limit.retryAfter} seconds.`,
     };
   }
 
-  const result = await runAction(() =>
-    day
-      ? sheetsSync.syncDay(user.id, websiteId, day)
-      : sheetsSync.syncYesterday(user.id, websiteId),
-  );
+  const result = await runAction(() => sheetsSync.refreshSheetForUser(user.id, websiteId));
   if (!result.ok) return result.state;
 
   revalidateSheetViews(websiteId);
 
-  // "Already synced" and "nothing to write" are not errors, and saying so plainly is the point — a
-  // customer who sees no new rows needs to know which of the two happened.
-  return { status: "success", message: result.data.message };
+  return {
+    status: "success",
+    message:
+      result.data.rows === 0
+        ? "Refreshed — no visitors have been assigned in the last 30 days."
+        : `Refreshed: ${result.data.rows} ${result.data.rows === 1 ? "row" : "rows"} written.`,
+  };
 }
 
 /** Revokes at Google and removes every website's destination. */

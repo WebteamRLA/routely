@@ -1,13 +1,7 @@
 import "server-only";
 
-import { buildSheetRows } from "@/lib/sheet-rows";
-import {
-  previousUtcDay,
-  utcDayKey,
-  utcDayRange,
-  utcDaysEndingWith,
-  type UtcDayKey,
-} from "@/lib/utc-day";
+import { buildDatedSheetRows } from "@/lib/sheet-rows";
+import { utcDayKey, utcDayRange, utcDaysEndingWith } from "@/lib/utc-day";
 import {
   SECRET_PURPOSES,
   decryptSecret,
@@ -16,16 +10,15 @@ import {
 } from "@/server/crypto";
 import { AppError, conflict, isAppError, notFound, validationFailed } from "@/server/errors";
 import * as connectionRepo from "@/server/repositories/sheets-connection.repository";
-import * as runRepo from "@/server/repositories/sheets-sync-run.repository";
 import * as targetRepo from "@/server/repositories/website-sheet-target.repository";
 import * as websiteRepo from "@/server/repositories/website.repository";
-import { getDailyArmRows } from "@/server/services/analytics.service";
+import { getArmRowsByDay } from "@/server/services/analytics.service";
 import * as googleOAuth from "@/server/services/google-oauth.service";
 import * as sheets from "@/server/services/google-sheets.service";
 import { parseOrThrow } from "@/server/validate";
-import { dayKeySchema, sheetTargetSchema } from "@/validation/integration";
+import { sheetTargetSchema } from "@/validation/integration";
 
-import type { SheetsConnection, SheetsSyncRun } from "@/generated/prisma/client";
+import type { SheetsConnection } from "@/generated/prisma/client";
 
 /**
  * The Google Sheets daily sync.
@@ -42,22 +35,19 @@ import type { SheetsConnection, SheetsSyncRun } from "@/generated/prisma/client"
  * website never depends on Google being reachable and a customer who does not want Sheets is never
  * blocked by it.
  *
- * ## What "once per day" means here
+ * ## One tab, rewritten from source
  *
- * A website's rows for a day are written under a claim row whose `[websiteId, day]` uniqueness the
- * database enforces, taken **before** the append. That makes a duplicated cron invocation, or a
- * manual "Sync now" racing the schedule, harmless.
+ * Each website's spreadsheet holds a single tab that Routely owns, showing a rolling window of
+ * recent days. Every refresh recomputes that window from the database and overwrites the tab.
  *
- * It is **not exactly-once**, and nothing here should say that it is. If the append succeeds and the
- * bookkeeping write that follows does not — a process killed in the few hundred milliseconds between
- * them — the run stays PENDING and is never retried automatically. Google's append API has no
- * idempotency key, so a re-run cannot be deduplicated server-side; the only honest design is to make
- * the ambiguity visible and let a person who has looked at the spreadsheet decide. See
- * `docs/INTEGRATIONS.md`.
+ * That is what makes the spreadsheet incapable of disagreeing with the dashboard: there is no
+ * accumulated state to drift, and no notion of a day being "already written". It also makes a
+ * refresh idempotent by construction — running it twice leaves the same cells — which is why the
+ * per-day claim rows the append-based design needed are gone.
+ *
+ * The customer chooses a *spreadsheet*, not a tab. A full overwrite aimed at a tab holding their own
+ * work would destroy it, so Routely creates and owns the tab it writes.
  */
-
-/** Days back from yesterday that a definitely-failed write is retried. */
-const RETRY_WINDOW_DAYS = 7;
 
 /** Wall-clock budget for one sweep, leaving room under the platform's function timeout. */
 const SWEEP_BUDGET_MS = 45_000;
@@ -89,19 +79,23 @@ function assertConfigured(): void {
 // Read model for the integrations page
 // ---------------------------------------------------------------------------
 
+export interface SheetDestinationSummary {
+  spreadsheetId: string;
+  spreadsheetName: string | null;
+  sheetTitle: string;
+  createdByRoutely: boolean;
+  /** When the tab was last written. Null until the first refresh. */
+  refreshedAt: Date | null;
+  /** Rows currently on the tab, excluding the header. */
+  rowCount: number;
+  /** Why the last refresh failed, or null when it succeeded. */
+  lastError: string | null;
+}
+
 export interface WebsiteSheetSummary {
   websiteId: string;
   websiteName: string;
-  destination: null | {
-    spreadsheetId: string;
-    spreadsheetName: string | null;
-    sheetTitle: string;
-    createdByRoutely: boolean;
-  };
-  lastRun: null | Pick<
-    SheetsSyncRun,
-    "day" | "status" | "rowsWritten" | "updatedRange" | "error" | "finishedAt"
-  >;
+  destination: SheetDestinationSummary | null;
 }
 
 export interface IntegrationOverview {
@@ -140,19 +134,6 @@ export async function getIntegrationOverview(actorUserId: string): Promise<Integ
 
   const targetByWebsite = new Map(targets.map((target) => [target.websiteId, target]));
 
-  // One query per website that actually has a destination, rather than one per website: a website
-  // with no sheet has no runs to show.
-  const lastRuns = await Promise.all(
-    websites
-      .filter((website) => targetByWebsite.has(website.id))
-      .map(async (website) => {
-        const [latest] = await runRepo.listRecentRuns(website.id, 1);
-        return [website.id, latest ?? null] as const;
-      }),
-  );
-
-  const lastRunByWebsite = new Map(lastRuns);
-
   return {
     configured: configurationHint === null,
     configurationHint,
@@ -165,27 +146,31 @@ export async function getIntegrationOverview(actorUserId: string): Promise<Integ
           canUseSheets: googleOAuth.canUseSheets(connection.grantedScopes),
         }
       : null,
-    websites: websites.map((website) => {
-      const target = targetByWebsite.get(website.id);
-
-      return {
-        websiteId: website.id,
-        websiteName: website.name,
-        destination: target
-          ? {
-              spreadsheetId: target.spreadsheetId,
-              spreadsheetName: target.spreadsheetName,
-              sheetTitle: target.sheetTitle,
-              createdByRoutely: target.createdByRoutely,
-            }
-          : null,
-        lastRun: lastRunByWebsite.get(website.id) ?? null,
-      };
-    }),
+    websites: websites.map((website) => ({
+      websiteId: website.id,
+      websiteName: website.name,
+      destination: toDestinationSummary(targetByWebsite.get(website.id)),
+    })),
   };
 }
 
-/** A website's destination and recent history, for the website's own page. */
+function toDestinationSummary(
+  target: targetRepo.TargetWithWebsite | undefined,
+): SheetDestinationSummary | null {
+  if (!target) return null;
+
+  return {
+    spreadsheetId: target.spreadsheetId,
+    spreadsheetName: target.spreadsheetName,
+    sheetTitle: target.sheetTitle,
+    createdByRoutely: target.createdByRoutely,
+    refreshedAt: target.refreshedAt,
+    rowCount: target.rowCount,
+    lastError: target.lastError,
+  };
+}
+
+/** A website's destination and the state of its tab, for the website's own page. */
 export async function getWebsiteSheetStatus(
   actorUserId: string,
   websiteId: string,
@@ -193,8 +178,7 @@ export async function getWebsiteSheetStatus(
   configured: boolean;
   connected: boolean;
   needsReconnect: boolean;
-  destination: WebsiteSheetSummary["destination"];
-  recentRuns: SheetsSyncRun[];
+  destination: SheetDestinationSummary | null;
 }> {
   const [connection, target] = await Promise.all([
     connectionRepo.findConnectionForUser(actorUserId),
@@ -205,15 +189,7 @@ export async function getWebsiteSheetStatus(
     configured: missingConfiguration() === null,
     connected: connection !== null,
     needsReconnect: connection?.status === "NEEDS_RECONNECT",
-    destination: target
-      ? {
-          spreadsheetId: target.spreadsheetId,
-          spreadsheetName: target.spreadsheetName,
-          sheetTitle: target.sheetTitle,
-          createdByRoutely: target.createdByRoutely,
-        }
-      : null,
-    recentRuns: target ? await runRepo.listRecentRuns(websiteId, 7) : [],
+    destination: toDestinationSummary(target ?? undefined),
   };
 }
 
@@ -355,38 +331,46 @@ async function requireWebsite(
 /**
  * Attaches a spreadsheet the customer chose in the Google Picker.
  *
+ * They choose a *spreadsheet*, not a tab. Routely creates and owns a tab inside it, because every
+ * refresh overwrites that tab wholesale — aimed at a tab holding the customer's own work, it would
+ * destroy it. Everything else in the file is left untouched, and the tab can be deleted freely: the
+ * next refresh recreates it.
+ *
  * The spreadsheet's name and the tab's title are read back from **Google**, never taken from the
- * form. A Server Action is a public HTTP endpoint, and the stored tab title is what builds the A1
- * range every nightly write targets — accepting it from the client would let a tampered submission
- * aim the write at a different tab.
+ * form. A Server Action is a public HTTP endpoint, and the stored title is what the next write
+ * targets.
  */
 export async function attachPickedSheet(
   actorUserId: string,
-  input: { websiteId: unknown; spreadsheetId: unknown; sheetId: unknown },
+  input: { websiteId: unknown; spreadsheetId: unknown },
 ): Promise<{ spreadsheetName: string; sheetTitle: string }> {
   const connection = await requireUsableConnection(actorUserId);
   const website = await requireWebsite(actorUserId, input.websiteId);
-  const target = parseOrThrow(sheetTargetSchema, input, "Check the spreadsheet you chose.");
-
-  const metadata = await withAccessToken(connection, (token) =>
-    sheets.getSpreadsheetMetadata(token, target.spreadsheetId),
+  const { spreadsheetId } = parseOrThrow(
+    sheetTargetSchema.pick({ spreadsheetId: true }),
+    { spreadsheetId: input.spreadsheetId },
+    "Check the spreadsheet you chose.",
   );
 
-  const worksheet = metadata.worksheets.find((sheet) => sheet.sheetId === target.sheetId);
+  const metadata = await withAccessToken(connection, (token) =>
+    sheets.getSpreadsheetMetadata(token, spreadsheetId),
+  );
 
-  if (!worksheet) {
-    throw validationFailed("That worksheet is not in the spreadsheet. Choose one from the list.", {
-      sheetId: ["Choose a worksheet"],
-    });
-  }
+  const worksheet = await withAccessToken(connection, (token) =>
+    sheets.ensureWorksheet(token, spreadsheetId, SHEET_TAB_TITLE),
+  );
 
   await targetRepo.attachTarget(website.id, {
-    spreadsheetId: target.spreadsheetId,
+    spreadsheetId,
     spreadsheetName: metadata.spreadsheetName,
     sheetId: worksheet.sheetId,
     sheetTitle: worksheet.title,
     createdByRoutely: false,
   });
+
+  // Populate it immediately, so the customer sees the result of what they just did rather than an
+  // empty tab and a promise.
+  await refreshSheet(website.id, new Date(), { force: true });
 
   return { spreadsheetName: metadata.spreadsheetName, sheetTitle: worksheet.title };
 }
@@ -396,7 +380,7 @@ export async function attachPickedSheet(
  *
  * Named after the website so a customer with several can tell them apart in their Drive without
  * opening them. The file is theirs from the moment it exists — they can rename, move or share it and
- * the sync keeps working, because Routely addresses it by id.
+ * the refresh keeps working, because Routely addresses it by id.
  */
 export async function createSheetForWebsite(
   actorUserId: string,
@@ -406,7 +390,7 @@ export async function createSheetForWebsite(
   const website = await requireWebsite(actorUserId, websiteId);
 
   const created = await withAccessToken(connection, (token) =>
-    sheets.createSpreadsheet(token, `Routely — ${website.name}`),
+    sheets.createSpreadsheet(token, `Routely — ${website.name}`, SHEET_TAB_TITLE),
   );
 
   await targetRepo.attachTarget(website.id, {
@@ -417,26 +401,13 @@ export async function createSheetForWebsite(
     createdByRoutely: true,
   });
 
+  await refreshSheet(website.id, new Date(), { force: true });
+
   return {
     spreadsheetId: created.spreadsheetId,
     spreadsheetName: created.spreadsheetName,
     sheetTitle: created.worksheet.title,
   };
-}
-
-/** The tabs of a spreadsheet the customer has already picked, so they can choose a different one. */
-export async function listWorksheets(
-  actorUserId: string,
-  spreadsheetId: unknown,
-): Promise<sheets.SpreadsheetMetadata> {
-  const connection = await requireUsableConnection(actorUserId);
-  const { spreadsheetId: id } = parseOrThrow(
-    sheetTargetSchema.pick({ spreadsheetId: true }),
-    { spreadsheetId },
-    "Check the spreadsheet you chose.",
-  );
-
-  return withAccessToken(connection, (token) => sheets.getSpreadsheetMetadata(token, id));
 }
 
 /** Stops syncing a website. The spreadsheet and everything in it are left alone. */
@@ -489,376 +460,82 @@ async function withAccessToken<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Writing a day
-// ---------------------------------------------------------------------------
-
-export interface SyncDayResult {
-  day: UtcDayKey;
-  outcome: "written" | "nothing-to-write" | "already-synced" | "skipped" | "failed";
-  rowsWritten: number;
-  /** A sentence for the customer. Always set — a silent outcome is never acceptable here. */
-  message: string;
-}
-
-/** Syncs yesterday for one website. The "Sync now" button's entry point. */
-export async function syncYesterday(
-  actorUserId: string,
-  websiteId: unknown,
-  now: Date = new Date(),
-): Promise<SyncDayResult> {
-  return syncDay(actorUserId, websiteId, previousUtcDay(now), now);
-}
-
-/** Syncs one UTC day for one website. */
-export async function syncDay(
-  actorUserId: string,
-  websiteId: unknown,
-  day: unknown,
-  now: Date = new Date(),
-): Promise<SyncDayResult> {
-  const connection = await requireUsableConnection(actorUserId);
-  const website = await requireWebsite(actorUserId, websiteId);
-  const dayKey = parseOrThrow(dayKeySchema, day, "Check the date you asked for.");
-
-  const target = await targetRepo.findTargetForWebsite(website.id, actorUserId);
-
-  if (!target) {
-    throw conflict("Attach a spreadsheet to this website before syncing it.");
-  }
-
-  return writeDay(connection, target, dayKey, now);
-}
-
-/**
- * The one place a day is written.
- *
- * Order matters and is the whole design: claim, then read the data, then resolve the tab, then
- * append, then record. The claim is first so two workers cannot both reach the append; recording is
- * last because until Google has answered there is nothing truthful to record.
- */
-async function writeDay(
-  connection: SheetsConnection,
-  target: targetRepo.TargetWithWebsite,
-  day: UtcDayKey,
-  now: Date,
-): Promise<SyncDayResult> {
-  const claim = await runRepo.claimRun(
-    target.websiteId,
-    day,
-    { spreadsheetId: target.spreadsheetId, sheetTitle: target.sheetTitle },
-    now,
-  );
-
-  if (claim.outcome === "already-synced") {
-    return {
-      day,
-      outcome: "already-synced",
-      rowsWritten: claim.run.rowsWritten ?? 0,
-      message: `${day} was already synced for ${target.website.name}.`,
-    };
-  }
-
-  if (claim.outcome === "skipped") {
-    return { day, outcome: "skipped", rowsWritten: 0, message: claim.reason };
-  }
-
-  const run = claim.run;
-
-  try {
-    // Scoped to this website as well as to its owner, so one website's rows can never reach
-    // another's spreadsheet.
-    const rows = await getDailyArmRows(target.website.userId, utcDayRange(day), target.websiteId);
-
-    /*
-     * A day with no activity is recorded as SUCCEEDED having written nothing, rather than left
-     * unclaimed. That distinction matters: "synced, nothing happened" and "never synced" look
-     * identical in a spreadsheet, and only the run history can tell them apart.
-     *
-     * It also means Google is not called at all for a quiet day, which is most days for most
-     * websites.
-     */
-    if (rows.length === 0) {
-      await runRepo.completeRun(run.id, { status: "SUCCEEDED", rowsWritten: 0 }, new Date());
-
-      return {
-        day,
-        outcome: "nothing-to-write",
-        rowsWritten: 0,
-        message: `Nothing to write for ${day} — no visitors were assigned on ${target.website.name}.`,
-      };
-    }
-
-    // Resolved from the stored gid, never from the stored title: a tab renamed in Sheets changes its
-    // title silently, and writing to a remembered name could hit the wrong tab.
-    const sheetTitle = await withAccessToken(connection, (token) =>
-      sheets.resolveWorksheetTitle(token, target.spreadsheetId, target.sheetId),
-    );
-
-    if (!target.headerWrittenAt) {
-      const header = await withAccessToken(connection, (token) =>
-        sheets.ensureHeaderRow(token, target.spreadsheetId, sheetTitle),
-      );
-
-      if (header.written) {
-        await targetRepo.markHeaderWritten(target.id, new Date());
-      }
-    }
-
-    const appended = await withAccessToken(connection, (token) =>
-      sheets.appendRows(token, target.spreadsheetId, sheetTitle, buildSheetRows(day, rows)),
-    );
-
-    await runRepo.completeRun(
-      run.id,
-      {
-        status: "SUCCEEDED",
-        rowsWritten: appended.rowsWritten,
-        updatedRange: appended.updatedRange,
-      },
-      new Date(),
-    );
-
-    return {
-      day,
-      outcome: "written",
-      rowsWritten: appended.rowsWritten,
-      message: `Wrote ${appended.rowsWritten} ${appended.rowsWritten === 1 ? "row" : "rows"} for ${day}.`,
-    };
-  } catch (error) {
-    await recordFailure(run.id, target, error);
-    throw error;
-  }
-}
-
-/**
- * Records why a claimed run did not complete.
- *
- * The FAILED/UNKNOWN distinction is the reason this is its own function. A rejection from Google
- * proves nothing was written, because an append is applied atomically per request — that is safe to
- * retry. A timeout proves nothing at all, and retrying it could append the same day twice, so it is
- * recorded as UNKNOWN and left for a person.
- */
-async function recordFailure(
-  runId: string,
-  target: targetRepo.TargetWithWebsite,
-  error: unknown,
-): Promise<void> {
-  const indeterminate = sheets.isIndeterminate(error);
-  const message = isAppError(error) ? error.message : "The sync failed for an unexpected reason.";
-
-  await runRepo.completeRun(
-    runId,
-    {
-      status: indeterminate ? "UNKNOWN" : "FAILED",
-      error: indeterminate
-        ? `${message} We do not know whether this day was written — check the spreadsheet before retrying.`
-        : message,
-    },
-    new Date(),
-  );
-
-  // A destination that no longer exists would fail identically every night. Detaching it turns a
-  // recurring silent failure into a visible "choose a spreadsheet" prompt on the website's page.
-  if (sheets.isMissingDestination(error)) {
-    await targetRepo.detachTarget(target.websiteId, target.website.userId);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// The scheduled sweep
-// ---------------------------------------------------------------------------
-
-export interface SweepSummary {
-  day: UtcDayKey;
-  websites: number;
-  written: number;
-  nothingToWrite: number;
-  alreadySynced: number;
-  skipped: number;
-  failed: number;
-  retried: number;
-  /** True when the wall-clock budget ran out before every website was visited. */
-  truncated: boolean;
-}
-
-/**
- * Writes yesterday for every website that has a spreadsheet attached, then retries recent definite
- * failures.
- *
- * No `actorUserId`: this acts for every account and is reachable only from the cron route, which
- * authenticates with a shared secret. Each website's rows are still scoped by both its owner's id
- * and its own id inside `getDailyArmRows`, so nothing can cross between customers or between sites.
- *
- * A failure for one website never stops the sweep. Each is recorded on its own run row, which is also
- * why the endpoint returns 200 with counts rather than a 500: a partial success is the normal case,
- * and an HTTP error would hide which part succeeded.
- */
-export async function runDailySweep(now: Date = new Date()): Promise<SweepSummary> {
-  assertConfigured();
-
-  const day = previousUtcDay(now);
-  const deadline = now.getTime() + SWEEP_BUDGET_MS;
-  const targets = await targetRepo.listSyncableTargets();
-
-  const summary: SweepSummary = {
-    day,
-    websites: targets.length,
-    written: 0,
-    nothingToWrite: 0,
-    alreadySynced: 0,
-    skipped: 0,
-    failed: 0,
-    retried: 0,
-    truncated: false,
-  };
-
-  // One grant per account, so several websites usually share one. Cached per sweep to avoid
-  // refetching and re-refreshing the same token for each of them.
-  const grants = new Map<string, SheetsConnection | null>();
-
-  const grantFor = async (userId: string): Promise<SheetsConnection | null> => {
-    if (!grants.has(userId)) {
-      grants.set(userId, await connectionRepo.findConnectedGrant(userId));
-    }
-
-    return grants.get(userId) ?? null;
-  };
-
-  for (const target of targets) {
-    // Checked between websites rather than mid-append: being killed by a platform timeout halfway
-    // through a write is exactly what produces a run whose outcome nobody knows.
-    if (Date.now() > deadline) {
-      summary.truncated = true;
-      break;
-    }
-
-    const connection = await grantFor(target.website.userId);
-
-    if (!connection) {
-      summary.skipped += 1;
-      continue;
-    }
-
-    const outcome = await safeWriteDay(connection, target, day, new Date());
-
-    if (outcome === "written") summary.written += 1;
-    else if (outcome === "nothing-to-write") summary.nothingToWrite += 1;
-    else if (outcome === "already-synced") summary.alreadySynced += 1;
-    else if (outcome === "skipped") summary.skipped += 1;
-    else summary.failed += 1;
-  }
-
-  for (const target of targets) {
-    if (Date.now() > deadline) {
-      summary.truncated = true;
-      break;
-    }
-
-    const connection = await grantFor(target.website.userId);
-    if (!connection) continue;
-
-    // Only FAILED runs, and only within the window — UNKNOWN is never retried automatically.
-    const retryable = await runRepo.listRetryableRuns(
-      target.websiteId,
-      utcDaysEndingWith(day, RETRY_WINDOW_DAYS),
-    );
-
-    for (const stale of retryable) {
-      if (Date.now() > deadline) {
-        summary.truncated = true;
-        break;
-      }
-
-      const outcome = await safeWriteDay(connection, target, stale.day as UtcDayKey, new Date());
-      if (outcome === "written" || outcome === "nothing-to-write") summary.retried += 1;
-    }
-  }
-
-  return summary;
-}
-
-/** One website's write, with every failure contained so the sweep continues. */
-async function safeWriteDay(
-  connection: SheetsConnection,
-  target: targetRepo.TargetWithWebsite,
-  day: UtcDayKey,
-  now: Date,
-): Promise<SyncDayResult["outcome"]> {
-  try {
-    const result = await writeDay(connection, target, day, now);
-    return result.outcome;
-  } catch (error) {
-    // Already recorded on the run row by `recordFailure`. Logged without the payload, which could
-    // carry a token or a customer's data.
-    console.error(
-      `[routely] sheets sync failed for website ${target.websiteId} on ${day}:`,
-      isAppError(error) ? error.message : "unexpected error",
-    );
-
-    return "failed";
-  }
-}
-
-// ---------------------------------------------------------------------------
-// The live tab
+// Publishing
 // ---------------------------------------------------------------------------
 
 /**
- * Shortest gap between two writes of one website's live tab.
+ * Shortest gap between two writes of one website's tab.
  *
  * Google allows **60 write requests per minute per user**. A write per event would exceed that at
  * roughly one visitor per second, so the tab is refreshed on a trailing throttle instead: traffic
  * triggers it, and this caps how often it can actually fire. Ten seconds means at most six writes a
  * minute per website — comfortably inside the quota even with several busy websites on one Google
  * account — while still feeling immediate to someone watching the spreadsheet.
+ *
+ * This protects the quota, not correctness. Overwriting a fixed range is idempotent, so a refresh
+ * that happens twice is merely wasteful, never wrong.
  */
-export const LIVE_REFRESH_INTERVAL_MS = 10_000;
+export const REFRESH_INTERVAL_MS = 10_000;
 
-/** The tab today's running totals are written to. Routely owns it outright and overwrites it. */
-export const LIVE_SHEET_TITLE = "Routely live";
+/** How many days the tab shows, ending with today. */
+export const WINDOW_DAYS = 30;
+
+/** The tab Routely creates and owns inside the customer's spreadsheet. */
+export const SHEET_TAB_TITLE = "Routely";
 
 /**
- * Rewrites one website's live tab with today's running totals.
+ * Rewrites one website's tab with the last `WINDOW_DAYS` days, today included.
  *
- * Called from event ingestion, **after the response has been sent**, so a visitor's beacon never
- * waits on Google. Three properties make that safe:
+ * Called from event ingestion **after the response has been sent**, and from the scheduled refresh.
+ * Three properties make the first of those safe:
  *
  * 1. **It is throttled by a compare-and-set**, so however many events arrive — across however many
  *    server instances — the tab is written at most once per interval.
  * 2. **It never throws.** Ingestion is the one path that must not fail, and a spreadsheet being
- *    unreachable is not a reason to lose a customer's tracking data. Every failure is logged and
- *    swallowed.
- * 3. **It touches only the live tab.** The daily history is append-only and is never rewritten,
- *    because a customer may have built formulas against those rows.
- *
- * Returns whether a write happened, which is only used by tests and the manual path.
+ *    unreachable is not a reason to lose a customer's tracking data. Failures are recorded on the
+ *    target so the UI can say so, then swallowed.
+ * 3. **It only ever touches Routely's own tab.** Everything else in the customer's spreadsheet is
+ *    left alone.
  */
-export async function refreshLiveTab(
+export async function refreshSheet(
   websiteId: string,
   now: Date = new Date(),
+  options: { force?: boolean } = {},
 ): Promise<{ refreshed: boolean; rows?: number; reason?: string }> {
   if (missingConfiguration() !== null) return { refreshed: false, reason: "not configured" };
 
+  let targetId: string | null = null;
+
   try {
-    const target = await targetRepo.claimLiveRefresh(websiteId, LIVE_REFRESH_INTERVAL_MS, now);
+    const target = await targetRepo.claimRefresh(
+      websiteId,
+      options.force ? 0 : REFRESH_INTERVAL_MS,
+      now,
+    );
 
     // Either no spreadsheet is attached, or another request refreshed it moments ago. Both are
     // ordinary outcomes, not failures.
     if (!target) return { refreshed: false, reason: "throttled or no destination" };
+    targetId = target.id;
 
     const connection = await connectionRepo.findConnectedGrant(target.website.userId);
     if (!connection) return { refreshed: false, reason: "no usable Google grant" };
 
-    const day = utcDayKey(now);
-    const rows = await getDailyArmRows(target.website.userId, utcDayRange(day), websiteId);
-    const cells = buildSheetRows(day, rows);
+    // Inclusive of today, so a window of 30 covers today and the 29 days before it.
+    const from = utcDayRange(utcDaysEndingWith(utcDayKey(now), WINDOW_DAYS)[0] as string).from;
+    const rows = await getArmRowsByDay(
+      target.website.userId,
+      { from, to: utcDayRange(utcDayKey(now)).to },
+      websiteId,
+    );
 
+    const cells = buildDatedSheetRows(rows);
+
+    // Resolved from the stored gid, never the stored title: a tab renamed in Sheets changes its
+    // title silently, and writing to a remembered name could hit the wrong tab — which, for an
+    // overwrite, would mean destroying it.
     const worksheet = await withAccessToken(connection, (token) =>
-      sheets.ensureWorksheet(
-        token,
-        target.spreadsheetId,
-        target.liveSheetTitle ?? LIVE_SHEET_TITLE,
-      ),
+      sheets.ensureWorksheet(token, target.spreadsheetId, target.sheetTitle),
     );
 
     await withAccessToken(connection, (token) =>
@@ -867,24 +544,99 @@ export async function refreshLiveTab(
         target.spreadsheetId,
         worksheet.title,
         cells,
-        target.liveRowCount,
+        target.rowCount,
       ),
     );
 
-    await targetRepo.recordLiveWrite(target.id, {
-      liveSheetId: worksheet.sheetId,
-      liveSheetTitle: worksheet.title,
-      liveRowCount: cells.length,
+    await targetRepo.recordWrite(target.id, {
+      sheetId: worksheet.sheetId,
+      sheetTitle: worksheet.title,
+      rowCount: cells.length,
     });
 
     return { refreshed: true, rows: cells.length };
   } catch (error) {
-    // Swallowed deliberately — see (2) above. Logged without the payload, which could carry a token.
-    console.error(
-      `[routely] live sheet refresh failed for website ${websiteId}:`,
-      isAppError(error) ? error.message : "unexpected error",
-    );
+    const message = isAppError(error) ? error.message : "The refresh failed unexpectedly.";
+
+    // Recorded so the UI can show why the numbers are stale, then swallowed — see (2) above.
+    if (targetId) await targetRepo.recordError(targetId, message).catch(() => {});
+
+    console.error(`[routely] sheet refresh failed for website ${websiteId}:`, message);
 
     return { refreshed: false, reason: "failed" };
   }
+}
+
+/** Refreshes one website on the customer's explicit request, ignoring the throttle. */
+export async function refreshSheetForUser(
+  actorUserId: string,
+  websiteId: unknown,
+): Promise<{ rows: number }> {
+  await requireUsableConnection(actorUserId);
+  const website = await requireWebsite(actorUserId, websiteId);
+
+  const target = await targetRepo.findTargetForWebsite(website.id, actorUserId);
+  if (!target) throw conflict("Attach a spreadsheet to this website before refreshing it.");
+
+  const result = await refreshSheet(website.id, new Date(), { force: true });
+
+  if (!result.refreshed) {
+    throw conflict(
+      target.lastError ?? "The refresh did not complete. Please try again in a moment.",
+    );
+  }
+
+  return { rows: result.rows ?? 0 };
+}
+
+export interface SweepSummary {
+  websites: number;
+  refreshed: number;
+  skipped: number;
+  failed: number;
+  /** True when the wall-clock budget ran out before every website was visited. */
+  truncated: boolean;
+}
+
+/**
+ * Refreshes every website's tab, on a schedule.
+ *
+ * Traffic already keeps a busy website's tab current, so this exists for the quiet ones: without it,
+ * a site with no visitors today would keep showing whatever it last showed, and the window would
+ * never roll forward onto the new day.
+ *
+ * No `actorUserId`: this acts for every account and is reachable only from the cron route, which
+ * authenticates with a shared secret. Each website's rows are still scoped by both its owner's id
+ * and its own id, so nothing crosses between customers or between sites.
+ */
+export async function refreshAllSheets(now: Date = new Date()): Promise<SweepSummary> {
+  assertConfigured();
+
+  const deadline = now.getTime() + SWEEP_BUDGET_MS;
+  const targets = await targetRepo.listSyncableTargets();
+
+  const summary: SweepSummary = {
+    websites: targets.length,
+    refreshed: 0,
+    skipped: 0,
+    failed: 0,
+    truncated: false,
+  };
+
+  for (const target of targets) {
+    // Checked between websites rather than mid-write, so a platform timeout cannot kill a refresh
+    // half way through replacing a tab's contents.
+    if (Date.now() > deadline) {
+      summary.truncated = true;
+      break;
+    }
+
+    const result = await refreshSheet(target.websiteId, new Date(), { force: true });
+
+    if (result.refreshed) summary.refreshed += 1;
+    else if (result.reason === "failed") summary.failed += 1;
+    else summary.skipped += 1;
+  }
+
+  return summary;
 }

@@ -3,22 +3,23 @@
 import { useActionState } from "react";
 import { ExternalLink, Sheet, Unplug } from "lucide-react";
 
+import { formatDateTime } from "@/lib/format";
+
 import { AttachSheetControls } from "@/components/integrations/attach-sheet-controls";
-import { SyncNowButton } from "@/components/integrations/sync-now-button";
+import { RefreshSheetButton } from "@/components/integrations/refresh-sheet-button";
 import { Button } from "@/components/ui/button";
 import { useFormToast } from "@/hooks/use-form-toast";
 import { IDLE, type FormState } from "@/lib/form-state";
-import type {
-  AttachResult,
-  PickerTokenResult,
-  WorksheetListResult,
-} from "@/server/actions/integration.actions";
+import type { AttachResult, PickerTokenResult } from "@/server/actions/integration.actions";
 
 export interface SheetDestination {
   spreadsheetId: string;
   spreadsheetName: string | null;
   sheetTitle: string;
   createdByRoutely: boolean;
+  refreshedAt: Date | null;
+  rowCount: number;
+  lastError: string | null;
 }
 
 /**
@@ -34,10 +35,9 @@ export function WebsiteSheetCard({
   projectNumber,
   getPickerToken,
   attachSheet,
-  listWorksheets,
   createSheetAction,
   detachSheetAction,
-  syncDayAction,
+  refreshSheetAction,
   canSync,
 }: {
   websiteId: string;
@@ -45,15 +45,10 @@ export function WebsiteSheetCard({
   developerKey?: string;
   projectNumber?: string;
   getPickerToken: () => Promise<PickerTokenResult>;
-  attachSheet: (input: {
-    websiteId: string;
-    spreadsheetId: string;
-    sheetId: number;
-  }) => Promise<AttachResult>;
-  listWorksheets: (spreadsheetId: string) => Promise<WorksheetListResult>;
+  attachSheet: (input: { websiteId: string; spreadsheetId: string }) => Promise<AttachResult>;
   createSheetAction: (state: FormState, formData: FormData) => Promise<FormState>;
   detachSheetAction: (state: FormState, formData: FormData) => Promise<FormState>;
-  syncDayAction: (state: FormState, formData: FormData) => Promise<FormState>;
+  refreshSheetAction: (state: FormState, formData: FormData) => Promise<FormState>;
   /** False while the grant needs reconnecting — syncing would only fail. */
   canSync: boolean;
 }) {
@@ -64,8 +59,8 @@ export function WebsiteSheetCard({
     return (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          No spreadsheet yet. Choose one of yours, or let Routely create one — either way,
-          yesterday&rsquo;s results are appended once a day.
+          No spreadsheet yet. Choose one of yours, or let Routely create one. It then keeps the last
+          30 days of results up to date, within seconds of a visit or a conversion.
         </p>
         <AttachSheetControls
           websiteId={websiteId}
@@ -73,7 +68,6 @@ export function WebsiteSheetCard({
           projectNumber={projectNumber}
           getPickerToken={getPickerToken}
           attachSheet={attachSheet}
-          listWorksheets={listWorksheets}
           createSheetAction={createSheetAction}
         />
       </div>
@@ -91,9 +85,21 @@ export function WebsiteSheetCard({
             </span>
           </p>
           <p className="text-xs text-muted-foreground">
-            Appending to the <span className="font-medium">{destination.sheetTitle}</span> tab
-            {destination.createdByRoutely ? " · created by Routely" : ""}
+            Writing to the <span className="font-medium">{destination.sheetTitle}</span> tab
+            {destination.createdByRoutely ? " · spreadsheet created by Routely" : ""}
           </p>
+          {destination.lastError ? (
+            <p className="text-xs text-destructive">{destination.lastError}</p>
+          ) : destination.refreshedAt ? (
+            <p className="text-xs text-muted-foreground">
+              Updated {formatDateTime(destination.refreshedAt)} UTC · {destination.rowCount}{" "}
+              {destination.rowCount === 1 ? "row" : "rows"}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Waiting for the first visitor — the tab fills in within seconds of one arriving.
+            </p>
+          )}
         </div>
 
         <Button variant="ghost" size="sm" asChild>
@@ -111,7 +117,7 @@ export function WebsiteSheetCard({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {canSync ? <SyncNowButton action={syncDayAction} websiteId={websiteId} /> : null}
+        {canSync ? <RefreshSheetButton action={refreshSheetAction} websiteId={websiteId} /> : null}
 
         <form action={detachFormAction}>
           <input type="hidden" name="websiteId" value={websiteId} />
@@ -133,11 +139,10 @@ export function WebsiteSheetCard({
             projectNumber={projectNumber}
             getPickerToken={getPickerToken}
             attachSheet={attachSheet}
-            listWorksheets={listWorksheets}
             createSheetAction={createSheetAction}
           />
           <p className="pt-2 text-xs text-muted-foreground">
-            Rows already written stay where they are. New rows go to the new destination.
+            The old spreadsheet is left exactly as it is; Routely simply stops updating it.
           </p>
         </div>
       </details>

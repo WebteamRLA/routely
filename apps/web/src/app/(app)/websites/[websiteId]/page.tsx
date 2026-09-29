@@ -22,8 +22,7 @@ import {
   createSheetAction,
   detachSheetAction,
   getPickerTokenAction,
-  listWorksheetsAction,
-  syncDayAction,
+  refreshSheetAction,
 } from "@/server/actions/integration.actions";
 import { deleteWebsiteAction, updateWebsiteAction } from "@/server/actions/website.actions";
 import { requireUser } from "@/server/auth/session";
@@ -161,11 +160,11 @@ export default async function WebsitePage({ params }: { params: Promise<{ websit
 
         <Card>
           <CardHeader>
-            <CardTitle>Daily results export</CardTitle>
+            <CardTitle>Results export</CardTitle>
             <CardDescription>
-              Once a day, Routely appends this website&rsquo;s results for the previous day to a
-              spreadsheet — one row per experiment arm. Optional, and it never changes rows already
-              written.
+              Routely keeps a spreadsheet up to date with this website&rsquo;s last 30 days of
+              results — one row per experiment arm per day, refreshed within seconds of a visit or a
+              conversion. Optional.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -200,42 +199,11 @@ export default async function WebsitePage({ params }: { params: Promise<{ websit
                   projectNumber={env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER}
                   getPickerToken={getPickerTokenAction}
                   attachSheet={attachPickedSheetAction}
-                  listWorksheets={listWorksheetsAction}
                   createSheetAction={createSheetAction}
                   detachSheetAction={detachSheetAction}
-                  syncDayAction={syncDayAction}
+                  refreshSheetAction={refreshSheetAction}
                   canSync={!sheetStatus.needsReconnect}
                 />
-
-                {sheetStatus.recentRuns.length > 0 ? (
-                  <div className="space-y-2 border-t border-border/70 pt-4">
-                    <h4 className="text-sm font-medium">Recent syncs</h4>
-                    <ul className="space-y-1 text-sm">
-                      {sheetStatus.recentRuns.map((run) => (
-                        <li key={run.id} className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="font-mono text-xs text-muted-foreground">{run.day}</span>
-                          <span
-                            className={
-                              run.status === "SUCCEEDED"
-                                ? "text-muted-foreground"
-                                : run.status === "UNKNOWN"
-                                  ? "text-amber-700 dark:text-amber-500"
-                                  : "text-destructive"
-                            }
-                          >
-                            {run.status === "SUCCEEDED"
-                              ? run.rowsWritten === 0
-                                ? "nothing to write"
-                                : `${run.rowsWritten} ${run.rowsWritten === 1 ? "row" : "rows"} written`
-                              : run.status === "PENDING"
-                                ? "in progress"
-                                : (run.error ?? run.status.toLowerCase())}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
               </div>
             )}
           </CardContent>

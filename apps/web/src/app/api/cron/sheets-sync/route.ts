@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { env } from "@/env";
 import { secretsMatch } from "@/lib/secret-box";
 import { isAppError } from "@/server/errors";
-import { runDailySweep } from "@/server/services/sheets-sync.service";
+import { refreshAllSheets } from "@/server/services/sheets-sync.service";
 
 /** The Prisma adapter is a Node database driver, so this cannot run on the Edge runtime. */
 export const runtime = "nodejs";
@@ -23,7 +23,11 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /**
- * The scheduled daily sync.
+ * The scheduled refresh.
+ *
+ * Traffic already keeps a busy website's spreadsheet current, so this exists for the quiet ones:
+ * without it, a site with no visitors would keep showing whatever it last showed and its window
+ * would never roll forward onto the new day.
  *
  * GET, because that is what platform cron schedulers issue. It is not a "read" — it writes to
  * customers' spreadsheets — which is exactly why the shared secret is mandatory rather than
@@ -51,20 +55,19 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   try {
-    const summary = await runDailySweep();
+    const summary = await refreshAllSheets();
 
     /*
      * 200 with counts, even when some connections failed.
      *
-     * A per-connection failure is recorded on its own run row and retried by the next sweep, and a
-     * 500 here would tell the scheduler the whole job failed — obscuring which customers *were*
-     * written and inviting a retry of work already done. Only a sweep that could not start at all
-     * is an error.
+     * A per-website failure is recorded on that website's own row and retried by the next run, and
+     * a 500 here would tell the scheduler the whole job failed — obscuring which customers *were*
+     * written. Only a run that could not start at all is an error.
      */
     return json(summary, 200);
   } catch (error) {
     console.error(
-      "[routely] daily sheets sweep could not start:",
+      "[routely] scheduled sheet refresh could not start:",
       isAppError(error) ? error.message : error,
     );
 

@@ -1,14 +1,15 @@
-# Integrations — Google Sheets daily sync
+# Integrations — Google Sheets
 
-Once a day, Routely appends the previous day's results to a spreadsheet — **one spreadsheet per
-website**. One row per experiment arm:
+Routely keeps a spreadsheet up to date with the last 30 days of results — **one spreadsheet per
+website**, refreshed within seconds of a visit or a conversion. One row per experiment arm per day:
 
 | Date (UTC) | Experiment | Variant | Visitors | Conversions | Conversion Rate (%) |
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-28 | Pricing redesign | Control | 412 | 30 | 7.3 |
 | 2026-09-28 | Pricing redesign | Variant 1 | 408 | 41 | 10 |
 
-Rows are only ever **appended**. Nothing already in the spreadsheet is edited or removed, and
+Routely creates and owns **one tab**, called `Routely`, inside the spreadsheet the customer chooses.
+Nothing else in that file is read or touched.
 Routely never deletes a row it wrote — including for an experiment that has since been deleted.
 
 ---
@@ -221,45 +222,52 @@ a later "cleanup" fails loudly.
 
 ---
 
-## 5b. Two tabs: permanent history, and live today
+## 5b. One tab, rewritten from source
 
-A synced spreadsheet ends up with two tabs, and the split is the whole reason both can exist:
+Every refresh recomputes the whole 30-day window from the database and overwrites the tab.
 
-| Tab | Written | Contents |
-| --- | --- | --- |
-| the tab you chose | appended, once per day | completed days, never rewritten |
-| **`Routely live`** | overwritten as traffic arrives | today's running totals |
+That is what makes the spreadsheet incapable of disagreeing with the dashboard: there is no
+accumulated state to drift, and no notion of a day being "already written". It also makes a refresh
+idempotent by construction — running it twice leaves exactly the same cells.
 
-The daily history is append-only precisely so a customer can build formulas against it without
-Routely ever moving a row underneath them. That guarantee is incompatible with showing *today*,
-because today's numbers change — so live data goes to a second tab that Routely owns outright and
-rewrites in place. The two never contend for the same cells. Deleting the live tab is safe; the next
-refresh recreates it.
+**An earlier design appended completed days to one tab and kept today in another.** It worked, but it
+put the same date in two places with different numbers as soon as a day was written while still in
+progress, and "which tab is right?" is not a question a customer should have to answer. Recomputing
+one tab removes the question rather than documenting it.
+
+**The customer chooses a spreadsheet, not a tab.** A full overwrite aimed at a tab holding their own
+work would destroy it, so Routely creates its own. Deleting that tab is safe — the next refresh
+recreates it.
 
 ### Why it is throttled rather than per-event
 
 Google allows **60 write requests per minute per user** and 300 per minute per project. A write per
-page view would exceed that at roughly **one visitor per second**, so a literal "row the instant
-someone converts" design breaks at very low traffic — and would put a Google round trip inside the
-tracking hot path, where the rule is that ingestion is fast and never fails.
+page view would exceed that at roughly **one visitor per second** — and would put a Google round trip
+inside the tracking hot path, where the rule is that ingestion is fast and never fails.
 
 Instead the refresh is *triggered* by traffic and *capped* by a throttle:
 
-- `/api/v1/events` schedules the refresh with Next's `after()`, so it runs **after the response is
-  sent**. Measured: beacons answer in 23–36 ms with the refresh enabled, unchanged.
-- `claimLiveRefresh` is a compare-and-set on `liveRefreshedAt`, so of any number of simultaneous
-  beacons — across any number of instances — exactly one wins. Verified: twelve simultaneous claims
-  produce one write, and a burst of ten beacons produces one.
-- `LIVE_REFRESH_INTERVAL_MS` is 10 seconds, so a website writes at most six times a minute however
-  busy it gets.
-- `refreshLiveTab` **never throws**. A spreadsheet being unreachable must not cost a customer their
-  tracking data, so every failure is logged and swallowed.
+- `/api/v1/events` schedules it with Next's `after()`, so it runs **after the response is sent**.
+  Measured: beacons answer in 23–36 ms with the refresh enabled, unchanged.
+- `claimRefresh` is a compare-and-set on `refreshedAt`, so of any number of simultaneous beacons —
+  across any number of instances — exactly one wins. Verified: twelve simultaneous claims produce one
+  write, and a burst of ten beacons produces one.
+- `REFRESH_INTERVAL_MS` is 10 seconds, so a website writes at most six times a minute however busy.
+- `refreshSheet` **never throws**. A spreadsheet being unreachable must not cost a customer their
+  tracking data, so failures are recorded on the target — and shown in the UI — then swallowed.
 
-`liveRowCount` is stored so a refresh can blank rows that are no longer needed — writing three rows
-over a tab that held eight would otherwise leave five stale rows below, still looking like results.
+The throttle protects the quota, not correctness. Because the write is an overwrite, a refresh that
+happens twice is merely wasteful, never wrong. That is why the per-day claim rows the append-based
+design needed are gone.
 
-The practical effect: someone watching the spreadsheet sees their own visit appear within seconds.
-Someone running a busy site sees numbers at most ten seconds stale, at a fixed and predictable cost.
+`rowCount` is stored so a refresh can blank rows it no longer needs — writing three rows over a tab
+that held eight would otherwise leave five stale rows below, still looking like results.
+
+### The scheduled refresh
+
+Traffic keeps a busy website current on its own, so the cron exists for the quiet ones: without it, a
+site with no visitors would keep showing whatever it last showed and the window would never roll
+forward onto the new day.
 
 ---
 
@@ -280,49 +288,20 @@ The header column says `Date (UTC)` so nobody has to guess.
 
 ---
 
-## 7. Writing a day once — and where that stops being true
+## 7. Idempotency, without a claim mechanism
 
-Each `(website, day)` pair gets a row in `sheets_sync_runs` with a unique constraint, **claimed
-before the append**. The insert is attempted and the unique violation is *expected* rather than
-avoided: a read-then-insert would leave a window in which a second worker also inserts, and two
-appends of the same day is the outcome this design exists to prevent. Letting Postgres arbitrate
-removes the window.
+There is none, and none is needed. The tab is overwritten from source data on every refresh, so:
 
-A claim that hits an existing row decides by its state:
+- a duplicated cron invocation writes the same cells twice;
+- a manual refresh racing a beacon writes the same cells twice;
+- a refresh that fails halfway leaves a tab the next refresh simply replaces.
 
-| State | Action | Why |
-| --- | --- | --- |
-| `SUCCEEDED` | skip | Already written |
-| `PENDING`, lease unexpired | skip | Another worker holds it |
-| `PENDING`, lease expired (10 min) | reclaim | The holder died |
-| `FAILED` | reclaim, `attempts + 1` | A rejection proves nothing was written |
-| `UNKNOWN` | **never** reclaimed automatically | It might already be in the spreadsheet |
-| `attempts >= 5` | skip | Stop retrying forever |
+None of those can duplicate or corrupt a row, which is what the previous append-based design needed a
+per-`(website, day)` unique claim to guarantee. Removing it removed the only part of this feature that
+was *not* exactly-once — the window where an append succeeded but the bookkeeping did not.
 
-Reclaiming is a compare-and-set on `status` *and* `updatedAt`, so of two workers reading the same row
-only one `updateMany` matches — the same structural trick the repositories use for tenant filters:
-put the condition in the write, not before it.
-
-Verified against real Postgres: eight simultaneous claims on one `(website, day)` produce exactly one
-winner, and two different websites claim the *same* day independently.
-
-### This is not exactly-once
-
-`FAILED` and `UNKNOWN` exist because a timeout is not a rejection:
-
-- **A non-2xx from Sheets ⇒ `FAILED`.** Sheets applies an append atomically per request, so a
-  rejection is evidence that nothing landed. Safe to retry.
-- **A timeout, abort, or the process dying in flight ⇒ `UNKNOWN`.** We do not know.
-
-If the append succeeds and the bookkeeping write immediately after it does not — a process killed in
-the few hundred milliseconds between them — the run stays `PENDING` and is never retried
-automatically. Google's `values.append` has no idempotency key, so a re-run cannot be deduplicated
-server-side. The only honest design is to make the ambiguity visible: the UI shows *"interrupted —
-check the spreadsheet"*, and the last success's `updatedRange` gives a human something concrete to
-compare against.
-
-**A duplicated day is therefore always a human decision, never a silent one. Do not describe this
-feature as exactly-once.**
+The spreadsheet is never the system of record. Routely's own database is, and the tab is a view of it
+that can be rebuilt at any time.
 
 ---
 
@@ -408,47 +387,34 @@ through the real app.
 
 ## 10. Known limitations
 
-1. **Days are UTC.** A customer in UTC+13 sees "yesterday" end at 11am their time. Nothing disagrees
-   in production, but the boundary is not the customer's day. A per-website timezone is one additive
-   nullable column plus an hourly sweep, and is not built.
-2. **Not exactly-once.** See §7. If the append succeeds and the bookkeeping does not, the day is
-   recorded as *interrupted* and a human decides whether to retry.
-3. **Experiments with no visitors that day produce no rows.** Absence in the spreadsheet means
-   "nothing happened", not "not synced" — the sync history is where you check whether a day ran.
+1. **The tab shows 30 days, not everything.** Older days fall out of the window. Routely's dashboard
+   keeps the full history; the spreadsheet is a rolling view, not an archive.
+2. **Days are UTC.** A customer in UTC+13 sees "today" roll over at 11am their time. Nothing
+   disagrees in production — on Vercel the runtime timezone is UTC — but the boundary is not their
+   local day.
+3. **A refresh only happens when traffic arrives, or on the schedule.** Between those, the tab is as
+   stale as the gap. For a busy site that is seconds; for a quiet one, until the next scheduled run.
 4. **One Google account per Routely account.** Every website's spreadsheet lives in the same Drive.
-   Handing website A's sheet to client A is a matter of *sharing* that spreadsheet, not of connecting
-   a different Google account. Per-website grants were considered and rejected: a consent screen per
-   website, against Google's ~100-refresh-token cap.
+   Handing website A's sheet to client A means *sharing* that spreadsheet, not connecting a different
+   Google account. Per-website grants were rejected: a consent screen per website, against Google's
+   ~100-refresh-token cap.
 5. **Routely cannot list a customer's spreadsheets** — by design, see §2. Choosing an existing one
-   requires the Picker, which requires the two `NEXT_PUBLIC_GOOGLE_*` variables. Without them only
-   "create a new sheet" is offered.
+   needs the Picker and its two `NEXT_PUBLIC_GOOGLE_*` variables; without them only "create a new
+   sheet" is offered.
 6. **The Picker needs a third-party script** (`apis.google.com/js/api.js`). An extension or corporate
    proxy that blocks it leaves "create a new sheet" as the only route; the UI says so rather than
    spinning.
-7. **Deleting an experiment does not remove its rows.** The sheet is an append-only record of what was
-   true, and Routely never edits rows a customer may have built formulas against. An arm whose variant
-   was deleted is labelled `Removed variant` rather than dropped, because the visitors it counted were
-   real.
-8. **Rows are never corrected.** A day is written once, from the data available at 00:20 UTC. A
-   conversion at 23:59 whose beacon lands the next morning is counted by the dashboard and missing
-   from the sheet.
-9. **Refresh tokens expire after 7 days while the OAuth app's publishing status is "Testing".**
-   Connections made during development break roughly weekly — Google's behaviour, not a bug here.
-   Google also revokes a refresh token unused for six months.
-10. **The live tab shows UTC "today", not the customer's today.** At 23:00 in UTC+13 the live tab has
-    already rolled over to a day that, locally, has barely started.
-11. **A live refresh only happens when traffic arrives.** A website with no visitors keeps whatever
-    the live tab last showed until the next event — it does not tick over to an empty day on its own.
-    The daily history is unaffected; that is written by the scheduled sweep regardless.
-12. **The manual "Sync now" and "Create sheet" throttles are per-process**, the same limitation
-    `rateLimit()` already carries. Multiple instances multiply the effective limit.
-13. **Syncing a day by hand claims it.** The day chooser allows today, which writes the results *so
-    far* — and because the day is then claimed, the scheduled run will not add the rest of that day.
-    The UI says so when today is selected. Pick yesterday for a complete day.
-14. **No backfill beyond what is already stored.** The scheduled sweep writes yesterday, plus
-    automatic retries of definitely-failed runs within seven days. Days before a spreadsheet was
-    attached can be written one at a time with the day chooser, but nothing does it in bulk.
-15. **Expected unique violations are logged by Prisma at error level.** A second worker losing the
-    claim race is the mechanism working, but it appears in logs as
-    `Unique constraint failed on ... sheets_sync_runs_websiteId_day_key`. Harmless, and not suppressed
-    because silencing it would mean silencing real constraint errors too.
+7. **An arm whose variant was deleted is labelled `Removed variant`** rather than dropped, because
+   the visitors it counted were real. It disappears once its days leave the window.
+8. **Late events change history.** A beacon that lands the morning after the visit is counted on the
+   day it *occurred*, so a completed day's row can still change. That is more accurate than freezing
+   it, but it does mean a figure someone screenshotted may not match later.
+9. **Refresh tokens expire after 7 days while the OAuth app's publishing status is "Testing"**, and
+   changing the app's scopes or publishing status revokes existing grants outright. Both surface as a
+   clear "reconnect" state rather than silent failure.
+10. **The refresh throttle is per-process**, the same limitation `rateLimit()` already carries.
+    Multiple instances multiply the effective write rate, which matters only against Google's quota.
+11. **The 30-day window is bucketed in memory.** `getArmRowsByDay` fetches the window's assignments
+    and conversions and groups them in JS, because Prisma cannot group by a date-truncated column.
+    `overview.service.ts` does the same and carries the same caveat: this becomes raw SQL if one
+    website's traffic over 30 days ever outgrows memory.

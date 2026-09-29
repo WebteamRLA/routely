@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { SHEET_COLUMNS, armLabel, buildSheetRows, headerRow, percentCell } from "@/lib/sheet-rows";
+import {
+  SHEET_COLUMNS,
+  armLabel,
+  buildDatedSheetRows,
+  buildSheetRows,
+  headerRow,
+  percentCell,
+} from "@/lib/sheet-rows";
 
 describe("headerRow", () => {
   it("names the timezone and the unit", () => {
@@ -156,5 +163,55 @@ describe("buildSheetRows", () => {
 
   it("returns nothing for a day with no arms", () => {
     expect(buildSheetRows("2026-09-28", [])).toEqual([]);
+  });
+});
+
+describe("buildDatedSheetRows", () => {
+  it("carries each row's own day", () => {
+    const rows = buildDatedSheetRows([
+      {
+        day: "2026-09-28",
+        experimentName: "Checkout",
+        variantLabel: "Control",
+        assignedVisitors: 10,
+        conversions: 1,
+        conversionRate: 0.1,
+      },
+      {
+        day: "2026-09-29",
+        experimentName: "Checkout",
+        variantLabel: "Control",
+        assignedVisitors: 4,
+        conversions: 0,
+        conversionRate: 0,
+      },
+    ]);
+
+    expect(rows).toEqual([
+      ["2026-09-28", "Checkout", "Control", 10, 1, 10],
+      ["2026-09-29", "Checkout", "Control", 4, 0, 0],
+    ]);
+  });
+
+  it("preserves the order it is given", () => {
+    // The tab is overwritten wholesale, so row order is entirely the caller's and must not be
+    // re-sorted here — oldest day first is what makes the sheet read as a report.
+    const days = ["2026-09-01", "2026-09-02", "2026-09-03"];
+    const rows = buildDatedSheetRows(
+      days.map((day) => ({
+        day,
+        experimentName: "E",
+        variantLabel: "Control",
+        assignedVisitors: 1,
+        conversions: 0,
+        conversionRate: 0,
+      })),
+    );
+
+    expect(rows.map((row) => row[0])).toEqual(days);
+  });
+
+  it("returns nothing for an empty window", () => {
+    expect(buildDatedSheetRows([])).toEqual([]);
   });
 });

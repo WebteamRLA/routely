@@ -27,7 +27,7 @@ import "dotenv/config";
 import { buildSheetRows } from "@/lib/sheet-rows";
 import { previousUtcDay, utcDayRange } from "@/lib/utc-day";
 import { getDailyArmRows } from "@/server/services/analytics.service";
-import { runDailySweep, syncDay } from "@/server/services/sheets-sync.service";
+import { refreshAllSheets, refreshSheet } from "@/server/services/sheets-sync.service";
 
 interface Options {
   dryRun: boolean;
@@ -75,19 +75,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (options.userId) {
-    if (!options.websiteId) {
-      console.error("--user needs --website <websiteId>: a sheet is attached per website.");
-      process.exitCode = 1;
-      return;
-    }
-
-    const result = await syncDay(options.userId, options.websiteId, options.day);
-    console.log(`${result.outcome}: ${result.message}`);
+  if (options.websiteId) {
+    const result = await refreshSheet(options.websiteId, new Date(), { force: true });
+    console.log(JSON.stringify(result));
     return;
   }
 
-  const summary = await runDailySweep();
+  const summary = await refreshAllSheets();
   console.log(JSON.stringify(summary, null, 2));
 }
 

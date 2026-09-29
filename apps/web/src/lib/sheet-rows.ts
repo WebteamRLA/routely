@@ -97,6 +97,30 @@ export function percentCell(rate: number | null): number | "" {
   return Math.round(rate * 1000) / 10;
 }
 
+/** One arm's figures, carrying the day they describe. */
+export interface DatedArmFigures extends DailyArmFigures {
+  /** `YYYY-MM-DD`, UTC. */
+  day: string;
+}
+
+/**
+ * Rows spanning several days, ready to write.
+ *
+ * The caller's order is preserved — `getArmRowsByDay` returns oldest day first, with each day's
+ * experiments together and control before its variants, which is the order a person reads a report
+ * in. A spreadsheet's row order is the only grouping it has.
+ */
+export function buildDatedSheetRows(figures: readonly DatedArmFigures[]): SheetCell[][] {
+  return figures.map((row) => [
+    row.day,
+    row.experimentName,
+    row.variantLabel,
+    row.assignedVisitors,
+    row.conversions,
+    percentCell(row.conversionRate),
+  ]);
+}
+
 /**
  * The rows for one day, ready to append.
  *
