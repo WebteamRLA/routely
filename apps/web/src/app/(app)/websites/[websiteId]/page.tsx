@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, FlaskConical, Plus } from "lucide-react";
 
 import { EmptyState } from "@/components/common/empty-state";
+import { SheetStatusColumn } from "@/components/integrations/sheet-status";
 import { WebsiteSheetCard } from "@/components/integrations/website-sheet-card";
 import { ExperimentRow } from "@/components/experiments/experiment-row";
 import { PageHeader } from "@/components/common/page-header";
@@ -191,6 +192,11 @@ export default async function WebsitePage({ params }: { params: Promise<{ websit
                     to resume the daily sync. This website keeps its spreadsheet.
                   </p>
                 ) : null}
+
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <p className="text-sm font-medium">Destination</p>
+                  <SheetStatusColumn destination={sheetStatus.destination} />
+                </div>
 
                 <WebsiteSheetCard
                   websiteId={website.id}

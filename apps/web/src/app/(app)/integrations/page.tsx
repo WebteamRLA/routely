@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, Sheet } from "lucide-react";
 import { PageHeader } from "@/components/common/page-header";
 import { ConnectGoogleButton } from "@/components/integrations/connect-google-button";
 import { DisconnectDialog } from "@/components/integrations/disconnect-dialog";
-import { SheetStatus, sheetHealth, sheetStatusLabel } from "@/components/integrations/sheet-status";
+import { SheetStatusColumn } from "@/components/integrations/sheet-status";
 import { WebsiteSheetCard } from "@/components/integrations/website-sheet-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -298,17 +298,14 @@ function Connected({ overview }: { overview: IntegrationOverview }) {
           <ul className="divide-y divide-border/60 rounded-lg border border-border/70">
             {overview.websites.map((website) => (
               <li key={website.websiteId} className="space-y-2 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-start justify-between gap-2">
                   <Link
                     href={routes.websites.detail(website.websiteId)}
                     className="truncate text-sm font-medium hover:underline"
                   >
                     {website.websiteName}
                   </Link>
-                  <SheetStatus
-                    health={sheetHealth(website.destination)}
-                    label={sheetStatusLabel(website.destination)}
-                  />
+                  <SheetStatusColumn destination={website.destination} />
                 </div>
 
                 <WebsiteSheetCard

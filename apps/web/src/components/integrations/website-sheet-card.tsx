@@ -1,8 +1,6 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { ExternalLink } from "lucide-react";
-
 import { AttachSheetControls } from "@/components/integrations/attach-sheet-controls";
 import { RefreshSheetButton } from "@/components/integrations/refresh-sheet-button";
 import { Button } from "@/components/ui/button";
@@ -73,17 +71,12 @@ export function WebsiteSheetCard({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-        <a
-          // Built from the id rather than a stored URL, so a renamed or moved file still opens.
-          href={`https://docs.google.com/spreadsheets/d/${encodeURIComponent(destination.spreadsheetId)}/edit`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 font-medium hover:underline"
-        >
+      {/* Plain text, not a link: "View spreadsheet" sits in the status column beside this, and two
+       * links to the same file a few pixels apart is a choice nobody wants to make. */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+        <span className="font-medium">
           {destination.spreadsheetName ?? destination.spreadsheetId}
-          <ExternalLink className="size-3 text-muted-foreground" aria-hidden />
-        </a>
+        </span>
         <span className="text-xs text-muted-foreground">
           {destination.sheetTitle} tab{meta.length > 0 ? ` · ${meta.join(" · ")}` : ""}
         </span>

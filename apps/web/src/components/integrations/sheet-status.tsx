@@ -1,3 +1,6 @@
+import { ExternalLink } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -72,5 +75,44 @@ export function SheetStatus({ health, label }: { health: SheetHealth; label: str
       <span className={cn("size-1.5 rounded-full", DOT[health])} aria-hidden />
       {label}
     </span>
+  );
+}
+
+/** The spreadsheet's own URL, built from its id so a renamed or moved file still opens. */
+export function spreadsheetUrl(spreadsheetId: string): string {
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(spreadsheetId)}/edit`;
+}
+
+/**
+ * Status, with the way out to the spreadsheet directly beneath it.
+ *
+ * One component rather than two placements, so the integrations list and a website's own page cannot
+ * end up describing the same destination differently — which they already had, the website page
+ * having quietly lost its status indicator when the list gained one.
+ */
+export function SheetStatusColumn({
+  destination,
+  className,
+}: {
+  destination: SheetDestination | null;
+  className?: string;
+}) {
+  return (
+    <div className={cn("flex shrink-0 flex-col items-end gap-1.5", className)}>
+      <SheetStatus health={sheetHealth(destination)} label={sheetStatusLabel(destination)} />
+
+      {destination ? (
+        <Button variant="outline" size="sm" asChild>
+          <a
+            href={spreadsheetUrl(destination.spreadsheetId)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View spreadsheet
+            <ExternalLink aria-hidden />
+          </a>
+        </Button>
+      ) : null}
+    </div>
   );
 }
