@@ -55,11 +55,12 @@ see [docs/AUTH.md](docs/AUTH.md).
 | `npm run dev` | Next.js dev server |
 | `npm run build` | Build the SDK, then the app |
 | `npm run check` | Typecheck, lint, format check, and all tests |
-| `npm run test` | 129 unit tests across both workspaces |
+| `npm run test` | 264 unit tests across both workspaces |
 | `npm run db:migrate` / `db:deploy` | Migrations, development / production |
 | `npm run db:seed` / `db:verify` | Sample data / data-model smoke test |
 | `npm run db:studio` | Prisma Studio |
 | `npm run sdk:build` | Build the tracking bundle (size-budgeted at 6 kB gzip) |
+| `npm run sheets:sync` | Run the Google Sheets daily sync (`-- --dry-run` prints rows, writes nothing) |
 
 ## Installing the tracking SDK
 
@@ -82,13 +83,14 @@ The public site id is an identifier, not a secret.
 | [docs/SDK-DEPLOYMENT.md](docs/SDK-DEPLOYMENT.md) | SDK build, hosting, visitor identity, conversions, and why time-on-page is approximate |
 | [CLAUDE.md](CLAUDE.md) | Full project context: locked stack, settled decisions, data-model invariants, gotchas |
 | [docs/DEPLOY-VERCEL.md](docs/DEPLOY-VERCEL.md) | Deploying to Vercel: database, env vars, and what behaves differently there |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Google Sheets daily sync: scopes, the Picker, idempotency, and known limitations |
 
 ## Status
 
-Working: Google sign-in, websites, experiments with publish/pause lifecycle, the tracking SDK
-(assignment, redirect, page views, visible time, conversions), event ingestion with rate
-limiting, the results dashboard, date ranges, and public share links.
+Working: Google sign-in, websites, experiments with publish/pause lifecycle, traffic split
+across any number of variants, the tracking SDK (assignment, redirect, page views, visible time,
+conversions), event ingestion with rate limiting, the results dashboard, date ranges, public
+share links, and a daily export of results to Google Sheets — one spreadsheet per website.
 
-Not built: the production Docker Compose stack, statistical significance testing, click or
-custom-JavaScript goals, and multi-variant tests. Per-part limitations are listed in the docs.
-# routely
+Not built: the production Docker Compose stack, statistical significance testing, and click or
+custom-JavaScript goals. Per-part limitations are listed in the docs.
