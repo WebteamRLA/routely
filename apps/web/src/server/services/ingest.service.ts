@@ -52,9 +52,18 @@ export interface IngestResult {
   rejected: number;
   /** Events discarded as repeats: a duplicate page-view burst, or a repeated conversion. */
   deduplicated: number;
+  /**
+   * The website these events belong to, resolved from the public site id — null when the batch was
+   * malformed or named a site that does not exist.
+   *
+   * Reported so the route can refresh that website's live Google Sheets tab *after* responding. It
+   * is deliberately the id this service resolved rather than anything from the payload: the site id
+   * in a request is an assertion, and the website is the fact it resolved to.
+   */
+  websiteId: string | null;
 }
 
-const EMPTY: IngestResult = { accepted: 0, rejected: 0, deduplicated: 0 };
+const EMPTY: IngestResult = { accepted: 0, rejected: 0, deduplicated: 0, websiteId: null };
 
 export async function ingest(payload: unknown): Promise<IngestResult> {
   const parsed = eventBatchSchema.safeParse(payload);
@@ -68,7 +77,12 @@ export async function ingest(payload: unknown): Promise<IngestResult> {
   }
 
   const now = Date.now();
-  const result: IngestResult = { accepted: 0, rejected: 0, deduplicated: 0 };
+  const result: IngestResult = {
+    accepted: 0,
+    rejected: 0,
+    deduplicated: 0,
+    websiteId: website.id,
+  };
 
   // Experiments are resolved once per batch: a batch usually concerns one experiment, and this
   // keeps a 50-event payload from issuing 50 identical queries.

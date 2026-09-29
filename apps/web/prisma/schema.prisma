@@ -579,6 +579,25 @@ model WebsiteSheetTarget {
   /// Only used to word the UI honestly ("we made this for you" vs "you chose this").
   createdByRoutely Boolean @default(false)
 
+  /// The "Routely live" tab: today's running totals, rewritten as traffic arrives.
+  ///
+  /// A *separate* tab from the daily history on purpose. The history is append-only and must never
+  /// be rewritten — a customer may have built formulas against those rows. This tab is one Routely
+  /// owns outright and overwrites in place, so "live" and "permanent" never fight over the same
+  /// cells. Null until the first live refresh creates it.
+  liveSheetId    Int?
+  liveSheetTitle String?
+
+  /// How many rows the live tab last held, so a refresh can blank the difference when today's arm
+  /// count shrinks. Without it, deleting an experiment would leave its stale rows on display.
+  liveRowCount Int @default(0)
+
+  /// When the live tab was last written. This is the throttle: a refresh is claimed by a
+  /// compare-and-set against this column, so however much traffic arrives, the tab is rewritten at
+  /// most once per interval per website — which is what keeps a busy site inside Google's write
+  /// quota of 60 per minute per user.
+  liveRefreshedAt DateTime?
+
   attachedAt DateTime @default(now())
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

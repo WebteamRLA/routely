@@ -405,6 +405,80 @@ export async function ensureHeaderRow(
 }
 
 /**
+ * Creates a worksheet if the spreadsheet does not already have one by that title.
+ *
+ * Returns its gid either way. Used for the live tab, which Routely adds to whichever spreadsheet the
+ * customer chose — including one of their existing ones, where adding a tab is the least invasive
+ * thing that could possibly work: no existing tab is touched, and they can delete it without
+ * breaking the daily history.
+ */
+export async function ensureWorksheet(
+  accessToken: string,
+  spreadsheetId: string,
+  title: string,
+): Promise<WorksheetSummary> {
+  const metadata = await getSpreadsheetMetadata(accessToken, spreadsheetId);
+  const existing = metadata.worksheets.find((sheet) => sheet.title === title);
+
+  if (existing) return existing;
+
+  const payload = (await googleFetch(
+    `${SHEETS_ENDPOINT}/${pathSafeSpreadsheetId(spreadsheetId)}:batchUpdate`,
+    accessToken,
+    {
+      method: "POST",
+      body: { requests: [{ addSheet: { properties: { title } } }] },
+    },
+  )) as { replies?: { addSheet?: { properties?: { sheetId?: unknown; title?: unknown } } }[] };
+
+  const created = payload.replies?.[0]?.addSheet?.properties;
+
+  if (typeof created?.sheetId !== "number" || typeof created.title !== "string") {
+    throw validationFailed("Google created the worksheet but did not describe it.");
+  }
+
+  return { sheetId: created.sheetId, title: created.title };
+}
+
+/**
+ * Overwrites a worksheet with a header and rows, in a single request.
+ *
+ * `values.update`, not `append`: this tab shows *today*, and today changes. Appending would stack a
+ * new copy of the same day every few seconds.
+ *
+ * `previousRowCount` is what stops stale rows lingering. Writing 3 rows over a tab that held 8 would
+ * leave 5 orphans below the new data, still looking like results — so the range is padded with empty
+ * rows out to whatever was there before. Padding in the same call keeps this to one write, which
+ * matters because the write quota is per minute and this runs on live traffic.
+ *
+ * `RAW` for the same reason as everywhere else: an experiment name beginning with `=` must be a
+ * string, not a formula.
+ */
+export async function overwriteWorksheet(
+  accessToken: string,
+  spreadsheetId: string,
+  sheetTitle: string,
+  rows: SheetCell[][],
+  previousRowCount: number,
+): Promise<{ rowsWritten: number }> {
+  const header = headerRow();
+  const body: SheetCell[][] = [header, ...rows];
+
+  const blank: SheetCell[] = Array.from({ length: SHEET_COLUMN_COUNT }, () => "");
+  for (let i = body.length; i < previousRowCount + 1; i += 1) body.push([...blank]);
+
+  const range = a1Range(sheetTitle, `A1:${LAST_COLUMN}${Math.max(body.length, 1)}`);
+
+  await googleFetch(
+    `${SHEETS_ENDPOINT}/${pathSafeSpreadsheetId(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    accessToken,
+    { method: "PUT", body: { range, majorDimension: "ROWS", values: body } },
+  );
+
+  return { rowsWritten: rows.length };
+}
+
+/**
  * Appends rows to a worksheet.
  *
  * `valueInputOption=RAW` is a security decision, not a formatting one. Under `USER_ENTERED`,

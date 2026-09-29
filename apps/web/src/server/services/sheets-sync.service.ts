@@ -1,7 +1,13 @@
 import "server-only";
 
 import { buildSheetRows } from "@/lib/sheet-rows";
-import { previousUtcDay, utcDayRange, utcDaysEndingWith, type UtcDayKey } from "@/lib/utc-day";
+import {
+  previousUtcDay,
+  utcDayKey,
+  utcDayRange,
+  utcDaysEndingWith,
+  type UtcDayKey,
+} from "@/lib/utc-day";
 import {
   SECRET_PURPOSES,
   decryptSecret,
@@ -790,5 +796,95 @@ async function safeWriteDay(
     );
 
     return "failed";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The live tab
+// ---------------------------------------------------------------------------
+
+/**
+ * Shortest gap between two writes of one website's live tab.
+ *
+ * Google allows **60 write requests per minute per user**. A write per event would exceed that at
+ * roughly one visitor per second, so the tab is refreshed on a trailing throttle instead: traffic
+ * triggers it, and this caps how often it can actually fire. Ten seconds means at most six writes a
+ * minute per website — comfortably inside the quota even with several busy websites on one Google
+ * account — while still feeling immediate to someone watching the spreadsheet.
+ */
+export const LIVE_REFRESH_INTERVAL_MS = 10_000;
+
+/** The tab today's running totals are written to. Routely owns it outright and overwrites it. */
+export const LIVE_SHEET_TITLE = "Routely live";
+
+/**
+ * Rewrites one website's live tab with today's running totals.
+ *
+ * Called from event ingestion, **after the response has been sent**, so a visitor's beacon never
+ * waits on Google. Three properties make that safe:
+ *
+ * 1. **It is throttled by a compare-and-set**, so however many events arrive — across however many
+ *    server instances — the tab is written at most once per interval.
+ * 2. **It never throws.** Ingestion is the one path that must not fail, and a spreadsheet being
+ *    unreachable is not a reason to lose a customer's tracking data. Every failure is logged and
+ *    swallowed.
+ * 3. **It touches only the live tab.** The daily history is append-only and is never rewritten,
+ *    because a customer may have built formulas against those rows.
+ *
+ * Returns whether a write happened, which is only used by tests and the manual path.
+ */
+export async function refreshLiveTab(
+  websiteId: string,
+  now: Date = new Date(),
+): Promise<{ refreshed: boolean; rows?: number; reason?: string }> {
+  if (missingConfiguration() !== null) return { refreshed: false, reason: "not configured" };
+
+  try {
+    const target = await targetRepo.claimLiveRefresh(websiteId, LIVE_REFRESH_INTERVAL_MS, now);
+
+    // Either no spreadsheet is attached, or another request refreshed it moments ago. Both are
+    // ordinary outcomes, not failures.
+    if (!target) return { refreshed: false, reason: "throttled or no destination" };
+
+    const connection = await connectionRepo.findConnectedGrant(target.website.userId);
+    if (!connection) return { refreshed: false, reason: "no usable Google grant" };
+
+    const day = utcDayKey(now);
+    const rows = await getDailyArmRows(target.website.userId, utcDayRange(day), websiteId);
+    const cells = buildSheetRows(day, rows);
+
+    const worksheet = await withAccessToken(connection, (token) =>
+      sheets.ensureWorksheet(
+        token,
+        target.spreadsheetId,
+        target.liveSheetTitle ?? LIVE_SHEET_TITLE,
+      ),
+    );
+
+    await withAccessToken(connection, (token) =>
+      sheets.overwriteWorksheet(
+        token,
+        target.spreadsheetId,
+        worksheet.title,
+        cells,
+        target.liveRowCount,
+      ),
+    );
+
+    await targetRepo.recordLiveWrite(target.id, {
+      liveSheetId: worksheet.sheetId,
+      liveSheetTitle: worksheet.title,
+      liveRowCount: cells.length,
+    });
+
+    return { refreshed: true, rows: cells.length };
+  } catch (error) {
+    // Swallowed deliberately — see (2) above. Logged without the payload, which could carry a token.
+    console.error(
+      `[routely] live sheet refresh failed for website ${websiteId}:`,
+      isAppError(error) ? error.message : "unexpected error",
+    );
+
+    return { refreshed: false, reason: "failed" };
   }
 }

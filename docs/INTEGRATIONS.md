@@ -221,6 +221,48 @@ a later "cleanup" fails loudly.
 
 ---
 
+## 5b. Two tabs: permanent history, and live today
+
+A synced spreadsheet ends up with two tabs, and the split is the whole reason both can exist:
+
+| Tab | Written | Contents |
+| --- | --- | --- |
+| the tab you chose | appended, once per day | completed days, never rewritten |
+| **`Routely live`** | overwritten as traffic arrives | today's running totals |
+
+The daily history is append-only precisely so a customer can build formulas against it without
+Routely ever moving a row underneath them. That guarantee is incompatible with showing *today*,
+because today's numbers change — so live data goes to a second tab that Routely owns outright and
+rewrites in place. The two never contend for the same cells. Deleting the live tab is safe; the next
+refresh recreates it.
+
+### Why it is throttled rather than per-event
+
+Google allows **60 write requests per minute per user** and 300 per minute per project. A write per
+page view would exceed that at roughly **one visitor per second**, so a literal "row the instant
+someone converts" design breaks at very low traffic — and would put a Google round trip inside the
+tracking hot path, where the rule is that ingestion is fast and never fails.
+
+Instead the refresh is *triggered* by traffic and *capped* by a throttle:
+
+- `/api/v1/events` schedules the refresh with Next's `after()`, so it runs **after the response is
+  sent**. Measured: beacons answer in 23–36 ms with the refresh enabled, unchanged.
+- `claimLiveRefresh` is a compare-and-set on `liveRefreshedAt`, so of any number of simultaneous
+  beacons — across any number of instances — exactly one wins. Verified: twelve simultaneous claims
+  produce one write, and a burst of ten beacons produces one.
+- `LIVE_REFRESH_INTERVAL_MS` is 10 seconds, so a website writes at most six times a minute however
+  busy it gets.
+- `refreshLiveTab` **never throws**. A spreadsheet being unreachable must not cost a customer their
+  tracking data, so every failure is logged and swallowed.
+
+`liveRowCount` is stored so a refresh can blank rows that are no longer needed — writing three rows
+over a tab that held eight would otherwise leave five stale rows below, still looking like results.
+
+The practical effect: someone watching the spreadsheet sees their own visit appear within seconds.
+Someone running a busy site sees numbers at most ten seconds stale, at a fixed and predictable cost.
+
+---
+
 ## 6. Days are UTC
 
 `utcDayRange` is the only definition of a day, and it is UTC at both ends, inclusive
@@ -393,15 +435,20 @@ through the real app.
 9. **Refresh tokens expire after 7 days while the OAuth app's publishing status is "Testing".**
    Connections made during development break roughly weekly — Google's behaviour, not a bug here.
    Google also revokes a refresh token unused for six months.
-10. **The manual "Sync now" and "Create sheet" throttles are per-process**, the same limitation
+10. **The live tab shows UTC "today", not the customer's today.** At 23:00 in UTC+13 the live tab has
+    already rolled over to a day that, locally, has barely started.
+11. **A live refresh only happens when traffic arrives.** A website with no visitors keeps whatever
+    the live tab last showed until the next event — it does not tick over to an empty day on its own.
+    The daily history is unaffected; that is written by the scheduled sweep regardless.
+12. **The manual "Sync now" and "Create sheet" throttles are per-process**, the same limitation
     `rateLimit()` already carries. Multiple instances multiply the effective limit.
-11. **Syncing a day by hand claims it.** The day chooser allows today, which writes the results *so
+13. **Syncing a day by hand claims it.** The day chooser allows today, which writes the results *so
     far* — and because the day is then claimed, the scheduled run will not add the rest of that day.
     The UI says so when today is selected. Pick yesterday for a complete day.
-12. **No backfill beyond what is already stored.** The scheduled sweep writes yesterday, plus
+14. **No backfill beyond what is already stored.** The scheduled sweep writes yesterday, plus
     automatic retries of definitely-failed runs within seven days. Days before a spreadsheet was
     attached can be written one at a time with the day chooser, but nothing does it in bulk.
-13. **Expected unique violations are logged by Prisma at error level.** A second worker losing the
+15. **Expected unique violations are logged by Prisma at error level.** A second worker losing the
     claim race is the mechanism working, but it appears in logs as
     `Unique constraint failed on ... sheets_sync_runs_websiteId_day_key`. Harmless, and not suppressed
     because silencing it would mean silencing real constraint errors too.

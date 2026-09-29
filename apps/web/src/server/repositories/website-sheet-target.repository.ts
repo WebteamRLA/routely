@@ -112,3 +112,48 @@ export function listSyncableTargets(client: DbClient = db): Promise<TargetWithWe
     orderBy: { attachedAt: "asc" },
   });
 }
+
+/**
+ * Claims the right to refresh one website's live tab, or reports that someone else has it.
+ *
+ * This is the throttle, and it is a compare-and-set rather than a read-then-write on purpose.
+ * Ingestion is concurrent by nature — several beacons can arrive in the same second, across several
+ * instances — and a read-then-write would let all of them decide to refresh. `updateMany` with the
+ * previously observed `liveRefreshedAt` in the `where` means exactly one wins: the others match zero
+ * rows and skip. The same structural trick the sync-run claim uses.
+ *
+ * Returns the target when the claim succeeded, `null` when it did not or when the interval has not
+ * elapsed. A caller that gets `null` must do nothing at all.
+ */
+export async function claimLiveRefresh(
+  websiteId: string,
+  minIntervalMs: number,
+  now: Date = new Date(),
+  client: DbClient = db,
+): Promise<TargetWithWebsite | null> {
+  const target = await client.websiteSheetTarget.findUnique({
+    where: { websiteId },
+    include: WEBSITE_INCLUDE,
+  });
+
+  if (!target) return null;
+
+  const last = target.liveRefreshedAt?.getTime() ?? 0;
+  if (now.getTime() - last < minIntervalMs) return null;
+
+  const claimed = await client.websiteSheetTarget.updateMany({
+    where: { id: target.id, liveRefreshedAt: target.liveRefreshedAt },
+    data: { liveRefreshedAt: now },
+  });
+
+  return claimed.count === 1 ? target : null;
+}
+
+/** Records the shape of what the live tab now holds, so the next refresh can blank the difference. */
+export function recordLiveWrite(
+  targetId: string,
+  data: { liveSheetId: number; liveSheetTitle: string; liveRowCount: number },
+  client: DbClient = db,
+): Promise<Prisma.BatchPayload> {
+  return client.websiteSheetTarget.updateMany({ where: { id: targetId }, data });
+}
