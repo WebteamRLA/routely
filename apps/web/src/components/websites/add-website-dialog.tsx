@@ -7,6 +7,7 @@ import { Plus } from "lucide-react";
 
 import { Field } from "@/components/common/field";
 import { SubmitButton } from "@/components/common/submit-button";
+import { AttachSheetControls } from "@/components/integrations/attach-sheet-controls";
 import { DomainField } from "@/components/websites/domain-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,12 +20,34 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import type { SiteProtocol } from "@/generated/prisma/enums";
+import { routes } from "@/lib/routes";
+import {
+  attachPickedSheetAction,
+  createSheetAction,
+  getPickerTokenAction,
+  listWorksheetsAction,
+} from "@/server/actions/integration.actions";
 import {
   createWebsiteInlineAction,
   type CreateWebsiteInlineState,
 } from "@/server/actions/website.actions";
 
 const IDLE: CreateWebsiteInlineState = { status: "idle" };
+
+/**
+ * Enables the optional "attach a Google Sheet" step after the website is created.
+ *
+ * Opt-in rather than always-on, because two callers must not have it: the experiment wizard, which
+ * closes this dialog immediately and appends the new website to a picker, and the new-experiment
+ * page, which does the same. Adding a step there would interrupt a flow that is about experiments,
+ * not spreadsheets.
+ */
+export interface SheetStepConfig {
+  /** Whether the account already holds a Google grant. False shows a link to connect one. */
+  connected: boolean;
+  developerKey?: string;
+  projectNumber?: string;
+}
 
 export interface CreatedWebsite {
   id: string;
@@ -116,12 +139,16 @@ function AddWebsiteForm({
 export function AddWebsiteDialog({
   onCreated,
   trigger = DEFAULT_TRIGGER,
+  sheetStep,
 }: {
   onCreated?: (website: CreatedWebsite) => void;
   trigger?: React.ReactNode;
+  /** When given, the dialog offers a Google Sheet for the new website before closing. */
+  sheetStep?: SheetStepConfig;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [created, setCreated] = useState<CreatedWebsite | null>(null);
 
   // Remounts the form on each open so its action state starts fresh. Without this, the result
   // of the previous submission would still be showing — and a second website could not be
@@ -129,17 +156,38 @@ export function AddWebsiteDialog({
   const [session, setSession] = useState(0);
 
   function handleOpenChange(next: boolean) {
-    if (next) setSession((value) => value + 1);
+    if (next) {
+      setSession((value) => value + 1);
+      setCreated(null);
+    }
     setOpen(next);
+
+    // Closing after the sheet step — by the X, Escape or a click outside — still has to refresh, or
+    // the page behind would not show the website that was created.
+    if (!next && created && !onCreated) router.refresh();
   }
 
   function handleSuccess(website: CreatedWebsite) {
-    setOpen(false);
+    // A caller that wants the created row takes it immediately; the sheet step is not for them.
     if (onCreated) {
+      setOpen(false);
       onCreated(website);
-    } else {
-      router.refresh();
+      return;
     }
+
+    if (sheetStep) {
+      setCreated(website);
+      return;
+    }
+
+    setOpen(false);
+    router.refresh();
+  }
+
+  function finishSheetStep() {
+    setOpen(false);
+    setCreated(null);
+    router.refresh();
   }
 
   return (
@@ -147,14 +195,61 @@ export function AddWebsiteDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
 
       <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add a website</DialogTitle>
-          <DialogDescription>
-            A website groups your experiments and gives you one tracking snippet to install.
-          </DialogDescription>
-        </DialogHeader>
+        {created && sheetStep ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Send {created.name}&rsquo;s results to Google Sheets?</DialogTitle>
+              <DialogDescription>
+                Optional. Routely will append yesterday&rsquo;s results to this website&rsquo;s own
+                spreadsheet once a day. You can set this up later from the website&rsquo;s page.
+              </DialogDescription>
+            </DialogHeader>
 
-        <AddWebsiteForm key={session} onSuccess={handleSuccess} onCancel={() => setOpen(false)} />
+            {sheetStep.connected ? (
+              <AttachSheetControls
+                compact
+                websiteId={created.id}
+                developerKey={sheetStep.developerKey}
+                projectNumber={sheetStep.projectNumber}
+                getPickerToken={getPickerTokenAction}
+                attachSheet={attachPickedSheetAction}
+                listWorksheets={listWorksheetsAction}
+                createSheetAction={createSheetAction}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Connect your Google account once on the{" "}
+                <a href={routes.integrations} className="font-medium underline">
+                  Integrations
+                </a>{" "}
+                page, then you can attach a spreadsheet to this website without signing in again.
+              </p>
+            )}
+
+            <div className="flex justify-end pt-1">
+              {/* "Done" rather than "Skip": the website is already created, so this button closes a
+               * finished flow rather than abandoning one. */}
+              <Button type="button" onClick={finishSheetStep}>
+                Done
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle>Add a website</DialogTitle>
+              <DialogDescription>
+                A website groups your experiments and gives you one tracking snippet to install.
+              </DialogDescription>
+            </DialogHeader>
+
+            <AddWebsiteForm
+              key={session}
+              onSuccess={handleSuccess}
+              onCancel={() => setOpen(false)}
+            />
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

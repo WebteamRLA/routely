@@ -282,3 +282,49 @@ version of the code still runs against the new schema. `DATABASE.md` covers the 
 - [ ] Deployed; `/sdk.js` returns 200 and `/experiments` returns 307
 - [ ] Signed in with Google end to end
 - [ ] **Rate limiting replaced with a shared store before real traffic** (§7)
+
+---
+
+## Scheduled jobs (Google Sheets daily sync)
+
+`vercel.json` registers one cron job:
+
+```json
+"crons": [{ "path": "/api/cron/sheets-sync", "schedule": "20 0 * * *" }]
+```
+
+**Crons only register on a production deployment.** Until one happens the array does nothing at
+all — with no error and no warning, just no invocations. Confirm the job is listed under
+**Settings → Cron Jobs** after deploying.
+
+Two environment variables must be set on the project **before** that deploy:
+
+| Variable | Purpose | Consequence if absent |
+| --- | --- | --- |
+| `TOKEN_ENCRYPTION_KEY` | Encrypts Google refresh tokens at rest (`openssl rand -base64 32`) | `/integrations` reports itself unavailable; nothing else affected |
+| `CRON_SECRET` | Bearer token the cron endpoint requires (`openssl rand -hex 32`) | The endpoint returns 503 and refuses to run |
+| `NEXT_PUBLIC_GOOGLE_API_KEY` | Google Picker, so customers can choose an existing spreadsheet | Only "create a new sheet" is offered |
+| `NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER` | The Picker's `appId` — the digits before the dash in the client id | Same; a picked file would not be linked to the app |
+
+Vercel sends an environment variable of the exact name `CRON_SECRET` as
+`Authorization: Bearer <value>` on cron invocations, which is why the name is not ours to choose.
+
+Neither variable is in `env.ts`'s `REQUIRED_IN_PRODUCTION`: a deployment without the Sheets
+integration is fully functional, and adding them there would fail an existing production server at
+start-up on the next deploy.
+
+**Check the current plan limits before relying on specifics.** The number of cron jobs allowed, the
+precision with which a daily job fires, and the `maxDuration` ceiling (`export const maxDuration =
+60` in the route) all differ by plan and Vercel has changed them more than once. The design is
+insensitive to the answer — a per-day claim row makes a late, early or duplicated invocation
+harmless — but a `maxDuration` above the plan's ceiling is rejected at deploy time.
+
+The Google Cloud Console also needs, on the existing OAuth client:
+
+- a second authorised **redirect URI**: `https://<your-origin>/api/integrations/google/callback`
+- the production origin among the authorised **JavaScript origins**, for the Picker
+- **Google Sheets API**, **Google Drive API** and **Google Picker API** all enabled
+
+The integration's scopes are all non-sensitive (`openid`, `userinfo.email`, `drive.file`), so no
+Google verification review is required and the app can be published straight away. See
+`docs/INTEGRATIONS.md` §3.

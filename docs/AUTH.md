@@ -113,6 +113,14 @@ for that address take over the existing one. The cost of leaving it off is the
 6. On the OAuth consent screen, the `openid`, `profile` and `email` scopes are sufficient —
    no additional scopes are requested.
 
+> **The Google Sheets integration is a second, separate Google flow**, over its own routes
+> (`/api/integrations/google/{start,callback}`) and writing to its own table
+> (`sheets_connections`). It is deliberately *not* this provider: adding `spreadsheets` and Drive
+> scopes here would force every customer to grant Drive access merely to sign in, and `Account`'s
+> `@@unique([provider, providerAccountId])` means a second consent for the same Google account
+> would write over the sign-in row that the Auth.js adapter owns. Nothing in this document's
+> model is touched by it. See `docs/INTEGRATIONS.md`.
+
 The redirect URI must match **exactly**, including scheme and the absence of a trailing slash.
 A mismatch produces Google's `redirect_uri_mismatch` error before Auth.js is ever reached.
 

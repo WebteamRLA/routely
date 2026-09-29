@@ -69,11 +69,71 @@ const serverSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+
+  /**
+   * 32 random bytes, base64, used to encrypt integration refresh tokens at rest — see
+   * `src/server/crypto.ts`. Generate with `openssl rand -base64 32`.
+   *
+   * Deliberately **not** `AUTH_SECRET`. Rotating `AUTH_SECRET` is a cheap, routine operation
+   * whose whole effect is that everybody signs in again. Rotating this one makes every stored
+   * refresh token permanently undecryptable, so every customer must reconnect their Google
+   * account and every daily sync fails until they do. Sharing one variable between those two
+   * operations would mean a cheap rotation silently triggering an expensive, invisible outage.
+   *
+   * Validated by shape rather than by decoding, because this module is evaluated in the browser
+   * bundle too and `Buffer` is not available there. The decode, and the real length assertion,
+   * happen in `crypto.ts`.
+   *
+   * Absent, the Sheets integration reports itself unavailable. It never falls back to storing a
+   * token in the clear.
+   */
+  TOKEN_ENCRYPTION_KEY: z
+    .string()
+    .regex(
+      /^[A-Za-z0-9+/]{43}=$/,
+      "must be 32 random bytes, base64-encoded — generate with: openssl rand -base64 32",
+    )
+    .optional(),
+
+  /**
+   * Shared secret the scheduled sync endpoint requires as a bearer token.
+   *
+   * On Vercel, an environment variable of this exact name is sent as
+   * `Authorization: Bearer <value>` on cron invocations, which is why the name is not ours to
+   * choose. Unset in production, `/api/cron/sheets-sync` refuses every request rather than
+   * running unauthenticated.
+   */
+  CRON_SECRET: z.string().min(16, "must be at least 16 characters").optional(),
 });
 
 const clientSchema = z.object({
   /** Public origin of the dashboard. Used for absolute links and install snippets. */
   NEXT_PUBLIC_APP_URL: z.url().default(() => vercelOrigin() ?? "http://localhost:3000"),
+
+  /**
+   * Google API key for the Google Picker, which runs in the browser.
+   *
+   * Public by necessity — the Picker reads it from page script — and safe to be, because an API key
+   * identifies the calling project rather than authorising anything: every file operation is
+   * authorised by the customer's own OAuth token, not by this. Restrict it in the Google console to
+   * the Picker API and to your own domains; note that "your domains" must include
+   * `https://docs.google.com/*` as well, or the Picker fails to load.
+   *
+   * Unset, the picker is unavailable and the UI offers creating a new spreadsheet instead.
+   */
+  NEXT_PUBLIC_GOOGLE_API_KEY: z.string().min(1).optional(),
+
+  /**
+   * The Google Cloud project *number* (all digits), which the Picker requires as its `appId`.
+   *
+   * It is the digits before the dash in the OAuth client id. Needed so Google can tell which app is
+   * being granted per-file access when the customer picks a spreadsheet — without it, a picked file
+   * is not actually shared with this app and the subsequent write 404s.
+   */
+  NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER: z
+    .string()
+    .regex(/^\d{6,30}$/, "must be the all-digits Google Cloud project number")
+    .optional(),
 
   /**
    * Absolute URL of the tracking SDK bundle, as it appears in the install snippet customers
@@ -100,6 +160,8 @@ const clientRuntime = {
   // so a value left over from a local .env cannot leak into production snippets.
   NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || undefined,
   NEXT_PUBLIC_SDK_URL: process.env.NEXT_PUBLIC_SDK_URL,
+  NEXT_PUBLIC_GOOGLE_API_KEY: process.env.NEXT_PUBLIC_GOOGLE_API_KEY,
+  NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER: process.env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER,
 };
 
 type ServerEnv = z.infer<typeof serverSchema>;

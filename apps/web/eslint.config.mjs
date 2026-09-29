@@ -42,7 +42,7 @@ const eslintConfig = defineConfig([
 
   {
     // Server modules and CLI scripts legitimately write to stdout.
-    files: ["src/server/**/*.ts", "prisma/**/*.ts"],
+    files: ["src/server/**/*.ts", "prisma/**/*.ts", "scripts/**/*.ts"],
     rules: { "no-console": "off" },
   },
 ]);

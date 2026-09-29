@@ -3,5 +3,11 @@
   "buildCommand": "npm run vercel-build",
   "installCommand": "npm install",
   "framework": "nextjs",
-  "outputDirectory": "apps/web/.next"
+  "outputDirectory": "apps/web/.next",
+  "crons": [
+    {
+      "path": "/api/cron/sheets-sync",
+      "schedule": "20 0 * * *"
+    }
+  ]
 }

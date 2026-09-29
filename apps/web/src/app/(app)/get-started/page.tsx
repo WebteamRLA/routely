@@ -13,6 +13,7 @@ import { verifyPixelAction } from "@/server/actions/pixel.actions";
 import { deleteWebsitesAction } from "@/server/actions/website.actions";
 import { requireUser } from "@/server/auth/session";
 import * as overviewService from "@/server/services/overview.service";
+import { getIntegrationOverview } from "@/server/services/sheets-sync.service";
 import * as websiteService from "@/server/services/website.service";
 
 export const metadata: Metadata = { title: "Get started" };
@@ -35,10 +36,12 @@ export default async function GetStartedPage() {
   const user = await requireUser();
   // Fetched together: both describe the same account, and running them in sequence would make
   // the first screen after signing in wait for two round trips instead of one.
-  const [entries, stats, charts] = await Promise.all([
+  const [entries, stats, charts, sheets] = await Promise.all([
     websiteService.listWebsitesWithStatus(user.id),
     overviewService.getOverviewStats(user.id),
     overviewService.getOverviewCharts(user.id),
+    // Only to decide whether the add-website dialog can offer a spreadsheet. Makes no Google call.
+    getIntegrationOverview(user.id),
   ]);
 
   return (
@@ -61,6 +64,11 @@ export default async function GetStartedPage() {
       <WebsitesTable
         entries={entries}
         sdkUrl={env.SDK_URL}
+        sheetStep={{
+          connected: sheets.connection?.status === "CONNECTED" && sheets.connection.canUseSheets,
+          developerKey: env.NEXT_PUBLIC_GOOGLE_API_KEY,
+          projectNumber: env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER,
+        }}
         verifyAction={verifyPixelAction}
         deleteAction={deleteWebsitesAction}
       />

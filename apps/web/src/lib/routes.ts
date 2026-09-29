@@ -19,6 +19,13 @@ export const routes = {
   /** Public, token-addressed results page. Deliberately outside the protected prefixes. */
   share: (token: string) => `/share/${encodeURIComponent(token)}`,
 
+  /** Where a customer connects Google Sheets and sees the daily sync's history.
+   *
+   * A plain string rather than a namespace: there is exactly one integration, so this page *is*
+   * the Google Sheets page. When a second one exists, this becomes the list and the Sheets page
+   * moves to `/integrations/google-sheets` — which is one edit here, and nowhere else. */
+  integrations: "/integrations",
+
   /** Conversion goals across every experiment, viewed as a list of measurable actions. */
   metrics: {
     list: "/metrics",
@@ -56,6 +63,7 @@ export const PROTECTED_PREFIXES = [
   "/websites",
   "/experiments",
   "/metrics",
+  "/integrations",
 ] as const;
 
 export function isProtectedPath(pathname: string): boolean {

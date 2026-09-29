@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, FlaskConical, Plus } from "lucide-react";
 
 import { EmptyState } from "@/components/common/empty-state";
+import { WebsiteSheetCard } from "@/components/integrations/website-sheet-card";
 import { ExperimentRow } from "@/components/experiments/experiment-row";
 import { PageHeader } from "@/components/common/page-header";
 import { CopyValue } from "@/components/websites/copy-value";
@@ -13,12 +14,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { env } from "@/env";
 import { formatDate } from "@/lib/format";
 import { routes } from "@/lib/routes";
+import {
+  attachPickedSheetAction,
+  createSheetAction,
+  detachSheetAction,
+  getPickerTokenAction,
+  listWorksheetsAction,
+  syncDayAction,
+} from "@/server/actions/integration.actions";
 import { deleteWebsiteAction, updateWebsiteAction } from "@/server/actions/website.actions";
 import { requireUser } from "@/server/auth/session";
 import { isAppError } from "@/server/errors";
 import * as experimentService from "@/server/services/experiment.service";
+import { getWebsiteSheetStatus } from "@/server/services/sheets-sync.service";
 import * as websiteService from "@/server/services/website.service";
 
 export const metadata: Metadata = { title: "Website" };
@@ -45,7 +56,11 @@ export default async function WebsitePage({ params }: { params: Promise<{ websit
     throw error;
   });
 
-  const experiments = await experimentService.listExperiments(user.id, website.id);
+  // Fetched together: both describe the same website, and the sheet status makes no Google call.
+  const [experiments, sheetStatus] = await Promise.all([
+    experimentService.listExperiments(user.id, website.id),
+    getWebsiteSheetStatus(user.id, website.id),
+  ]);
   const activeCount = experiments.filter((experiment) => experiment.status === "ACTIVE").length;
 
   return (
@@ -139,6 +154,92 @@ export default async function WebsitePage({ params }: { params: Promise<{ websit
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-medium">Google Sheets</h2>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Daily results export</CardTitle>
+            <CardDescription>
+              Once a day, Routely appends this website&rsquo;s results for the previous day to a
+              spreadsheet — one row per experiment arm. Optional, and it never changes rows already
+              written.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!sheetStatus.configured ? (
+              <p className="text-sm text-muted-foreground">
+                This integration is not configured on this deployment.
+              </p>
+            ) : !sheetStatus.connected ? (
+              <p className="text-sm text-muted-foreground">
+                Connect your Google account once on the{" "}
+                <Link href={routes.integrations} className="font-medium underline">
+                  Integrations
+                </Link>{" "}
+                page, then you can attach a spreadsheet here without signing in again.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {sheetStatus.needsReconnect ? (
+                  <p className="text-sm text-destructive">
+                    Google access has stopped working.{" "}
+                    <Link href={routes.integrations} className="font-medium underline">
+                      Reconnect
+                    </Link>{" "}
+                    to resume the daily sync. This website keeps its spreadsheet.
+                  </p>
+                ) : null}
+
+                <WebsiteSheetCard
+                  websiteId={website.id}
+                  destination={sheetStatus.destination}
+                  developerKey={env.NEXT_PUBLIC_GOOGLE_API_KEY}
+                  projectNumber={env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER}
+                  getPickerToken={getPickerTokenAction}
+                  attachSheet={attachPickedSheetAction}
+                  listWorksheets={listWorksheetsAction}
+                  createSheetAction={createSheetAction}
+                  detachSheetAction={detachSheetAction}
+                  syncDayAction={syncDayAction}
+                  canSync={!sheetStatus.needsReconnect}
+                />
+
+                {sheetStatus.recentRuns.length > 0 ? (
+                  <div className="space-y-2 border-t border-border/70 pt-4">
+                    <h4 className="text-sm font-medium">Recent syncs</h4>
+                    <ul className="space-y-1 text-sm">
+                      {sheetStatus.recentRuns.map((run) => (
+                        <li key={run.id} className="flex flex-wrap items-baseline gap-x-2">
+                          <span className="font-mono text-xs text-muted-foreground">{run.day}</span>
+                          <span
+                            className={
+                              run.status === "SUCCEEDED"
+                                ? "text-muted-foreground"
+                                : run.status === "UNKNOWN"
+                                  ? "text-amber-700 dark:text-amber-500"
+                                  : "text-destructive"
+                            }
+                          >
+                            {run.status === "SUCCEEDED"
+                              ? run.rowsWritten === 0
+                                ? "nothing to write"
+                                : `${run.rowsWritten} ${run.rowsWritten === 1 ? "row" : "rows"} written`
+                              : run.status === "PENDING"
+                                ? "in progress"
+                                : (run.error ?? run.status.toLowerCase())}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </section>
 
       <section className="space-y-4">

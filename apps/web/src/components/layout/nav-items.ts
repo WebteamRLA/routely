@@ -1,4 +1,4 @@
-import { FlaskConical, Rocket, Target, type LucideIcon } from "lucide-react";
+import { FlaskConical, Plug, Rocket, Target, type LucideIcon } from "lucide-react";
 
 import { routes } from "@/lib/routes";
 
@@ -21,6 +21,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: routes.getStarted, label: "Get started", icon: Rocket, exact: true },
   { href: routes.experiments.list, label: "Experiments", icon: FlaskConical, exact: true },
   { href: routes.metrics.list, label: "Metrics", icon: Target, exact: true },
+  { href: routes.integrations, label: "Integrations", icon: Plug, exact: true },
 ];
 
 export function isNavItemActive(item: NavItem, pathname: string): boolean {

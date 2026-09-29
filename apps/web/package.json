@@ -16,7 +16,8 @@
     "db:studio": "prisma studio",
     "db:seed": "node scripts/assert-local-db.mjs && tsx prisma/seed.ts",
     "db:verify": "tsx prisma/verify.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "sheets:sync": "tsx --conditions=react-server scripts/sync-sheets.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.3",
