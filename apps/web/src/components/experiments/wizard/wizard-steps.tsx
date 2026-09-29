@@ -9,7 +9,7 @@ import {
   type DistributionArm,
 } from "@/components/experiments/traffic-distribution";
 import { WizardStepCard } from "@/components/experiments/wizard/wizard-step-card";
-import { AddWebsiteDialog } from "@/components/websites/add-website-dialog";
+import { AddWebsiteDialog, type SheetStepConfig } from "@/components/websites/add-website-dialog";
 import type {
   WizardValues,
   WizardVariant,
@@ -34,6 +34,7 @@ export function WebsiteStep({
   onCreate,
   errors,
   onNext,
+  sheetStep,
 }: {
   websites: WizardWebsite[];
   websiteId: string;
@@ -41,6 +42,8 @@ export function WebsiteStep({
   onCreate: (website: WizardWebsite) => void;
   errors: FieldErrors;
   onNext: () => void;
+  /** Offers a Google Sheet for a website added here, exactly as the dashboard does. */
+  sheetStep?: SheetStepConfig;
 }) {
   return (
     <WizardStepCard
@@ -78,7 +81,7 @@ export function WebsiteStep({
         })}
       </div>
 
-      <AddWebsiteDialog onCreated={onCreate} />
+      <AddWebsiteDialog onCreated={onCreate} sheetStep={sheetStep} />
 
       {errors?.websiteId?.length ? (
         <p className="text-xs text-destructive">{errors.websiteId.join(" ")}</p>

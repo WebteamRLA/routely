@@ -167,12 +167,15 @@ export function AddWebsiteDialog({
   }
 
   function handleSuccess(website: CreatedWebsite) {
-    // A caller that wants the created row takes it immediately; the sheet step is not for them.
-    if (onCreated) {
-      setOpen(false);
-      onCreated(website);
-      return;
-    }
+    /*
+     * A caller that wants the created row is told **immediately**, before the sheet step is shown.
+     *
+     * That ordering matters for the experiment wizard: it appends the new website to its picker and
+     * selects it, and making that wait until the dialog closed would leave the wizard looking like
+     * nothing had happened while the sheet step was open. Telling it now means the website is
+     * already chosen behind the dialog, and attaching a spreadsheet is genuinely optional on top.
+     */
+    onCreated?.(website);
 
     if (sheetStep) {
       setCreated(website);
@@ -180,13 +183,15 @@ export function AddWebsiteDialog({
     }
 
     setOpen(false);
-    router.refresh();
+    // Only when nobody is listening: a caller with `onCreated` updates its own state and a refresh
+    // would throw away the wizard's half-filled form.
+    if (!onCreated) router.refresh();
   }
 
   function finishSheetStep() {
     setOpen(false);
     setCreated(null);
-    router.refresh();
+    if (!onCreated) router.refresh();
   }
 
   return (
@@ -199,8 +204,9 @@ export function AddWebsiteDialog({
             <DialogHeader>
               <DialogTitle>Send {created.name}&rsquo;s results to Google Sheets?</DialogTitle>
               <DialogDescription>
-                Optional. Routely will append yesterday&rsquo;s results to this website&rsquo;s own
-                spreadsheet once a day. You can set this up later from the website&rsquo;s page.
+                Optional. Routely will keep a spreadsheet up to date with this website&rsquo;s last
+                30 days of results, refreshed within seconds of a visit or a conversion. You can set
+                this up later from the website&rsquo;s page.
               </DialogDescription>
             </DialogHeader>
 
