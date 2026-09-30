@@ -13,7 +13,6 @@ import { createExperimentAction } from "@/server/actions/experiment.actions";
 import { verifyPixelAction } from "@/server/actions/pixel.actions";
 import { requireUser } from "@/server/auth/session";
 import * as experimentService from "@/server/services/experiment.service";
-import { getIntegrationOverview } from "@/server/services/sheets-sync.service";
 import * as websiteService from "@/server/services/website.service";
 
 export const metadata: Metadata = { title: "New experiment" };
@@ -24,19 +23,11 @@ export default async function NewExperimentPage({
   searchParams: Promise<{ websiteId?: string }>;
 }) {
   const user = await requireUser();
-  const [{ websiteId }, websites, activeExperiments, sheets] = await Promise.all([
+  const [{ websiteId }, websites, activeExperiments] = await Promise.all([
     searchParams,
     websiteService.listWebsites(user.id),
     experimentService.listAllExperiments(user.id, { status: "ACTIVE" }),
-    // Only to decide whether the add-website dialog can offer a spreadsheet. Makes no Google call.
-    getIntegrationOverview(user.id),
   ]);
-
-  const sheetStep = {
-    connected: sheets.connection?.status === "CONNECTED" && sheets.connection.canUseSheets,
-    developerKey: env.NEXT_PUBLIC_GOOGLE_API_KEY,
-    projectNumber: env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER,
-  };
 
   // Only the actor's own websites are offered, and the action re-checks ownership anyway —
   // a websiteId typed into the query string cannot select somebody else's website.
@@ -73,7 +64,6 @@ export default async function NewExperimentPage({
           description="An experiment belongs to a website, which is what supplies the tracking snippet and the domain its URLs must be on."
           action={
             <AddWebsiteDialog
-              sheetStep={sheetStep}
               trigger={
                 <Button>
                   <Plus aria-hidden />
@@ -86,7 +76,6 @@ export default async function NewExperimentPage({
       ) : (
         <ExperimentWizard
           action={createExperimentAction}
-          sheetStep={sheetStep}
           websites={websites.map(({ id, name, domain, protocol, publicSiteId }) => ({
             id,
             name,

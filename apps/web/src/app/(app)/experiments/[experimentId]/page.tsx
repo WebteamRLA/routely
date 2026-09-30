@@ -5,7 +5,7 @@ import { ArrowLeft, Target } from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
 import { DeleteExperimentDialog } from "@/components/experiments/delete-experiment-dialog";
-import { ExperimentForm } from "@/components/experiments/experiment-form";
+import { ExperimentConfiguration } from "@/components/experiments/experiment-configuration";
 import { RangePicker } from "@/components/experiments/range-picker";
 import { ExperimentResults } from "@/components/experiments/results";
 import { SharePanel } from "@/components/experiments/share-panel";
@@ -21,7 +21,6 @@ import { armShares } from "@/lib/traffic";
 import {
   changeExperimentStatusAction,
   deleteExperimentAction,
-  updateExperimentAction,
 } from "@/server/actions/experiment.actions";
 import {
   disableSharingAction,
@@ -240,21 +239,18 @@ export default async function ExperimentPage({
       />
 
       <section className="space-y-4">
-        <h2 className="text-lg font-medium">Settings</h2>
+        <h2 className="text-lg font-medium">Configuration</h2>
         <Card>
           <CardHeader>
-            <CardTitle>Edit experiment</CardTitle>
+            <CardTitle>How this experiment is set up</CardTitle>
             <CardDescription>
-              {isDraft
-                ? "Change anything you like while this is still a draft."
-                : "The name and description can be edited at any time. The URLs are fixed once the experiment has started."}
+              Fixed once the experiment exists. Archive it and create a new one to test something
+              else.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ExperimentForm
-              action={updateExperimentAction}
-              experimentId={experiment.id}
-              urlsLocked={!isDraft}
+            <ExperimentConfiguration
+              hasStarted={!isDraft}
               defaults={{
                 name: experiment.name,
                 description: experiment.description ?? undefined,
@@ -271,8 +267,6 @@ export default async function ExperimentPage({
                 primaryMetric: experiment.primaryMetric,
                 trafficAllocation: experiment.trafficAllocation,
               }}
-              submitLabel="Save changes"
-              pendingLabel="Saving…"
             />
 
             <Separator className="my-6" />

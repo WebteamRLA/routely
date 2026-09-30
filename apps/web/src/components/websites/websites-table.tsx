@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 import { PixelSetupDialog } from "@/components/get-started/pixel-setup-dialog";
-import { AddWebsiteDialog, type SheetStepConfig } from "@/components/websites/add-website-dialog";
+import { AddWebsiteDialog } from "@/components/websites/add-website-dialog";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -284,14 +284,11 @@ export function WebsitesTable({
   sdkUrl,
   verifyAction,
   deleteAction,
-  sheetStep,
 }: {
   entries: WebsiteWithStatus[];
   sdkUrl: string;
   verifyAction: (state: FormState, formData: FormData) => Promise<FormState>;
   deleteAction: (state: FormState, formData: FormData) => Promise<FormState>;
-  /** Offers a Google Sheet for a newly added website. Passed straight to the dialog. */
-  sheetStep?: SheetStepConfig;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
@@ -335,7 +332,6 @@ export function WebsitesTable({
             />
           ) : null}
           <AddWebsiteDialog
-            sheetStep={sheetStep}
             trigger={
               <Button size="sm">
                 <Plus aria-hidden />
@@ -391,7 +387,6 @@ export function WebsitesTable({
             </p>
           </div>
           <AddWebsiteDialog
-            sheetStep={sheetStep}
             trigger={
               <Button size="sm">
                 <Plus aria-hidden />

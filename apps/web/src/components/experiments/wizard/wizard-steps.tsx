@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Plus, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 
 import { AudienceSegments } from "@/components/experiments/wizard/audience-segments";
 import { GoalTypes } from "@/components/experiments/wizard/goal-types";
@@ -9,7 +9,7 @@ import {
   type DistributionArm,
 } from "@/components/experiments/traffic-distribution";
 import { WizardStepCard } from "@/components/experiments/wizard/wizard-step-card";
-import { AddWebsiteDialog, type SheetStepConfig } from "@/components/websites/add-website-dialog";
+import { AddWebsiteDialog } from "@/components/websites/add-website-dialog";
 import type {
   WizardValues,
   WizardVariant,
@@ -34,7 +34,6 @@ export function WebsiteStep({
   onCreate,
   errors,
   onNext,
-  sheetStep,
 }: {
   websites: WizardWebsite[];
   websiteId: string;
@@ -42,8 +41,6 @@ export function WebsiteStep({
   onCreate: (website: WizardWebsite) => void;
   errors: FieldErrors;
   onNext: () => void;
-  /** Offers a Google Sheet for a website added here, exactly as the dashboard does. */
-  sheetStep?: SheetStepConfig;
 }) {
   return (
     <WizardStepCard
@@ -81,7 +78,7 @@ export function WebsiteStep({
         })}
       </div>
 
-      <AddWebsiteDialog onCreated={onCreate} sheetStep={sheetStep} />
+      <AddWebsiteDialog onCreated={onCreate} />
 
       {errors?.websiteId?.length ? (
         <p className="text-xs text-destructive">{errors.websiteId.join(" ")}</p>
@@ -98,7 +95,6 @@ export function ProfileStep({
   values,
   onChange,
   onVariantUrlChange,
-  onAddVariant,
   onRemoveVariant,
   origin,
   errors,
@@ -111,7 +107,6 @@ export function ProfileStep({
     value: WizardValues[K],
   ) => void;
   onVariantUrlChange: (index: number, url: string) => void;
-  onAddVariant: () => void;
   onRemoveVariant: (index: number) => void;
   /** Scheme + host, e.g. `https://acme.com` — used for URL placeholders. */
   origin?: string;
@@ -196,14 +191,12 @@ export function ProfileStep({
           />
         ))}
 
-        <button
-          type="button"
-          onClick={onAddVariant}
-          className="w-full cursor-pointer rounded-lg border border-dashed border-border/70 py-2.5 text-center text-sm font-medium text-muted-foreground transition-colors outline-none hover:border-primary/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Plus className="mr-1.5 inline size-3.5" aria-hidden />
-          Add URL Variant
-        </button>
+        {/* The "Add URL Variant" button is deliberately absent: an experiment is one control
+         * against one variant for now. Everything underneath still handles a list — the schema,
+         * the weighted draw, the results table and the Sheets export are all written for any
+         * number of arms — so restoring multi-variant is putting this button back, not rebuilding
+         * the feature. Experiments created earlier with several variants still render and still
+         * work. */}
 
         {/* Zod collapses every issue under a nested array path (variants.N.url) to the single
          * top-level key "variants", so a validation failure can't be pinned to one row — shown

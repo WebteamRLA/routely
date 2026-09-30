@@ -24,7 +24,6 @@ import type {
   WizardValues,
   WizardWebsite,
 } from "@/components/experiments/wizard/wizard-types";
-import type { SheetStepConfig } from "@/components/websites/add-website-dialog";
 import { IDLE, type FormState } from "@/lib/form-state";
 import { siteOrigin } from "@/lib/site-url";
 import { armShares } from "@/lib/traffic";
@@ -71,7 +70,6 @@ export function ExperimentWizard({
   preselectedWebsiteId,
   sdkUrl,
   verifyAction,
-  sheetStep,
 }: {
   action: (state: FormState, formData: FormData) => Promise<FormState>;
   websites: WizardWebsite[];
@@ -80,8 +78,6 @@ export function ExperimentWizard({
   /** Passed through to the summary, whose install check can open the pixel setup guide. */
   sdkUrl: string;
   verifyAction: (state: FormState, formData: FormData) => Promise<FormState>;
-  /** Offers a Google Sheet for a website added from inside the wizard. */
-  sheetStep?: SheetStepConfig;
 }) {
   const [state, formAction, isPending] = useActionState(action, IDLE);
   // Paired with the step-jumping below: the toast says what went wrong, the jump puts the
@@ -131,15 +127,6 @@ export function ExperimentWizard({
       variants: previous.variants.map((variant, i) =>
         i === index ? { ...variant, url } : variant,
       ),
-    }));
-  }
-
-  function addVariant() {
-    setValues((previous) => ({
-      ...previous,
-      // A new arm joins on the same footing as control rather than inheriting a weight that
-      // would silently favour it.
-      variants: [...previous.variants, { url: "", weight: previous.controlWeight }],
     }));
   }
 
@@ -346,7 +333,6 @@ export function ExperimentWizard({
             onCreate={handleWebsiteCreated}
             errors={fieldErrors}
             onNext={advance}
-            sheetStep={sheetStep}
           />
         </div>
 
@@ -355,7 +341,6 @@ export function ExperimentWizard({
             values={values}
             onChange={set}
             onVariantUrlChange={setVariantUrl}
-            onAddVariant={addVariant}
             onRemoveVariant={removeVariant}
             origin={origin}
             errors={fieldErrors}
