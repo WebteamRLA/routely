@@ -1,49 +1,38 @@
-import { PageHeaderSkeleton } from "@/components/common/loading-state";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
- * Mirrors the shape of the loaded page — the configuration card, then the two result columns —
- * so the layout does not jump when the aggregation queries return.
+ * Mirrors the design's loading state for experiment detail: the title block, the tab row, then
+ * the two shimmer blocks standing in for the verdict hero and the comparison table — so the
+ * layout does not jump when the aggregation queries return.
  */
 export default function ExperimentLoading() {
   return (
-    <>
-      <PageHeaderSkeleton />
-
-      <Card>
-        <CardHeader className="space-y-2">
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-4 w-72" />
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
-          <Skeleton className="h-24 w-full rounded-xl" />
-          <Skeleton className="mx-auto hidden size-4 sm:block" />
-          <Skeleton className="h-24 w-full rounded-xl" />
-        </CardContent>
-      </Card>
-
-      <div className="space-y-4">
-        <Skeleton className="h-6 w-24" />
-        <div className="grid gap-4 lg:grid-cols-2">
-          {[0, 1].map((index) => (
-            <Card key={index}>
-              <CardHeader className="space-y-2">
-                <Skeleton className="h-5 w-28" />
-                <Skeleton className="h-3 w-48" />
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Skeleton className="h-10 w-24" />
-                <div className="space-y-3 pt-2">
-                  {[0, 1, 2, 3, 4].map((row) => (
-                    <Skeleton key={row} className="h-4 w-full" />
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+    <div className="flex flex-col gap-[18px]">
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="h-4 w-24 rounded-md" />
+        <div className="flex flex-wrap items-start justify-between gap-3.5">
+          <div className="flex min-w-0 flex-[1_1_420px] flex-col gap-2.5">
+            <Skeleton className="h-[22px] w-40 rounded-md" />
+            <Skeleton className="h-7 w-full max-w-80 rounded-md" />
+            <Skeleton className="h-4 w-full max-w-64 rounded-md" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-[38px] w-24 rounded-md" />
+            <Skeleton className="h-[38px] w-28 rounded-md" />
+          </div>
         </div>
       </div>
-    </>
+
+      <div className="flex gap-1 border-b border-border">
+        {[0, 1, 2].map((tab) => (
+          <div key={tab} className="flex h-10 items-center px-3.5">
+            <Skeleton className="h-3.5 w-16 rounded-sm" />
+          </div>
+        ))}
+      </div>
+
+      <Skeleton className="h-[140px] w-full" />
+      <Skeleton className="h-[340px] w-full" />
+    </div>
   );
 }

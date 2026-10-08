@@ -20,7 +20,7 @@ export default function AppError({
   }, [error]);
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-2xl items-center px-4">
+    <div className="mx-auto flex min-h-screen w-full max-w-2xl items-center bg-background px-4">
       <ErrorState digest={error.digest} onRetry={reset} className="w-full" />
     </div>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
-import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -43,12 +42,20 @@ export function GoogleSignInButton({ disabled = false }: { disabled?: boolean })
     <Button
       type="submit"
       variant="outline"
-      // Google's branding guidance keeps the mark on a neutral surface, and an outline button
-      // is also the more legible target here — the panel behind it is already tinted.
-      className="h-11 w-full gap-2.5 text-sm font-medium"
+      // The design's primary-button proportions (46px, 6px radius, 14.5px/800), but on a white
+      // surface: Google's branding guidance keeps the multicolour mark on a neutral background,
+      // and a blue fill would make it read as a generic button rather than "Sign in with Google".
+      className="h-[46px] w-full gap-2.5 rounded-md border-input bg-card text-[14.5px] font-extrabold text-foreground hover:bg-background"
       disabled={disabled || pending}
     >
-      {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <GoogleMark />}
+      {pending ? (
+        <span
+          aria-hidden
+          className="size-4 animate-rl-spin rounded-full border-2 border-brand/25 border-t-brand"
+        />
+      ) : (
+        <GoogleMark />
+      )}
       {pending ? "Redirecting to Google…" : "Continue with Google"}
     </Button>
   );
