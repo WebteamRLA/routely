@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Loader2, Unplug } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -44,10 +44,7 @@ export function DisconnectDialog({
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive">
-            <Unplug aria-hidden />
-            Disconnect
-          </Button>
+          <Button variant="destructive-outline">Disconnect</Button>
         </AlertDialogTrigger>
 
         <AlertDialogContent>
@@ -56,7 +53,7 @@ export function DisconnectDialog({
             <AlertDialogDescription>
               Routely will revoke its access to{" "}
               {googleEmail ? (
-                <span className="font-medium">{googleEmail}</span>
+                <span className="font-bold text-foreground">{googleEmail}</span>
               ) : (
                 "your Google account"
               )}{" "}

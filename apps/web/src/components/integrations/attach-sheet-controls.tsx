@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useTransition } from "react";
-import { FilePlus2, FolderOpen, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { SubmitButton } from "@/components/common/submit-button";
@@ -94,38 +94,37 @@ export function AttachSheetControls({
     <div className={compact ? "space-y-3" : "space-y-4"}>
       <div className="flex flex-wrap gap-2">
         {pickerAvailable ? (
-          <Button type="button" variant="outline" onClick={openPicker} disabled={isPicking}>
-            {isPicking ? (
-              <Loader2 className="animate-spin" aria-hidden />
-            ) : (
-              <FolderOpen aria-hidden />
-            )}
+          <Button
+            type="button"
+            variant="outline"
+            className="border-primary text-primary"
+            onClick={openPicker}
+            disabled={isPicking}
+          >
+            {isPicking ? <Loader2 className="animate-spin" aria-hidden /> : null}
             Choose existing sheet
           </Button>
         ) : null}
 
         <form action={createFormAction}>
           <input type="hidden" name="websiteId" value={websiteId} />
-          <SubmitButton
-            variant={pickerAvailable ? "secondary" : "default"}
-            pendingLabel="Creating…"
-          >
-            <FilePlus2 aria-hidden />
-            Create new sheet
+          <SubmitButton variant={pickerAvailable ? "outline" : "default"} pendingLabel="Creating…">
+            + Create new sheet
           </SubmitButton>
         </form>
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12.5px] text-ink-3">
         Routely adds a tab called &ldquo;Routely&rdquo; and keeps it up to date. Nothing else in the
         spreadsheet is touched.
       </p>
 
       {!pickerAvailable ? (
-        <p className="text-xs text-muted-foreground">
-          Choosing an existing spreadsheet needs <code>NEXT_PUBLIC_GOOGLE_API_KEY</code> and{" "}
-          <code>NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER</code> to be configured. Creating a new one works
-          without them.
+        <p className="text-[12.5px] text-ink-3">
+          Choosing an existing spreadsheet needs{" "}
+          <code className="font-mono text-xs">NEXT_PUBLIC_GOOGLE_API_KEY</code> and{" "}
+          <code className="font-mono text-xs">NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER</code> to be
+          configured. Creating a new one works without them.
         </p>
       ) : null}
     </div>

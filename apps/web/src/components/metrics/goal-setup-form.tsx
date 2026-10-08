@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Eye, Loader2, Wand2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { Field } from "@/components/common/field";
 import { SubmitButton } from "@/components/common/submit-button";
@@ -48,115 +48,119 @@ export function GoalSetupForm({
   useFormToast(validateState);
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <h3 className="text-sm font-medium">How do you define this conversion goal?</h3>
-
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
-          <span
-            aria-hidden
-            className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground"
-          >
-            <Eye className="size-4" />
-          </span>
-          <div className="min-w-0">
-            <p className="font-medium">Pageview</p>
-            <p className="text-sm text-muted-foreground">
-              Counts a conversion when a visitor reaches a specific URL. The only goal type Routely
-              records today.
-            </p>
-          </div>
+    <div className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-[22px]">
+        <div>
+          <h2 className="m-0 font-heading text-[15.5px] font-bold tracking-[-0.01em]">
+            How do you define this conversion goal?
+          </h2>
+          <p className="mt-1 text-[13px] text-ink-3">
+            Pageview is the only goal type Routely records today.
+          </p>
         </div>
-      </section>
 
-      <form action={save} className="space-y-5">
-        <input type="hidden" name="experimentId" value={metric.experimentId} />
-        {/* Carried even when the field is locked, so a submission cannot blank the goal. */}
-        <input type="hidden" name="conversionMatchType" value={matchType} />
-        {!metric.urlEditable ? <input type="hidden" name="conversionUrl" value={url} /> : null}
+        <div className="rounded-lg border-[1.5px] border-primary bg-brand-tint p-3 sm:max-w-[50%]">
+          <p className="text-[13.5px] font-extrabold">Pageview</p>
+          <p className="mt-0.5 text-xs text-ink-3">
+            Counts a conversion when a visitor reaches a specific URL.
+          </p>
+        </div>
 
-        <Field
-          name="conversionName"
-          label="Name this conversion goal"
-          hint="Optional. Shown on the metrics list; defaults to the experiment's name."
-          errors={saveState.fieldErrors?.["conversionName"]}
-        >
-          {(props) => (
-            <Input
-              {...props}
-              defaultValue={metric.name === metric.experimentName ? "" : metric.name}
-              placeholder={metric.experimentName}
-              maxLength={120}
-              autoComplete="off"
-            />
-          )}
-        </Field>
+        <form action={save} className="flex flex-col gap-4">
+          <input type="hidden" name="experimentId" value={metric.experimentId} />
+          {/* Carried even when the field is locked, so a submission cannot blank the goal. */}
+          <input type="hidden" name="conversionMatchType" value={matchType} />
+          {!metric.urlEditable ? <input type="hidden" name="conversionUrl" value={url} /> : null}
 
-        <Field
-          name="conversionUrl"
-          label="Converted when landed on Page URL"
-          hint={
-            metric.urlEditable
-              ? "Must be on this website's domain, and different from the control and variant pages."
-              : "Locked: this experiment has already started, and its visitors are bucketed against this goal. Archive it and create a new one to measure a different page."
-          }
-          errors={saveState.fieldErrors?.["conversionUrl"]}
-          required={metric.urlEditable}
-        >
-          {(props) => (
-            <Input
-              {...props}
-              value={url}
-              onChange={(event) => setUrl(event.target.value)}
-              disabled={!metric.urlEditable}
-              inputMode="url"
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              required={metric.urlEditable}
-            />
-          )}
-        </Field>
-
-        {metric.urlEditable ? (
           <Field
-            name="conversionMatchTypeSelect"
-            label="URL match"
-            hint="Exact counts only that address. Prefix also counts anything beneath it."
+            name="conversionName"
+            label="Name this conversion goal"
+            hint="Optional. Shown on the metrics list; defaults to the experiment's name."
+            errors={saveState.fieldErrors?.["conversionName"]}
           >
-            {() => (
-              <Select value={matchType} onValueChange={setMatchType}>
-                <SelectTrigger className="w-full sm:w-[16rem]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="EXACT">Exact</SelectItem>
-                  <SelectItem value="PREFIX">Prefix</SelectItem>
-                </SelectContent>
-              </Select>
+            {(props) => (
+              <Input
+                {...props}
+                defaultValue={metric.name === metric.experimentName ? "" : metric.name}
+                placeholder={metric.experimentName}
+                maxLength={120}
+                autoComplete="off"
+              />
             )}
           </Field>
-        ) : null}
 
-        <div className="flex flex-wrap justify-end gap-2 pt-1">
-          <SubmitButton pendingLabel="Saving…">Save goal</SubmitButton>
-        </div>
-      </form>
+          <Field
+            name="conversionUrl"
+            label="Converted when landed on Page URL"
+            hint={
+              metric.urlEditable
+                ? "Must be on this website's domain, and different from the control and variant pages."
+                : "Locked: this experiment has already started, and its visitors are bucketed against this goal. Archive it and create a new one to measure a different page."
+            }
+            errors={saveState.fieldErrors?.["conversionUrl"]}
+            required={metric.urlEditable}
+          >
+            {(props) => (
+              <Input
+                {...props}
+                value={url}
+                onChange={(event) => setUrl(event.target.value)}
+                disabled={!metric.urlEditable}
+                className="font-mono text-[13px]"
+                inputMode="url"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                required={metric.urlEditable}
+              />
+            )}
+          </Field>
+
+          {metric.urlEditable ? (
+            <Field
+              name="conversionMatchTypeSelect"
+              label="URL match"
+              hint="Exact counts only that address. Prefix also counts anything beneath it."
+            >
+              {() => (
+                <Select value={matchType} onValueChange={setMatchType}>
+                  <SelectTrigger className="w-full sm:w-[16rem]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="EXACT">Exact</SelectItem>
+                    <SelectItem value="PREFIX">Prefix</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </Field>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <SubmitButton pendingLabel="Saving…">Save goal</SubmitButton>
+          </div>
+        </form>
+      </section>
 
       {/* Its own form: validation loads the page and reports back, and must not be able to
        * save anything as a side effect of checking. */}
       <form
         action={validate}
-        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-muted/30 p-4"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-4 py-3.5"
       >
         <input type="hidden" name="websiteId" value={metric.websiteId} />
         <input type="hidden" name="conversionUrl" value={url} />
-        <p className="min-w-0 text-sm text-muted-foreground">
+        <p className="min-w-0 flex-1 basis-[260px] text-[13px] text-ink-3">
           Check the goal page loads and carries the tracking snippet — without it, reaching the page
           records nothing.
         </p>
-        <Button type="submit" variant="outline" disabled={validating}>
-          {validating ? <Loader2 className="animate-spin" aria-hidden /> : <Wand2 aria-hidden />}
+        <Button
+          type="submit"
+          variant="outline"
+          className="border-primary text-primary"
+          disabled={validating}
+        >
+          {validating ? <Loader2 className="animate-spin" aria-hidden /> : null}
           {validating ? "Checking…" : "Validate goal"}
         </Button>
       </form>

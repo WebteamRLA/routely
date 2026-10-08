@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Eye, MoreVertical, Trash2 } from "lucide-react";
+import { MoreVertical, Trash2 } from "lucide-react";
 
 import { DeleteMetricsDialog } from "@/components/metrics/delete-metrics-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -28,37 +29,23 @@ import type { Metric, MetricState } from "@/server/services/metrics.service";
  * discovering it afterwards from a shorter experiments list.
  */
 
-const STATE: Record<MetricState, { label: string; hint: string; tone: string }> = {
-  collecting: {
-    label: "Collecting",
-    hint: "Recording conversions",
-    tone: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20",
-  },
-  waiting: {
-    label: "Waiting",
-    hint: "Waiting for first conversion",
-    tone: "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20",
-  },
-  paused: {
-    label: "Paused",
-    hint: "Its experiment is paused",
-    tone: "bg-muted text-muted-foreground ring-border",
-  },
-  draft: {
-    label: "Not live",
-    hint: "Its experiment hasn't launched",
-    tone: "bg-muted text-muted-foreground ring-border",
-  },
-  archived: {
-    label: "Archived",
-    hint: "Its experiment is archived",
-    tone: "bg-muted text-muted-foreground ring-border",
-  },
+const STATE: Record<
+  MetricState,
+  { label: string; hint: string; variant: "success" | "warning" | "secondary" }
+> = {
+  collecting: { label: "Collecting", hint: "Recording conversions", variant: "success" },
+  waiting: { label: "Waiting", hint: "Waiting for first conversion", variant: "warning" },
+  paused: { label: "Paused", hint: "Its experiment is paused", variant: "secondary" },
+  draft: { label: "Not live", hint: "Its experiment hasn't launched", variant: "secondary" },
+  archived: { label: "Archived", hint: "Its experiment is archived", variant: "secondary" },
 };
 
 function typeLabel(metric: Metric): string {
-  return metric.matchType === "PREFIX" ? "Pageview (Prefix)" : "Pageview (Exact)";
+  return metric.matchType === "PREFIX" ? "Pageview · Prefix" : "Pageview · Exact";
 }
+
+const TH = "px-3 py-2.5 whitespace-nowrap first:pl-5 last:pr-5 table-head";
+const TD = "px-3 py-3 align-middle first:pl-5 last:pr-5";
 
 export function MetricsTable({
   metrics,
@@ -85,31 +72,30 @@ export function MetricsTable({
   return (
     <>
       {visibleSelected.length > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5">
-          <p className="text-sm">
-            <span className="font-medium tabular-nums">{visibleSelected.length}</span> selected
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-brand-tint px-5 py-2.5">
+          <p className="text-[13.5px] font-bold">
+            <span className="tabular-nums">{visibleSelected.length}</span> selected
           </p>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" onClick={() => setSelected([])}>
               Clear
             </Button>
             <Button
-              variant="destructive"
+              variant="destructive-outline"
               size="sm"
               onClick={() => setPendingDelete(visibleSelected.map((id) => byId.get(id)!))}
             >
-              <Trash2 aria-hidden />
               Delete selected
             </Button>
           </div>
         </div>
       ) : null}
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[56rem] border-collapse text-left">
+      <div className="relative overflow-x-auto">
+        <table className="w-full min-w-[60rem] border-collapse text-left">
           <thead>
-            <tr className="border-b border-border bg-muted/40 text-xs tracking-wide text-muted-foreground uppercase">
-              <th scope="col" className="w-10 px-4 py-2.5">
+            <tr className="border-b border-divider bg-subtle">
+              <th scope="col" className={cn(TH, "w-10")}>
                 <Checkbox
                   checked={allSelected}
                   onCheckedChange={(checked) =>
@@ -120,20 +106,29 @@ export function MetricsTable({
                   aria-label={allSelected ? "Clear selection" : "Select every metric"}
                 />
               </th>
-              <th scope="col" className="px-4 py-2.5 font-medium">
+              <th scope="col" className={TH}>
                 Metric
               </th>
-              <th scope="col" className="px-4 py-2.5 font-medium">
+              <th scope="col" className={TH}>
                 Type
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-medium">
-                Conversions (24h)
+              <th scope="col" className={TH}>
+                Goal URL
               </th>
-              <th scope="col" className="px-4 py-2.5 font-medium">
+              <th scope="col" className={TH}>
+                Last received
+              </th>
+              <th scope="col" className={cn(TH, "text-right")}>
+                24h
+              </th>
+              <th scope="col" className={cn(TH, "text-right")}>
+                All time
+              </th>
+              <th scope="col" className={TH}>
                 Status
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-medium">
-                Action
+              <th scope="col" className={cn(TH, "text-right")}>
+                <span className="sr-only">Actions</span>
               </th>
             </tr>
           </thead>
@@ -147,9 +142,9 @@ export function MetricsTable({
                 <tr
                   key={metric.experimentId}
                   data-selected={isSelected || undefined}
-                  className="border-b border-border last:border-0 data-[selected]:bg-muted/30"
+                  className="border-b border-divider text-[13.5px] transition-colors last:border-0 hover:bg-subtle data-[selected]:bg-brand-tint"
                 >
-                  <td className="px-4 py-3.5 align-top">
+                  <td className={TD}>
                     <Checkbox
                       checked={isSelected}
                       onCheckedChange={(checked) => toggle(metric.experimentId, checked === true)}
@@ -157,76 +152,76 @@ export function MetricsTable({
                     />
                   </td>
 
-                  <td className="px-4 py-3.5 align-top">
-                    <p className="font-medium">{metric.name}</p>
-                    <p className="text-xs text-muted-foreground">
+                  <td className={TD}>
+                    <Link
+                      href={routes.metrics.detail(metric.experimentId)}
+                      className="block max-w-[16rem] truncate font-extrabold hover:text-primary"
+                    >
+                      {metric.name}
+                    </Link>
+                    <p className="max-w-[16rem] truncate text-xs text-ink-3">
                       {metric.experimentName} · {metric.websiteName}
                     </p>
                   </td>
 
-                  <td className="px-4 py-3.5 align-top">
-                    <p className="flex items-center gap-1.5 text-sm">
-                      <Eye className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                      {typeLabel(metric)}
-                    </p>
-                    <p className="mt-0.5 max-w-[24rem] truncate font-mono text-xs text-muted-foreground">
+                  <td className={cn(TD, "whitespace-nowrap text-ink-2")}>{typeLabel(metric)}</td>
+
+                  <td className={TD}>
+                    <p
+                      className="max-w-[14rem] truncate font-mono text-[12.5px]"
+                      title={metric.url}
+                    >
                       {metric.url}
                     </p>
                   </td>
 
-                  <td className="px-4 py-3.5 text-right align-top">
-                    <span className="text-sm font-semibold tabular-nums">
-                      {formatNumber(metric.conversions24h)}
-                    </span>
-                    {metric.conversionsTotal > 0 ? (
-                      <p className="text-xs text-muted-foreground tabular-nums">
-                        {formatNumber(metric.conversionsTotal)} all time
-                      </p>
-                    ) : null}
+                  <td className={cn(TD, "font-semibold whitespace-nowrap")}>
+                    {metric.lastConversionAt ? (
+                      formatDate(metric.lastConversionAt)
+                    ) : (
+                      <span className="text-warning-text">Never</span>
+                    )}
                   </td>
 
-                  <td className="px-4 py-3.5 align-top">
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-                        state.tone,
-                      )}
-                    >
-                      {state.label}
-                    </span>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {metric.lastConversionAt
-                        ? `Last conversion ${formatDate(metric.lastConversionAt)}`
-                        : state.hint}
-                    </p>
+                  <td className={cn(TD, "text-right font-bold tabular-nums")}>
+                    {formatNumber(metric.conversions24h)}
                   </td>
 
-                  <td className="px-4 py-3.5 align-top">
-                    <div className="flex items-center justify-end gap-2">
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={routes.experiments.detail(metric.experimentId)}>
-                          View
-                          <span className="sr-only"> results for {metric.name}</span>
-                        </Link>
-                      </Button>
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={routes.metrics.detail(metric.experimentId)}>
-                          Edit
-                          <span className="sr-only"> the goal for {metric.name}</span>
-                        </Link>
-                      </Button>
+                  <td className={cn(TD, "text-right text-ink-2 tabular-nums")}>
+                    {formatNumber(metric.conversionsTotal)}
+                  </td>
+
+                  <td className={TD}>
+                    <Badge variant={state.variant}>{state.label}</Badge>
+                    <p className="mt-1 text-xs text-ink-3">{state.hint}</p>
+                  </td>
+
+                  <td className={TD}>
+                    <div className="flex items-center justify-end gap-1">
+                      <Link
+                        href={routes.metrics.detail(metric.experimentId)}
+                        className="px-1 text-[12.5px] font-extrabold whitespace-nowrap text-primary hover:text-brand-hover"
+                      >
+                        Edit goal
+                        <span className="sr-only"> for {metric.name}</span>
+                      </Link>
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
                             variant="ghost"
-                            size="icon"
+                            size="icon-sm"
                             aria-label={`More actions for ${metric.name}`}
                           >
                             <MoreVertical aria-hidden />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem asChild>
+                            <Link href={routes.experiments.detail(metric.experimentId)}>
+                              View results
+                            </Link>
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             variant="destructive"
                             onSelect={() => setPendingDelete([metric])}

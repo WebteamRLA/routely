@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
 
 import { DeleteMetricsDialog } from "@/components/metrics/delete-metrics-dialog";
 import { Button } from "@/components/ui/button";
@@ -30,8 +29,7 @@ export function DeleteGoalButton({
 
   return (
     <>
-      <Button type="button" variant="outline" onClick={() => setOpen(true)}>
-        <Trash2 aria-hidden />
+      <Button type="button" variant="destructive-outline" onClick={() => setOpen(true)}>
         Delete
       </Button>
 

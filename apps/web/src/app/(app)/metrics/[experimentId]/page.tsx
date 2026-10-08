@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
 import { DeleteGoalButton } from "@/components/metrics/delete-goal-button";
@@ -41,15 +40,11 @@ export default async function MetricPage({
   if (!metric) notFound();
 
   return (
-    <>
+    <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-[18px]">
       <PageHeader
         eyebrow={
-          <Link
-            href={routes.metrics.list}
-            className="inline-flex items-center gap-1 hover:text-foreground"
-          >
-            <ArrowLeft className="size-3.5" aria-hidden />
-            Metrics
+          <Link href={routes.metrics.list} className="text-primary hover:text-brand-hover">
+            ← Metrics &amp; goals
           </Link>
         }
         title="Conversion goal setup"
@@ -71,6 +66,6 @@ export default async function MetricPage({
           validateAction={validateGoalAction}
         />
       </div>
-    </>
+    </div>
   );
 }

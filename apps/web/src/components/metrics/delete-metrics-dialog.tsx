@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -63,11 +63,11 @@ export function DeleteMetricsDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-border bg-muted/40 p-3 text-sm">
+        <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-border bg-subtle p-3 text-[13.5px]">
           {metrics.map((metric) => (
             <li key={metric.experimentId} className="truncate">
-              <span className="font-medium">{metric.name}</span>{" "}
-              <span className="text-muted-foreground">· {metric.experimentName}</span>
+              <span className="font-bold">{metric.name}</span>{" "}
+              <span className="text-ink-3">· {metric.experimentName}</span>
             </li>
           ))}
         </ul>
@@ -88,7 +88,7 @@ export function DeleteMetricsDialog({
           {/* `useFormStatus` needs a descendant of the form, so pending state comes from
               `useActionState` instead — the button is associated, not nested. */}
           <Button type="submit" form={formId} variant="destructive" disabled={isPending}>
-            {isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Trash2 aria-hidden />}
+            {isPending ? <Loader2 className="animate-spin" aria-hidden /> : null}
             Delete {one ? "experiment" : "experiments"}
           </Button>
         </AlertDialogFooter>

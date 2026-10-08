@@ -1,6 +1,3 @@
-import { ExternalLink } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -49,18 +46,18 @@ export function sheetStatusLabel(destination: SheetDestination | null): string {
   }[sheetHealth(destination)];
 }
 
-const TEXT: Record<SheetHealth, string> = {
-  live: "text-emerald-700 dark:text-emerald-500",
-  waiting: "text-muted-foreground",
-  error: "text-destructive",
-  none: "text-muted-foreground",
+const PILL: Record<SheetHealth, string> = {
+  live: "bg-success-bg text-success-strong",
+  waiting: "bg-warning-bg text-warning-text",
+  error: "bg-danger-bg text-danger-text",
+  none: "bg-divider text-ink-2",
 };
 
 const DOT: Record<SheetHealth, string> = {
-  live: "bg-emerald-500",
-  waiting: "bg-amber-500",
+  live: "bg-success",
+  waiting: "bg-warning",
   error: "bg-destructive",
-  none: "bg-muted-foreground/40",
+  none: "bg-faint",
 };
 
 /**
@@ -71,8 +68,13 @@ const DOT: Record<SheetHealth, string> = {
  */
 export function SheetStatus({ health, label }: { health: SheetHealth; label: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-xs", TEXT[health])}>
-      <span className={cn("size-1.5 rounded-full", DOT[health])} aria-hidden />
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold whitespace-nowrap",
+        PILL[health],
+      )}
+    >
+      <span className={cn("size-[7px] rounded-full", DOT[health])} aria-hidden />
       {label}
     </span>
   );
@@ -98,20 +100,18 @@ export function SheetStatusColumn({
   className?: string;
 }) {
   return (
-    <div className={cn("flex shrink-0 flex-col items-end gap-1.5", className)}>
+    <div className={cn("flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5", className)}>
       <SheetStatus health={sheetHealth(destination)} label={sheetStatusLabel(destination)} />
 
       {destination ? (
-        <Button variant="outline" size="sm" asChild>
-          <a
-            href={spreadsheetUrl(destination.spreadsheetId)}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            View spreadsheet
-            <ExternalLink aria-hidden />
-          </a>
-        </Button>
+        <a
+          href={spreadsheetUrl(destination.spreadsheetId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[13px] font-bold whitespace-nowrap text-primary hover:text-brand-hover"
+        >
+          View spreadsheet ↗
+        </a>
       ) : null}
     </div>
   );

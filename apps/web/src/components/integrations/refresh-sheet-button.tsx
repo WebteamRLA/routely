@@ -1,7 +1,6 @@
 "use client";
 
 import { useActionState } from "react";
-import { RefreshCw } from "lucide-react";
 
 import { SubmitButton } from "@/components/common/submit-button";
 import { useFormToast } from "@/hooks/use-form-toast";
@@ -30,8 +29,12 @@ export function RefreshSheetButton({
   return (
     <form action={formAction}>
       <input type="hidden" name="websiteId" value={websiteId} />
-      <SubmitButton variant="outline" size="sm" pendingLabel="Refreshing…">
-        <RefreshCw aria-hidden />
+      <SubmitButton
+        variant="outline"
+        size="sm"
+        className="border-primary text-primary"
+        pendingLabel="Refreshing…"
+      >
         Refresh now
       </SubmitButton>
     </form>

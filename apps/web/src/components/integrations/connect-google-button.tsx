@@ -15,7 +15,7 @@ export function ConnectGoogleButton({
   variant = "default",
 }: {
   label?: string;
-  variant?: "default" | "outline";
+  variant?: "default" | "outline" | "dark" | "destructive-outline";
 }) {
   return (
     <form action="/api/integrations/google/start" method="post">

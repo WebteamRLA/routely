@@ -2,7 +2,6 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
-import { ArrowDownWideNarrow, Filter, Loader2, Search } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -81,64 +80,55 @@ export function MetricsFilters({
   }, [term]);
 
   return (
-    <div className="space-y-4 border-b border-border p-4">
-      <div className="flex flex-wrap items-center gap-1">
-        {tabs.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => set("tab", item.key, "summary")}
-            aria-current={item.key === tab ? "page" : undefined}
-            className={cn(
-              "cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-              "outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              item.key === tab
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-            )}
-          >
-            {item.label}
-            <span className="ml-1.5 text-xs text-muted-foreground tabular-nums">{item.count}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
-            value={term}
-            onChange={(event) => setTerm(event.target.value)}
-            placeholder="Search metrics…"
-            aria-label="Search metrics"
-            className="pl-9"
-          />
+    <div className="border-b border-border">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 border-b border-divider px-3 sm:px-5">
+        <div className="flex max-w-full gap-1 overflow-x-auto">
+          {tabs.map((item) => {
+            const active = item.key === tab;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => set("tab", item.key, "summary")}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "-mb-px flex h-10 cursor-pointer items-center gap-1.5 border-b-2 px-3 text-[13.5px] font-bold whitespace-nowrap transition-colors",
+                  "outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  active
+                    ? "border-primary text-primary"
+                    : "border-transparent text-ink-3 hover:text-foreground",
+                )}
+              >
+                {item.label}
+                <span className="rounded-lg bg-divider px-1.5 py-px text-[11.5px] text-ink-2 tabular-nums">
+                  {item.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <span className="flex items-center gap-2 py-2 text-[12.5px] text-ink-3 tabular-nums">
           {isPending ? (
-            <Loader2
-              className="absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin text-muted-foreground"
+            <span
               aria-hidden
+              className="size-3.5 animate-rl-spin rounded-full border-2 border-brand-tint-2 border-t-primary"
             />
           ) : null}
-        </div>
+          {total} {total === 1 ? "metric" : "metrics"}
+        </span>
+      </div>
 
-        <Select value={sort} onValueChange={(value) => set("sort", value, "recent")}>
-          <SelectTrigger className="w-[11rem]" aria-label="Sort metrics">
-            <ArrowDownWideNarrow className="size-4 text-muted-foreground" aria-hidden />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="recent">Most recent</SelectItem>
-            <SelectItem value="conversions">Most conversions</SelectItem>
-            <SelectItem value="name">Name A–Z</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-center gap-2 px-3 py-3 sm:px-5">
+        <Input
+          value={term}
+          onChange={(event) => setTerm(event.target.value)}
+          placeholder="Search name or URL"
+          aria-label="Search metrics"
+          className="h-9 w-full min-w-0 sm:w-[240px]"
+        />
 
         <Select value={type} onValueChange={(value) => set("type", value, "all")}>
-          <SelectTrigger className="w-[12rem]" aria-label="Filter by type">
-            <Filter className="size-4 text-muted-foreground" aria-hidden />
+          <SelectTrigger className="data-[size=default]:h-9" aria-label="Filter by type">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -150,9 +140,16 @@ export function MetricsFilters({
           </SelectContent>
         </Select>
 
-        <span className="ml-auto shrink-0 text-sm text-muted-foreground tabular-nums">
-          {total} {total === 1 ? "metric" : "metrics"}
-        </span>
+        <Select value={sort} onValueChange={(value) => set("sort", value, "recent")}>
+          <SelectTrigger className="data-[size=default]:h-9" aria-label="Sort metrics">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="recent">Sort: Most recent</SelectItem>
+            <SelectItem value="conversions">Sort: Most conversions</SelectItem>
+            <SelectItem value="name">Sort: Name A–Z</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
     </div>
   );

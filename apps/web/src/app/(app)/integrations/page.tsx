@@ -1,34 +1,10 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import { AlertCircle, CheckCircle2, Sheet } from "lucide-react";
 
 import { PageHeader } from "@/components/common/page-header";
-import { ConnectGoogleButton } from "@/components/integrations/connect-google-button";
-import { DisconnectDialog } from "@/components/integrations/disconnect-dialog";
-import { SheetStatusColumn } from "@/components/integrations/sheet-status";
-import { WebsiteSheetCard } from "@/components/integrations/website-sheet-card";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { env } from "@/env";
-import { formatDateTime } from "@/lib/format";
-import { routes } from "@/lib/routes";
-import { SHEET_COLUMNS } from "@/lib/sheet-rows";
-import {
-  attachPickedSheetAction,
-  createSheetAction,
-  detachSheetAction,
-  disconnectSheetsAction,
-  getPickerTokenAction,
-  refreshSheetAction,
-} from "@/server/actions/integration.actions";
+import { SheetsPanel } from "@/components/integrations/sheets-panel";
+import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
-import {
-  getIntegrationOverview,
-  type IntegrationOverview,
-} from "@/server/services/sheets-sync.service";
+import { getIntegrationOverview } from "@/server/services/sheets-sync.service";
 
 export const metadata: Metadata = { title: "Integrations" };
 
@@ -58,283 +34,28 @@ export default async function IntegrationsPage({
   const flash = readFlash(params);
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-[18px]">
       <PageHeader
         title="Integrations"
         description="Send your experiment results somewhere else, automatically."
       />
 
       {flash ? (
-        <Alert variant={flash.tone === "error" ? "destructive" : "default"}>
-          {flash.tone === "error" ? <AlertCircle aria-hidden /> : <CheckCircle2 aria-hidden />}
-          <AlertTitle>{flash.title}</AlertTitle>
-          <AlertDescription>{flash.body}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1.5">
-              <CardTitle className="flex items-center gap-2">
-                <Sheet className="size-4" aria-hidden />
-                Google Sheets
-              </CardTitle>
-              <CardDescription>
-                Routely keeps a spreadsheet up to date with the last 30 days of results — one per
-                website, refreshed within seconds of a visit or a conversion.
-              </CardDescription>
-            </div>
-            {overview.connection ? (
-              overview.connection.status === "CONNECTED" ? (
-                // Explicit emerald rather than a Badge variant: `components/ui` is generated, so a
-                // variant added there is lost the next time the primitive is regenerated.
-                <Badge className="gap-1.5 border-emerald-500/20 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-400">
-                  <span className="inline-block size-1.5 rounded-full bg-emerald-500" aria-hidden />
-                  Connected
-                </Badge>
-              ) : (
-                <Badge variant="destructive">Needs reconnecting</Badge>
-              )
-            ) : null}
-          </div>
-        </CardHeader>
-
-        <CardContent className="space-y-6">
-          {!overview.configured ? (
-            <NotConfigured hint={overview.configurationHint} />
-          ) : !overview.connection ? (
-            <NotConnected />
-          ) : (
-            <Connected overview={overview} />
+        <div
+          role={flash.tone === "error" ? "alert" : "status"}
+          className={cn(
+            "rounded-lg border px-4 py-3",
+            flash.tone === "error"
+              ? "border-danger-border bg-danger-bg-2 text-danger-text"
+              : "border-success-border bg-success-bg-2 text-success-strong",
           )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-/**
- * Names the missing variable rather than saying "unavailable".
- *
- * Mirrors the login page's behaviour when Google credentials are absent: the person reading this is
- * whoever deployed the app, and the one thing they need is the name of what to set.
- */
-function NotConfigured({ hint }: { hint: string | null }) {
-  return (
-    <Alert>
-      <AlertCircle aria-hidden />
-      <AlertTitle>This integration is not configured</AlertTitle>
-      <AlertDescription>
-        Set {hint ?? "the required environment variables"} to enable it. Routely will not store a
-        Google refresh token without an encryption key for it.
-      </AlertDescription>
-    </Alert>
-  );
-}
-
-function NotConnected() {
-  return (
-    <div className="space-y-5">
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium">What gets written</h3>
-        <p className="text-sm text-muted-foreground">
-          One row per experiment arm per day, for the last 30 days, in a tab Routely keeps current:
-        </p>
-        <div className="overflow-x-auto rounded-md border border-border/70">
-          <table className="w-full text-xs">
-            <thead className="bg-muted/50">
-              <tr>
-                {SHEET_COLUMNS.map((column) => (
-                  <th key={column} className="px-3 py-2 text-left font-medium whitespace-nowrap">
-                    {column}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="font-mono text-muted-foreground">
-              <tr className="border-t border-border/70">
-                <td className="px-3 py-2 whitespace-nowrap">2026-09-28</td>
-                <td className="px-3 py-2 whitespace-nowrap">Pricing redesign</td>
-                <td className="px-3 py-2 whitespace-nowrap">Control</td>
-                <td className="px-3 py-2">412</td>
-                <td className="px-3 py-2">30</td>
-                <td className="px-3 py-2">7.3</td>
-              </tr>
-              <tr className="border-t border-border/70">
-                <td className="px-3 py-2 whitespace-nowrap">2026-09-28</td>
-                <td className="px-3 py-2 whitespace-nowrap">Pricing redesign</td>
-                <td className="px-3 py-2 whitespace-nowrap">Variant 1</td>
-                <td className="px-3 py-2">408</td>
-                <td className="px-3 py-2">41</td>
-                <td className="px-3 py-2">10.0</td>
-              </tr>
-            </tbody>
-          </table>
+        >
+          <p className="text-[13.5px] font-extrabold">{flash.title}</p>
+          <p className="mt-0.5 text-[13px]">{flash.body}</p>
         </div>
-      </div>
-
-      <div className="space-y-2">
-        <h3 className="text-sm font-medium">What Routely can see</h3>
-        <p className="text-sm text-muted-foreground">
-          Only the spreadsheets you pick, and the ones Routely creates for you. It cannot list, open
-          or read anything else in your Google Drive — you choose files in Google&rsquo;s own
-          picker, and Google grants access to just that file.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Days run to UTC midnight, the same boundary every date in Routely uses. Routely creates
-          and maintains its own tab inside the spreadsheet you choose; nothing else in that file is
-          touched.
-        </p>
-      </div>
-
-      <ConnectGoogleButton />
-    </div>
-  );
-}
-
-function Connected({ overview }: { overview: IntegrationOverview }) {
-  const connection = overview.connection;
-  if (!connection) return null;
-
-  const attached = overview.websites.filter((website) => website.destination !== null);
-  const canSync = connection.status === "CONNECTED" && connection.canUseSheets;
-
-  /*
-   * Two websites pointing at one spreadsheet tab overwrite each other on every refresh — silently,
-   * repeatedly, and undiagnosably from the spreadsheet itself, where the numbers simply flicker
-   * between two sites. Cheap to detect here, so it is surfaced rather than left to be discovered.
-   */
-  const websitesBySheet = new Map<string, string[]>();
-  for (const website of attached) {
-    const key = `${website.destination?.spreadsheetId}::${website.destination?.sheetTitle}`;
-    websitesBySheet.set(key, [...(websitesBySheet.get(key) ?? []), website.websiteName]);
-  }
-
-  const sharedWith = (website: (typeof overview.websites)[number]): string[] => {
-    if (!website.destination) return [];
-    const key = `${website.destination.spreadsheetId}::${website.destination.sheetTitle}`;
-    return (websitesBySheet.get(key) ?? []).filter((name) => name !== website.websiteName);
-  };
-
-  const sheetProps = {
-    developerKey: env.NEXT_PUBLIC_GOOGLE_API_KEY,
-    projectNumber: env.NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER,
-    getPickerToken: getPickerTokenAction,
-    attachSheet: attachPickedSheetAction,
-    createSheetAction,
-    detachSheetAction,
-    refreshSheetAction,
-    canSync,
-  };
-
-  return (
-    <div className="space-y-6">
-      {connection.status === "NEEDS_RECONNECT" ? (
-        <Alert variant="destructive">
-          <AlertCircle aria-hidden />
-          <AlertTitle>Google access has stopped working</AlertTitle>
-          <AlertDescription>
-            {connection.statusDetail ?? "Reconnect your Google account to resume the daily sync."}{" "}
-            The daily sync is paused until you reconnect. Every website keeps its spreadsheet and
-            its history.
-          </AlertDescription>
-        </Alert>
       ) : null}
 
-      {connection.status === "CONNECTED" && !connection.canUseSheets ? (
-        <Alert variant="destructive">
-          <AlertCircle aria-hidden />
-          <AlertTitle>A required permission was declined</AlertTitle>
-          <AlertDescription>
-            Routely was not given permission to create and edit the Google Sheets you choose.
-            Reconnect and leave that permission ticked.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <dl className="grid gap-4 text-sm sm:grid-cols-3">
-        <div>
-          <dt className="text-muted-foreground">Google account</dt>
-          <dd className="font-medium">{connection.googleEmail ?? "Connected"}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Connected</dt>
-          <dd className="font-medium">{formatDateTime(connection.connectedAt)} UTC</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Websites publishing</dt>
-          <dd className="font-medium">
-            {attached.length}
-            <span className="font-normal text-muted-foreground">
-              {" "}
-              of {overview.websites.length}
-            </span>
-          </dd>
-        </div>
-      </dl>
-
-      <Separator />
-
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-sm font-medium">Spreadsheet per website</h3>
-          <p className="text-sm text-muted-foreground">
-            Each website has its own spreadsheet. A website with none attached is simply not
-            published.
-          </p>
-        </div>
-
-        {overview.websites.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border/70 p-6 text-center">
-            <p className="text-sm text-muted-foreground">
-              You have no websites yet. Add one and you can attach a spreadsheet to it.
-            </p>
-            <Button variant="outline" size="sm" className="mt-3" asChild>
-              <Link href={routes.getStarted}>Get started</Link>
-            </Button>
-          </div>
-        ) : (
-          <ul className="divide-y divide-border/60 rounded-lg border border-border/70">
-            {overview.websites.map((website) => (
-              <li key={website.websiteId} className="space-y-2 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <Link
-                    href={routes.websites.detail(website.websiteId)}
-                    className="truncate text-sm font-medium hover:underline"
-                  >
-                    {website.websiteName}
-                  </Link>
-                  <SheetStatusColumn destination={website.destination} />
-                </div>
-
-                <WebsiteSheetCard
-                  websiteId={website.websiteId}
-                  destination={website.destination}
-                  sharedWith={sharedWith(website)}
-                  {...sheetProps}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <Separator />
-
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h3 className="text-sm font-medium">Disconnect Google</h3>
-          <p className="max-w-md text-sm text-muted-foreground">
-            Revokes Routely&rsquo;s access and stops every website&rsquo;s sync. Your spreadsheets
-            and every row already in them are left untouched.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <ConnectGoogleButton label="Reconnect" variant="outline" />
-          <DisconnectDialog action={disconnectSheetsAction} googleEmail={connection.googleEmail} />
-        </div>
-      </div>
+      <SheetsPanel overview={overview} />
     </div>
   );
 }
