@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 
+import { armBg } from "@/components/experiments/arm-colors";
 import { Input } from "@/components/ui/input";
 import { applyShare, roundToTotal } from "@/lib/traffic";
 import { cn } from "@/lib/utils";
@@ -34,20 +35,9 @@ export interface DistributionArm {
 }
 
 /** Fixed per position so an arm keeps its colour as others are added or removed. */
-const ARM_COLORS = [
-  "bg-red-500",
-  "bg-blue-600",
-  "bg-amber-500",
-  "bg-emerald-600",
-  "bg-violet-600",
-  "bg-pink-600",
-];
+const armColor = armBg;
 
-const EXCLUDED_COLOR = "bg-muted-foreground/30";
-
-function armColor(index: number): string {
-  return ARM_COLORS[index % ARM_COLORS.length]!;
-}
+const EXCLUDED_COLOR = "bg-divider text-ink-3!";
 
 export function TrafficDistribution({
   arms,
@@ -147,8 +137,10 @@ export function TrafficDistribution({
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-medium">Traffic Distribution</h3>
-        <p className="text-sm text-muted-foreground">
+        <h3 className="font-heading text-[14.5px] font-bold tracking-[-0.01em]">
+          Traffic distribution
+        </h3>
+        <p className="text-[13px] text-ink-3">
           {disabled
             ? "Fixed while the experiment is running."
             : "Drag the edges between colours to adjust allocation."}
@@ -158,13 +150,13 @@ export function TrafficDistribution({
       <div>
         <div
           ref={trackRef}
-          className="relative flex h-9 w-full overflow-hidden rounded-md select-none"
+          className="relative flex h-[30px] w-full overflow-hidden rounded-[7px] select-none"
         >
           {segments.map((segment) => (
             <div
               key={segment.key}
               className={cn(
-                "flex items-center justify-center overflow-hidden text-xs font-semibold whitespace-nowrap text-white transition-[width] duration-75",
+                "flex items-center justify-center overflow-hidden text-xs font-extrabold whitespace-nowrap text-white transition-[width] duration-75",
                 segment.color,
               )}
               style={{ width: `${segment.percent}%` }}
@@ -201,9 +193,9 @@ export function TrafficDistribution({
             : null}
         </div>
 
-        <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+        <div className="mt-1.5 flex justify-between text-[11px] text-faint">
           <span>0%</span>
-          <span>Total Site Traffic</span>
+          <span>Total site traffic</span>
           <span>100%</span>
         </div>
       </div>
@@ -213,19 +205,19 @@ export function TrafficDistribution({
           {segments.map((segment, index) => (
             <div
               key={`input-${segment.key}`}
-              className="flex items-center gap-3 rounded-lg border border-border/70 p-3"
+              className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
             >
               <span
                 className={cn(
-                  "grid size-8 shrink-0 place-items-center rounded-md text-xs font-semibold text-white",
+                  "grid size-8 shrink-0 place-items-center rounded-md text-xs font-extrabold text-white",
                   segment.color,
                 )}
               >
                 {segment.short}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-muted-foreground">{segment.label}</p>
-                <p className="text-sm font-medium tabular-nums">{segment.percent}%</p>
+                <p className="truncate text-xs font-bold text-ink-3">{segment.label}</p>
+                <p className="text-sm font-bold tabular-nums">{segment.percent}%</p>
               </div>
               <Input
                 type="number"
@@ -235,19 +227,19 @@ export function TrafficDistribution({
                 disabled={disabled}
                 onChange={(event) => setSegment(index, Number(event.target.value))}
                 aria-label={`${segment.label} percentage`}
-                className="w-16 shrink-0 text-center"
+                className="h-9 w-16 shrink-0 text-center"
               />
             </div>
           ))}
         </div>
       ) : null}
 
-      <div className="flex justify-end gap-4 text-sm">
+      <div className="flex justify-end gap-4 text-[13px] font-bold">
         {!disabled ? (
           <button
             type="button"
             onClick={resetToEqual}
-            className="cursor-pointer text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            className="cursor-pointer text-primary underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:ring-3 focus-visible:ring-primary/15"
           >
             Reset to equal
           </button>
@@ -255,7 +247,7 @@ export function TrafficDistribution({
         <button
           type="button"
           onClick={() => setShowExact((value) => !value)}
-          className="cursor-pointer text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          className="cursor-pointer text-primary underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:ring-3 focus-visible:ring-primary/15"
         >
           {showExact ? "Hide exact values" : "Show exact values"}
         </button>

@@ -2,7 +2,6 @@ import Link from "next/link";
 
 import { ExperimentStatusBadge } from "@/components/experiments/status-badge";
 import { PublishPauseButton } from "@/components/experiments/publish-pause-button";
-import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/format";
 import { routes } from "@/lib/routes";
 import { changeExperimentStatusAction } from "@/server/actions/experiment.actions";
@@ -17,32 +16,30 @@ import type { Experiment } from "@/generated/prisma/client";
  */
 export function ExperimentRow({ experiment }: { experiment: Experiment }) {
   return (
-    <Card size="sm" className="transition focus-within:ring-ring">
-      <div className="flex items-center gap-3 px-(--card-spacing)">
-        <Link
-          href={routes.experiments.detail(experiment.id)}
-          className="min-w-0 flex-1 rounded-md outline-none"
-        >
-          <span className="block truncate text-sm font-medium">{experiment.name}</span>
-          <span className="block truncate text-xs text-muted-foreground">
-            {experiment.controlUrl}
-          </span>
-        </Link>
-
-        <span className="hidden text-xs whitespace-nowrap text-muted-foreground md:block">
-          {experiment.publishedAt
-            ? `Published ${formatDate(experiment.publishedAt)}`
-            : `Created ${formatDate(experiment.createdAt)}`}
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-[18px] py-3 transition-colors focus-within:border-primary hover:bg-subtle">
+      <Link
+        href={routes.experiments.detail(experiment.id)}
+        className="min-w-0 flex-1 rounded-md outline-none"
+      >
+        <span className="block truncate text-[13.5px] font-bold">{experiment.name}</span>
+        <span className="mt-[3px] block truncate font-mono text-xs text-ink-3">
+          {experiment.controlUrl}
         </span>
+      </Link>
 
-        <ExperimentStatusBadge status={experiment.status} />
+      <span className="hidden text-[12.5px] whitespace-nowrap text-ink-3 md:block">
+        {experiment.publishedAt
+          ? `Published ${formatDate(experiment.publishedAt)}`
+          : `Created ${formatDate(experiment.createdAt)}`}
+      </span>
 
-        <PublishPauseButton
-          action={changeExperimentStatusAction}
-          experimentId={experiment.id}
-          status={experiment.status}
-        />
-      </div>
-    </Card>
+      <ExperimentStatusBadge status={experiment.status} />
+
+      <PublishPauseButton
+        action={changeExperimentStatusAction}
+        experimentId={experiment.id}
+        status={experiment.status}
+      />
+    </div>
   );
 }

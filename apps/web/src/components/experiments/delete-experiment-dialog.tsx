@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { useFormToast } from "@/hooks/use-form-toast";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -57,10 +57,7 @@ export function DeleteExperimentDialog({
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive">
-            <Trash2 aria-hidden />
-            Delete experiment
-          </Button>
+          <Button variant="destructive-outline">Delete experiment</Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>

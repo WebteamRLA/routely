@@ -1,5 +1,3 @@
-import { CheckCircle2, Eye } from "lucide-react";
-
 /**
  * How a conversion is defined.
  *
@@ -14,20 +12,25 @@ import { CheckCircle2, Eye } from "lucide-react";
  */
 export function GoalTypes() {
   return (
-    <div className="space-y-3">
-      <p className="text-sm font-medium">How do you define this conversion goal?</p>
+    <div className="flex flex-col gap-2">
+      <p className="text-[13px] font-extrabold">Goal type</p>
 
-      <div className="relative flex gap-3 rounded-lg border border-primary bg-primary/5 p-4 ring-1 ring-primary sm:max-w-sm">
-        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
-          <Eye className="size-4" aria-hidden />
-        </span>
-
-        <div className="min-w-0 flex-1 space-y-1">
-          <p className="pr-5 text-sm font-medium">Pageview</p>
-          <p className="text-sm text-muted-foreground">Track when users visit a specific URL</p>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-2.5">
+        <div
+          aria-current="true"
+          className="flex gap-2.5 rounded-lg border-[1.5px] border-primary bg-brand-tint px-3.5 py-3 shadow-[0_0_0_3px_rgba(43,89,240,0.14)]"
+        >
+          <span
+            aria-hidden
+            className="mt-0.5 size-4 flex-none rounded-full border-2 border-primary bg-primary shadow-[inset_0_0_0_3px_#FFFFFF]"
+          />
+          <span className="min-w-0">
+            <span className="text-[13.5px] font-extrabold">Pageview</span>
+            <span className="mt-0.5 block text-[12.5px] text-ink-3">
+              Track when users visit a specific URL
+            </span>
+          </span>
         </div>
-
-        <CheckCircle2 className="absolute top-3 right-3 size-4 text-primary" aria-hidden />
       </div>
     </div>
   );

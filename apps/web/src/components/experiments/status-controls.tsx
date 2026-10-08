@@ -2,22 +2,23 @@
 
 import { useActionState } from "react";
 import { useFormToast } from "@/hooks/use-form-toast";
-import { Archive, Loader2, Pause, Play } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { IDLE, type FormState } from "@/lib/form-state";
 
 type Status = "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED";
 
-const TRANSITIONS: Record<
-  Status,
-  { label: string; icon: typeof Play; variant?: "default" | "outline" | "destructive" }
-> = {
-  ACTIVE: { label: "Start experiment", icon: Play, variant: "default" },
-  PAUSED: { label: "Pause", icon: Pause, variant: "outline" },
-  ARCHIVED: { label: "Archive", icon: Archive, variant: "outline" },
-  DRAFT: { label: "Back to draft", icon: Play, variant: "outline" },
+const TRANSITIONS: Record<Status, { label: string; variant: "default" | "outline" | "dark" }> = {
+  ACTIVE: { label: "Start experiment", variant: "default" },
+  PAUSED: { label: "Pause", variant: "outline" },
+  ARCHIVED: { label: "Archive", variant: "dark" },
+  DRAFT: { label: "Back to draft", variant: "outline" },
 };
+
+/** Resuming takes the design's green "Resume" treatment, distinct from a first start. */
+const RESUME_CLASS =
+  "border-success bg-success text-white hover:border-success-strong hover:bg-success-strong";
 
 /**
  * Lifecycle buttons for an experiment.
@@ -44,21 +45,21 @@ export function StatusControls({
 
   if (allowed.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
+      <p className="text-[13px] text-ink-3">
         This experiment is archived. Its results are kept, but it will not collect anything new.
       </p>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div>
       <form action={formAction} className="flex flex-wrap gap-2">
         <input type="hidden" name="experimentId" value={experimentId} />
 
         {allowed.map((status) => {
-          const { label, icon: Icon, variant } = TRANSITIONS[status];
-          const text =
-            status === "ACTIVE" && currentStatus === "PAUSED" ? "Resume experiment" : label;
+          const { label, variant } = TRANSITIONS[status];
+          const resuming = status === "ACTIVE" && currentStatus === "PAUSED";
+          const text = resuming ? "Resume experiment" : label;
 
           return (
             <Button
@@ -68,8 +69,9 @@ export function StatusControls({
               value={status}
               variant={variant}
               disabled={isPending}
+              className={resuming ? RESUME_CLASS : undefined}
             >
-              {isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />}
+              {isPending ? <Loader2 className="animate-spin" aria-hidden /> : null}
               {text}
             </Button>
           );

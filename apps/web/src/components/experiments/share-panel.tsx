@@ -6,7 +6,6 @@ import { Link2, Loader2, RefreshCw, X } from "lucide-react";
 
 import { CopyValue } from "@/components/websites/copy-value";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { IDLE, type FormState } from "@/lib/form-state";
 
 /**
@@ -45,21 +44,21 @@ export function SharePanel({
   const busy = enabling || rotating || disabling;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Share results</CardTitle>
-        <CardDescription>
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="font-heading text-[15px] font-bold tracking-[-0.01em]">Share results</h2>
+        <p className="mt-1 max-w-2xl text-[13px] text-pretty text-ink-3">
           Create a read-only link so someone can see this experiment&rsquo;s numbers without a
           Routely account. It shows only this experiment — not your other tests, websites or
           account.
-        </CardDescription>
-      </CardHeader>
+        </p>
+      </div>
 
-      <CardContent className="space-y-4">
+      <div className="space-y-4 px-5 py-4">
         {shareUrl ? (
           <>
             <CopyValue value={shareUrl} label="Copy share link" />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[12.5px] text-ink-3">
               Anyone with this link can view the results. It is unguessable, but it is not a
               password — treat it as public once you have sent it.
             </p>
@@ -95,7 +94,7 @@ export function SharePanel({
             </Button>
           </form>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

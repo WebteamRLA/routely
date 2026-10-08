@@ -1,17 +1,15 @@
 "use client";
 
-import { Check } from "lucide-react";
-
 import { cn } from "@/lib/utils";
 
 /**
- * The wizard's step indicator, rendered as a section at the top of the wizard page.
+ * The wizard's step indicator.
  *
- * It used to sit in the app's 56px top bar, sharing that strip with the menu button and the
- * wordmark, which is why labels were withheld until `xl`. In the page it has the full content
- * width to itself, so they appear from `sm` — at which point the strip is orientation rather
- * than decoration. Below that only the current step keeps its label, which is the one piece of
- * orientation that still matters when space runs out.
+ * From the 900px breakpoint up it is a row of bars, one per step, each labelled with its number
+ * (a check once completed, "!" when it holds an error) — every step reached so far can be
+ * clicked to jump back to it. Below that the row would not fit its labels, so it collapses to
+ * "Step n of N · Name" and a single progress bar, which is the one piece of orientation that
+ * still matters when space runs out.
  */
 
 export interface StepperItem {
@@ -23,6 +21,7 @@ export function WizardStepper({
   steps,
   currentIndex,
   maxIndex,
+  errorIndexes,
   onSelect,
   className,
 }: {
@@ -30,74 +29,115 @@ export function WizardStepper({
   currentIndex: number;
   /** Furthest step reached, which is as far as the customer may jump back and forth. */
   maxIndex: number;
+  /** Steps holding a field error that is currently on screen. */
+  errorIndexes?: ReadonlySet<number>;
   onSelect: (key: string) => void;
   className?: string;
 }) {
+  const current = steps[currentIndex];
+  const next = steps[currentIndex + 1];
+  const percent = Math.round(((currentIndex + 1) / steps.length) * 100);
+
   return (
     <nav aria-label="Experiment setup" className={cn("min-w-0", className)}>
-      <ol className="flex items-center gap-1 overflow-x-auto">
-        {steps.map((item, index) => {
-          const completed = index < maxIndex;
-          const current = index === currentIndex;
-          const reachable = index <= maxIndex;
+      {/* Desktop: one bar per step. */}
+      <div className="hidden flex-col gap-3 pt-1 pb-0.5 nav:flex">
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="flex items-baseline gap-2.5">
+            <span className="text-xs font-extrabold tracking-[0.08em] text-ink-3 uppercase">
+              Step {currentIndex + 1} of {steps.length}
+            </span>
+            <span className="text-[13.5px] font-extrabold text-foreground">{current?.label}</span>
+          </div>
+          <span className="text-[12.5px] font-semibold text-ink-3">
+            {next ? `Next: ${next.label}` : "Final step"}
+          </span>
+        </div>
 
-          return (
-            <li key={item.key} className="flex shrink-0 items-center gap-1">
-              {index > 0 ? (
-                <span
-                  aria-hidden
-                  className={cn(
-                    "h-px w-4 shrink-0",
-                    index <= maxIndex ? "bg-primary" : "bg-border",
-                  )}
-                />
-              ) : null}
+        <ol
+          className="grid gap-1.5"
+          style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+        >
+          {steps.map((item, index) => {
+            const isCurrent = index === currentIndex;
+            const bad = errorIndexes?.has(index) ?? false;
+            const done = index < maxIndex && !isCurrent;
+            const reachable = index <= maxIndex;
 
-              <button
-                type="button"
-                disabled={!reachable}
-                onClick={() => onSelect(item.key)}
-                aria-current={current ? "step" : undefined}
-                className={cn(
-                  "flex cursor-pointer items-center gap-1.5 rounded-full py-1 pr-1 pl-1 transition-colors",
-                  "outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed",
-                  current ? "bg-muted pr-2.5" : "hover:bg-muted/60",
-                )}
-              >
-                <span
-                  aria-hidden
+            return (
+              <li key={item.key} className="min-w-0">
+                <button
+                  type="button"
+                  disabled={!reachable}
+                  onClick={() => onSelect(item.key)}
+                  aria-current={isCurrent ? "step" : undefined}
                   className={cn(
-                    "grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-semibold ring-1",
-                    completed
-                      ? "bg-primary text-primary-foreground ring-primary"
-                      : current
-                        ? "bg-background text-foreground ring-foreground/60"
-                        : "bg-background text-muted-foreground ring-border",
+                    "flex w-full min-w-0 flex-col gap-2 rounded-sm text-left outline-none",
+                    "focus-visible:ring-3 focus-visible:ring-primary/15",
+                    reachable ? "cursor-pointer" : "cursor-default",
                   )}
                 >
-                  {completed ? <Check className="size-3.5" /> : index + 1}
-                </span>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "h-1 rounded-[2px] transition-colors duration-200",
+                      bad
+                        ? "bg-danger"
+                        : isCurrent
+                          ? "bg-primary"
+                          : done
+                            ? "bg-navy"
+                            : "bg-[#DDE1E9]",
+                    )}
+                  />
+                  <span className="flex min-w-0 items-baseline gap-1.5">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "flex-none text-[11.5px] font-extrabold tabular-nums",
+                        bad
+                          ? "text-danger"
+                          : isCurrent
+                            ? "text-primary"
+                            : done
+                              ? "text-success-text"
+                              : "text-faint",
+                      )}
+                    >
+                      {bad ? "!" : done ? "✓" : String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span
+                      className={cn(
+                        "truncate text-[12.5px]",
+                        isCurrent ? "font-extrabold text-foreground" : "font-semibold text-ink-3",
+                      )}
+                    >
+                      {item.label}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
 
-                <span
-                  aria-hidden
-                  className={cn(
-                    "text-xs font-medium whitespace-nowrap",
-                    // The current step keeps its label at every width; the rest appear once
-                    // there is room, so the strip degrades to plain circles rather than wrapping.
-                    current ? "inline text-foreground" : "hidden text-muted-foreground sm:inline",
-                  )}
-                >
-                  {item.label}
-                </span>
-
-                {/* The visible label above is decorative — this is the one that gets announced,
-                 * so a step reads the same whether or not its label fits on screen. */}
-                <span className="sr-only">{item.label}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+      {/* Mobile: "Step n of N" and a single progress bar. */}
+      <div className="rounded-lg border border-border bg-card px-3.5 py-3 nav:hidden">
+        <p className="text-[13px] font-extrabold">
+          Step {currentIndex + 1} of {steps.length} · {current?.label}
+        </p>
+        <div
+          role="progressbar"
+          aria-label="Setup progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent}
+          className="mt-2 h-1 overflow-hidden rounded-[3px] bg-divider"
+        >
+          <div className="h-full bg-primary" style={{ width: `${percent}%` }} />
+        </div>
+      </div>
     </nav>
   );
 }

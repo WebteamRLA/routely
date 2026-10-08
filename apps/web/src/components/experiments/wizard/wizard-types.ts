@@ -47,3 +47,29 @@ export const PRIMARY_METRIC_LABEL: Record<PrimaryMetric, string> = {
   TIME_ON_PAGE: "Average time on page",
   PAGE_VIEWS: "Page views per visitor",
 };
+
+/**
+ * Arm colours by position — arm 0 is always control. Fixed per position so an arm keeps its
+ * colour as the set changes; a fifth variant and beyond cycle through the variant colours.
+ */
+const VARIANT_ARM_CLASSES = ["bg-arm-a", "bg-arm-b", "bg-arm-c", "bg-arm-d"];
+
+export function armColorClass(armIndex: number): string {
+  if (armIndex <= 0) return "bg-arm-control";
+  return VARIANT_ARM_CLASSES[(armIndex - 1) % VARIANT_ARM_CLASSES.length]!;
+}
+
+/**
+ * The path part of a URL for compact display (`/pricing?x=1`), falling back to whatever was
+ * typed when it does not parse yet — the rail and the review update while the customer types.
+ */
+export function displayPath(url: string): string {
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed);
+    return `${parsed.pathname}${parsed.search}` || "/";
+  } catch {
+    return trimmed;
+  }
+}

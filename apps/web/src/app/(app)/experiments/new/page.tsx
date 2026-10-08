@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, Globe, Plus } from "lucide-react";
+import { Globe, Plus } from "lucide-react";
 
 import { EmptyState } from "@/components/common/empty-state";
-import { PageHeader } from "@/components/common/page-header";
 import { ExperimentWizard } from "@/components/experiments/wizard/experiment-wizard";
 import { AddWebsiteDialog } from "@/components/websites/add-website-dialog";
 import { Button } from "@/components/ui/button";
@@ -36,26 +35,26 @@ export default async function NewExperimentPage({
 
   return (
     /*
-     * Held to 1000px and centred in the content area, against the full-width shell every other
-     * page uses.
-     *
-     * The wizard is a form, not a table: its inputs have a natural size, so the extra width a
-     * wide monitor offers is width the fields cannot use. Centring keeps the column in the
-     * middle of the space it has rather than hugging the sidebar, which is what a single
-     * focused task wants — the trade being that it no longer shares a left edge with the pages
-     * around it.
+     * Held to 1240px and centred in the content area, against the full-width shell every other
+     * page uses: the wizard is a single focused task, a form column plus a summary rail, and the
+     * extra width of a wide monitor is width its fields cannot use.
      */
-    <div className="mx-auto w-full max-w-[1000px] space-y-6">
-      <PageHeader
-        eyebrow={
-          <Link href={backHref} className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="size-3.5" aria-hidden />
-            {preselected ? preselected.name : "Experiments"}
-          </Link>
-        }
-        title="New experiment"
-        description="Send half your visitors to an alternative page and compare which one converts better."
-      />
+    <div className="mx-auto flex w-full max-w-[1240px] animate-rl-in flex-col gap-[18px]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Button asChild variant="outline" size="sm" className="h-[34px] px-3 text-[13px]">
+            <Link href={backHref}>← Exit</Link>
+          </Button>
+          <div className="min-w-0">
+            <p className="text-xs font-extrabold tracking-[0.08em] text-coral uppercase">
+              Create experiment
+            </p>
+            <h1 className="truncate font-heading text-xl font-semibold">
+              {preselected ? `New split URL test · ${preselected.name}` : "New split URL test"}
+            </h1>
+          </div>
+        </div>
+      </div>
 
       {websites.length === 0 ? (
         <EmptyState

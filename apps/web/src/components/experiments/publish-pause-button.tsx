@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { useFormToast } from "@/hooks/use-form-toast";
-import { Loader2, Pause, Play } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { IDLE, type FormState } from "@/lib/form-state";
@@ -36,7 +36,6 @@ export function PublishPauseButton({
   if (status === "ARCHIVED") return null;
 
   const publishing = status !== "ACTIVE";
-  const Icon = publishing ? Play : Pause;
 
   return (
     <form action={formAction}>
@@ -49,7 +48,7 @@ export function PublishPauseButton({
         variant={publishing ? "default" : "outline"}
         disabled={isPending}
       >
-        {isPending ? <Loader2 className="animate-spin" aria-hidden /> : <Icon aria-hidden />}
+        {isPending ? <Loader2 className="animate-spin" aria-hidden /> : null}
         {publishing ? "Publish" : "Pause"}
       </Button>
     </form>
