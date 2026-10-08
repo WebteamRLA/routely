@@ -1,12 +1,7 @@
 import Link from "next/link";
-import { AlertCircle, CheckCircle2 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { PIXEL_STATUS, type PixelStatus } from "@/lib/pixel-status";
 import { cn } from "@/lib/utils";
-
-const PILL_CLASSES =
-  "h-auto gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold [&>svg]:size-4!";
 
 /**
  * A website's tracking status.
@@ -20,18 +15,17 @@ export function PixelStatusBadge({ status, href }: { status: PixelStatus; href?:
   const { label, positive } = PIXEL_STATUS[status];
 
   const badge = (
-    <Badge
-      variant="outline"
+    <span
       className={cn(
-        PILL_CLASSES,
+        "inline-flex h-7 items-center gap-1.5 rounded-sm border px-3 text-[12.5px] font-extrabold whitespace-nowrap",
         positive
-          ? "border-emerald-300/70 bg-emerald-100 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300"
-          : "border-amber-300/70 bg-amber-100 text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-300",
+          ? "border-success-border bg-success-bg text-success-strong"
+          : "border-danger-border bg-danger-bg-2 text-danger-text",
       )}
     >
-      {positive ? <CheckCircle2 aria-hidden /> : <AlertCircle aria-hidden />}
+      <span aria-hidden>{positive ? "✓" : "✕"}</span>
       {label}
-    </Badge>
+    </span>
   );
 
   if (!href) {
@@ -41,7 +35,7 @@ export function PixelStatusBadge({ status, href }: { status: PixelStatus; href?:
   return (
     <Link
       href={href}
-      className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-primary/15"
     >
       {badge}
     </Link>

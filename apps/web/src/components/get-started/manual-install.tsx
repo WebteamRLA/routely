@@ -1,5 +1,3 @@
-import { Code2 } from "lucide-react";
-
 import { CodeBlock } from "@/components/common/code-block";
 import { CopyValue } from "@/components/websites/copy-value";
 import { buildInstallSnippet } from "@/lib/snippet";
@@ -13,91 +11,126 @@ import { cn } from "@/lib/utils";
  * "Coming soon". That grid cost the customer a click and a decision before showing them
  * anything, and its main effect was to advertise eight things the product does not do. The
  * snippet is two script tags; pasting them into `<head>` is the same job on every platform, so
- * there is nothing for a platform picker to actually pick.
+ * there is nothing for a platform picker to actually pick. (The design's "Install with" method
+ * tabs are left out for the same reason: Routely has no tag-manager variant to offer.)
  */
 
-function Step({
+/**
+ * One numbered row of the install panel: a 26px circle, then the step's title and body.
+ *
+ * The circle is navy while the step is outstanding and green once the installation has been
+ * confirmed; `tone="next"` marks the step that is the customer's next action, in brand blue.
+ */
+export function InstallStep({
   n,
+  title,
+  tone = "todo",
+  aside,
   children,
   className,
 }: {
   n: number;
-  children: React.ReactNode;
+  title: React.ReactNode;
+  tone?: "todo" | "next" | "done";
+  /** Right-aligned beside the title — the Verify step puts its button here. */
+  aside?: React.ReactNode;
+  children?: React.ReactNode;
   className?: string;
 }) {
   return (
-    <div className={cn("flex gap-3", className)}>
+    <div
+      className={cn(
+        "flex items-start gap-4 border-b border-divider px-[22px] py-5 last:border-b-0",
+        className,
+      )}
+    >
       <span
         aria-hidden
-        className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-muted-foreground tabular-nums"
+        className={cn(
+          "grid size-[26px] shrink-0 place-items-center rounded-full font-heading text-[12.5px] font-bold text-white",
+          tone === "done" ? "bg-success" : tone === "next" ? "bg-brand" : "bg-navy",
+        )}
       >
-        {n}
+        {tone === "done" ? "✓" : n}
       </span>
-      <div className="min-w-0 flex-1 space-y-3">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <h3 className="font-heading text-[14.5px] leading-[26px] font-bold tracking-[-0.01em]">
+            {title}
+          </h3>
+          {aside}
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
 
+/** The design's coral-diamond bullet line. */
+function Bullet({ children }: { children: React.ReactNode }) {
+  return (
+    <li className="flex gap-2.5 text-[13px] leading-normal text-pretty text-ink-2">
+      <span aria-hidden className="mt-[7px] size-[5px] shrink-0 rotate-45 bg-coral" />
+      <span className="min-w-0">{children}</span>
+    </li>
+  );
+}
+
+const inlineCode = "rounded-sm bg-divider px-1 py-px font-mono text-[12px] text-foreground";
+
+/** Steps 1 and 2 of the install panel: copy the snippet, then put it in `<head>`. */
 export function ManualInstall({
   sdkUrl,
   publicSiteId,
-  className,
+  domain,
+  done = false,
 }: {
   sdkUrl: string;
   publicSiteId: string;
-  className?: string;
+  /** Named in the instructions, so the customer knows which site the snippet belongs to. */
+  domain: string;
+  /** The installation is confirmed, so both steps show as complete. */
+  done?: boolean;
 }) {
   const snippet = buildInstallSnippet({ sdkUrl, publicSiteId });
 
   return (
-    <div className={cn("space-y-6", className)}>
-      <div className="flex items-start gap-3">
-        <span
-          aria-hidden
-          className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground"
-        >
-          <Code2 className="size-4" />
-        </span>
-        <div className="min-w-0 space-y-1">
-          <span className="inline-flex items-center rounded-md bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-            Manual installation
-          </span>
-          <h3 className="text-base font-semibold tracking-tight">
-            Add the code to your site (5-minute setup)
-          </h3>
+    <>
+      <InstallStep n={1} title="Copy your Routely snippet" tone={done ? "done" : "todo"}>
+        <CodeBlock code={snippet} label="Copy install snippet" />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="text-[12.5px] font-extrabold text-ink-2">Your site ID</span>
+          <CopyValue value={publicSiteId} label="Copy site id" className="min-w-0 flex-1" />
         </div>
-      </div>
+      </InstallStep>
 
-      <div className="space-y-5">
-        <Step n={1}>
-          <p className="text-sm text-muted-foreground">
-            Paste this into the{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">
-              &lt;head&gt;
-            </code>{" "}
-            tag of every page you want to test — including the goal page.
-          </p>
-          <CodeBlock code={snippet} label="Copy install snippet" />
-          <p className="text-xs text-muted-foreground">
+      <InstallStep
+        n={2}
+        title={
+          <>
+            Add it to your website <code className={inlineCode}>&lt;head&gt;</code>
+          </>
+        }
+        tone={done ? "done" : "todo"}
+      >
+        <ul className="flex flex-col gap-2">
+          <Bullet>
+            Paste it into the <code className={inlineCode}>&lt;head&gt;</code> of every page you
+            want to test on {domain} — including the goal page. Adding it once to a shared header
+            template covers them all.
+          </Bullet>
+          <Bullet>
             Keep both blocks, in this order. The first hides the page for up to{" "}
-            <code className="font-mono">routelyTimeout</code> milliseconds so a redirected visitor
-            never sees the original page first; edit that number, or the{" "}
-            <code className="font-mono">#fff</code> background, to suit your site. It lifts on its
-            own even if the tracking script never loads.
-          </p>
-        </Step>
-
-        <Step n={2}>
-          <p className="text-sm text-muted-foreground">
-            Save your changes, then continue to verify the installation.
-          </p>
-        </Step>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 border-t border-border/70 pt-4">
-        <span className="text-sm font-medium">Your site ID</span>
-        <CopyValue value={publicSiteId} label="Copy site id" className="min-w-0 flex-1" />
-      </div>
-    </div>
+            <code className={inlineCode}>routelyTimeout</code> milliseconds so a redirected visitor
+            never sees the original page first; it lifts on its own even if the tracking script
+            never loads.
+          </Bullet>
+          <Bullet>
+            Edit that number, or the <code className={inlineCode}>#fff</code> background, to suit
+            your site. Then save your changes and verify below.
+          </Bullet>
+        </ul>
+      </InstallStep>
+    </>
   );
 }

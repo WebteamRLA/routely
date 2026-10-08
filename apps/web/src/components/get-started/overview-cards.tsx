@@ -1,101 +1,67 @@
 import Link from "next/link";
-import { ArrowRight, Hourglass, Info, PenLine, TrendingUp, User, Users } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { formatNumber } from "@/lib/format";
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import type { OverviewStats } from "@/server/services/overview.service";
 
 /**
- * The two rows of figures above the websites table: where the account stands this cycle, and
- * what its experiments have produced this year.
+ * The figures above the websites table: where the account stands this cycle, and what its
+ * experiments have produced this year.
+ *
+ * Drawn as the design's KPI strip — white tiles separated by 1px hairlines rather than as
+ * separate cards — so the row reads as one instrument rather than as a row of competing panels.
  *
  * Every number is derived from rows at request time — see `overview.service.ts`. The one thing
  * that is *not* measured is the tracked-user allowance, because Routely has no billing yet;
  * it is a named constant in the service, and this component only renders it.
  */
 
-function Stat({
-  icon: Icon,
-  tone,
-  title,
-  value,
-  unit,
-  action,
-  footnote,
-  children,
-  className,
-}: {
-  icon: typeof User;
-  tone: "blue" | "amber" | "green";
-  title: string;
-  value: string;
-  unit: string;
-  action?: React.ReactNode;
-  footnote: string;
-  children?: React.ReactNode;
-  className?: string;
-}) {
-  const tones = {
-    blue: "bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400",
-    amber: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
-    green: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400",
-  } as const;
+/** The 1px-gap container: its background shows through the gaps as the dividing rules. */
+const STRIP =
+  "grid grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-px overflow-hidden bg-border";
 
+/** "View usage →" — the tile's onward action, styled as the design's 13px blue section link. */
+function TileLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <div className={cn("flex min-w-0 flex-col gap-3 p-5", className)}>
-      <div className="flex items-center gap-2.5">
-        <span
-          aria-hidden
-          className={cn("grid size-7 shrink-0 place-items-center rounded-md", tones[tone])}
-        >
-          <Icon className="size-4" />
-        </span>
-        <h3 className="truncate text-sm font-semibold">{title}</h3>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="flex items-baseline gap-1.5">
-          <span className="text-3xl font-semibold tabular-nums">{value}</span>
-          <span className="text-sm text-muted-foreground">{unit}</span>
-        </p>
-        {action}
-      </div>
-
-      {children}
-
-      <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-        <Info className="mt-0.5 size-3 shrink-0" aria-hidden />
-        <span className="min-w-0">{footnote}</span>
-      </p>
-    </div>
+    <Link
+      href={href}
+      className="rounded-sm text-[13px] font-bold whitespace-nowrap text-primary outline-none hover:text-brand-hover focus-visible:ring-3 focus-visible:ring-primary/15"
+    >
+      {children} →
+    </Link>
   );
 }
 
-function Metric({
-  icon: Icon,
+function Tile({
   label,
   value,
-  footnote,
-  className,
+  unit,
+  sub,
+  action,
+  children,
 }: {
-  icon: typeof User;
   label: string;
   value: string;
-  footnote: string;
-  className?: string;
+  unit?: string;
+  sub: React.ReactNode;
+  action?: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return (
-    <div className={cn("flex min-w-0 flex-col gap-4 p-5", className)}>
-      <div className="flex items-center gap-2">
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <h3 className="truncate text-sm font-medium">{label}</h3>
+    <div className="flex min-w-0 flex-col gap-1.5 bg-card px-[22px] py-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="truncate text-[12.5px] font-bold text-ink-3">{label}</h3>
+        {action}
       </div>
-      <div className="flex items-end justify-between gap-3">
-        <span className="text-3xl font-semibold tabular-nums">{value}</span>
-        <span className="text-xs text-muted-foreground">{footnote}</span>
-      </div>
+      <p className="flex items-baseline gap-1.5">
+        <span className="font-heading text-[30px] leading-[1.1] font-bold tracking-[-0.02em] tabular-nums">
+          {value}
+        </span>
+        {unit ? <span className="text-[13px] font-semibold text-ink-3">{unit}</span> : null}
+      </p>
+      {children}
+      <p className="text-[12.5px] text-pretty text-ink-3">{sub}</p>
     </div>
   );
 }
@@ -115,125 +81,90 @@ export function OverviewCards({ stats }: { stats: OverviewStats }) {
   const running = stats.liveExperiments > 0;
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-1 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-        <Stat
-          icon={User}
-          tone="blue"
-          title="Tracked users this cycle"
+    <>
+      <div className={cn(STRIP, "rounded-lg border border-border")}>
+        <Tile
+          label="Tracked users this cycle"
           value={formatNumber(stats.trackedUsers)}
           unit="users"
-          action={
-            <Button variant="secondary" size="sm" asChild>
-              <Link href={routes.experiments.list}>View usage</Link>
-            </Button>
-          }
-          footnote="Counted against your monthly plan allowance"
+          action={<TileLink href={routes.experiments.list}>View usage</TileLink>}
+          sub="Counted against your monthly plan allowance"
         >
-          <div className="space-y-1.5">
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className="space-y-1.5 pt-1">
+            <div className="h-1.5 overflow-hidden rounded-[3px] bg-divider">
               <div
-                className="h-full rounded-full bg-primary"
+                className="h-full rounded-[3px] bg-primary"
                 style={{
                   width: `${Math.max(stats.usageRatio * 100, stats.trackedUsers > 0 ? 2 : 0)}%`,
                 }}
               />
             </div>
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <span className="text-muted-foreground tabular-nums">
+            <div className="flex items-center justify-between gap-3 text-[12.5px]">
+              <span className="text-ink-3 tabular-nums">
                 {(stats.usageRatio * 100).toFixed(0)}% of {formatNumber(stats.trackedUserAllowance)}
               </span>
               <span
                 className={cn(
-                  "font-medium",
-                  stats.usageOnTrack
-                    ? "text-emerald-600 dark:text-emerald-400"
-                    : "text-amber-600 dark:text-amber-400",
+                  "font-extrabold",
+                  stats.usageOnTrack ? "text-success-text" : "text-warning-text",
                 )}
               >
                 {stats.usageOnTrack ? "On track" : "Near limit"}
               </span>
             </div>
           </div>
-        </Stat>
+        </Tile>
 
-        <Stat
-          icon={Hourglass}
-          tone="amber"
-          title={running ? "Experiments running" : "Nothing running yet"}
+        <Tile
+          label={running ? "Experiments running" : "Nothing running yet"}
           value={formatNumber(stats.liveExperiments)}
-          unit="live experiments"
-          action={
-            <Button
-              size="sm"
-              asChild
-              className="bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-500/15 dark:text-amber-200 dark:hover:bg-amber-500/25"
-            >
-              <Link href={routes.experiments.new()}>New experiment</Link>
-            </Button>
-          }
-          footnote={
+          unit="live"
+          action={<TileLink href={routes.experiments.new()}>New experiment</TileLink>}
+          sub={
             running
               ? "Collecting results while they stay published"
               : "Launch an experiment to start collecting results"
           }
         />
 
-        <Stat
-          icon={PenLine}
-          tone="green"
-          title="Drafts ready to launch"
+        <Tile
+          label="Drafts ready to launch"
           value={formatNumber(stats.draftExperiments)}
           unit={stats.draftExperiments === 1 ? "draft" : "drafts"}
           action={
-            <Button
-              size="sm"
-              asChild
-              className="bg-emerald-100 text-emerald-900 hover:bg-emerald-200 dark:bg-emerald-500/15 dark:text-emerald-200 dark:hover:bg-emerald-500/25"
-            >
-              <Link href={`${routes.experiments.list}?status=draft`}>Review drafts</Link>
-            </Button>
+            <TileLink href={`${routes.experiments.list}?status=draft`}>Review drafts</TileLink>
           }
-          footnote="Built but never started collecting traffic"
+          sub="Built but never started collecting traffic"
         />
       </div>
 
-      <div>
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
-          <div className="flex flex-wrap items-baseline gap-2">
-            <h2 className="text-base font-semibold tracking-tight">Performance</h2>
-            <p className="text-sm text-muted-foreground">All experiments · {stats.year}</p>
+      <section className="overflow-hidden rounded-lg border border-border bg-card">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+            <h2 className="font-heading text-[14.5px] font-bold tracking-[-0.01em]">Performance</h2>
+            <span className="text-[12.5px] text-ink-3">All experiments · {stats.year}</span>
           </div>
-          <Link
-            href={routes.experiments.list}
-            className="inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            View full report
-            <ArrowRight className="size-3.5" aria-hidden />
-          </Link>
+          <TileLink href={routes.experiments.list}>View full report</TileLink>
         </div>
 
-        <div className="grid grid-cols-1 divide-y divide-border overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-          <Metric
-            icon={TrendingUp}
+        <div className={STRIP}>
+          <Tile
             label="Conversions"
             value={formatNumber(stats.conversions)}
-            footnote={experimentCount(stats.measuredExperiments)}
+            sub={experimentCount(stats.measuredExperiments)}
           />
-          <Metric
-            icon={TrendingUp}
+          <Tile
             label="Average uplift"
             value={formatUplift(stats.averageUplift)}
-            footnote={experimentCount(stats.upliftExperiments)}
+            sub={experimentCount(stats.upliftExperiments)}
           />
-          <Metric
-            icon={Users}
+          <Tile
             label="Visitors in experiments"
             value={formatNumber(stats.visitorsInExperiments)}
-            footnote={experimentCount(stats.measuredExperiments)}
+            sub={experimentCount(stats.measuredExperiments)}
           />
         </div>
-      </div>
-    </div>
+      </section>
+    </>
   );
 }

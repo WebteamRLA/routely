@@ -3,15 +3,7 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormToast } from "@/hooks/use-form-toast";
 import Link from "next/link";
-import {
-  CheckCircle2,
-  CircleAlert,
-  FlaskConical,
-  Globe,
-  Loader2,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 
 import { PixelSetupDialog } from "@/components/get-started/pixel-setup-dialog";
 import { AddWebsiteDialog } from "@/components/websites/add-website-dialog";
@@ -25,7 +17,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { IDLE, type FormState } from "@/lib/form-state";
@@ -51,21 +42,14 @@ import type { WebsiteWithStatus } from "@/server/services/website.service";
  * different place.
  */
 const ROW_GRID =
-  "grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 sm:grid-cols-[auto_minmax(0,2.2fr)_minmax(0,1.8fr)_minmax(0,1fr)_19rem] sm:items-center sm:gap-4";
+  "grid grid-cols-[auto_1fr] gap-x-3 gap-y-2.5 lg:grid-cols-[auto_minmax(0,2.2fr)_minmax(0,1.8fr)_88px_17rem] lg:items-center lg:gap-x-3.5";
 
 /**
  * A stable colour per website, so a row keeps its identity as others come and go. Derived from
  * the id rather than list position, which would reshuffle every colour whenever a website is
  * created or deleted.
  */
-const AVATAR_COLORS = [
-  "bg-blue-600",
-  "bg-emerald-600",
-  "bg-violet-600",
-  "bg-amber-500",
-  "bg-pink-600",
-  "bg-cyan-600",
-];
+const AVATAR_COLORS = ["bg-arm-a", "bg-coral", "bg-arm-c", "bg-arm-d", "bg-navy", "bg-arm-control"];
 
 function avatarColor(id: string): string {
   let hash = 0;
@@ -95,8 +79,8 @@ function WebsiteRow({
     <div
       className={cn(
         ROW_GRID,
-        "px-4 py-3.5 transition-colors",
-        selected ? "bg-primary/5" : "hover:bg-muted/40",
+        "border-b border-divider px-[18px] py-[13px] transition-colors last:border-b-0",
+        selected ? "bg-brand-tint" : "hover:bg-subtle",
       )}
     >
       <Checkbox
@@ -109,7 +93,7 @@ function WebsiteRow({
         <span
           aria-hidden
           className={cn(
-            "grid size-9 shrink-0 place-items-center rounded-lg text-sm font-semibold text-white",
+            "grid size-8 shrink-0 place-items-center rounded-md font-heading text-[13px] font-bold text-white",
             avatarColor(website.id),
           )}
         >
@@ -118,40 +102,40 @@ function WebsiteRow({
         <span className="min-w-0">
           <Link
             href={routes.websites.detail(website.id)}
-            className="block truncate text-sm font-medium hover:underline"
+            className="block truncate text-[13.5px] font-bold outline-none hover:text-primary focus-visible:underline"
           >
             {website.name}
           </Link>
-          <span className="block truncate font-mono text-xs text-muted-foreground">
+          <span className="mt-0.5 block truncate font-mono text-[12px] text-ink-3">
             {website.domain}
           </span>
         </span>
       </div>
 
-      {/* Below `sm` the grid is two columns, so these cells start a new row and would otherwise
+      {/* Below `lg` the grid is two columns, so these cells start a new row and would otherwise
           sit underneath the checkbox. */}
-      <div className="col-start-2 min-w-0 sm:col-start-auto">
+      <div className="col-start-2 min-w-0 lg:col-start-auto">
         <span
           className={cn(
-            "inline-flex items-center gap-1.5 text-sm font-medium",
+            "inline-flex h-[22px] items-center gap-1.5 rounded-sm border px-2 text-[12px] font-bold whitespace-nowrap",
             status.positive
-              ? "text-emerald-700 dark:text-emerald-400"
-              : "text-amber-700 dark:text-amber-400",
+              ? "border-success-border bg-success-bg text-success-strong"
+              : "border-warning-border bg-warning-bg text-warning-text",
           )}
         >
-          {status.positive ? (
-            <CheckCircle2 className="size-4 shrink-0" aria-hidden />
-          ) : (
-            <CircleAlert className="size-4 shrink-0" aria-hidden />
-          )}
+          <span aria-hidden className="text-[9px] leading-none">
+            {status.positive ? "●" : "○"}
+          </span>
           {status.label}
         </span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">{status.hint}</span>
+        <span className="mt-1 block text-[12px] text-pretty text-ink-3">{status.hint}</span>
       </div>
 
-      <div className="col-start-2 min-w-0 sm:col-start-auto">
-        <span className="text-sm font-medium tabular-nums">{experiments.active} running</span>
-        <span className="mt-0.5 block text-xs text-muted-foreground">
+      <div className="col-start-2 min-w-0 lg:col-start-auto lg:text-right">
+        <span className="text-[13.5px] font-semibold tabular-nums">
+          {experiments.active} running
+        </span>
+        <span className="mt-0.5 block text-[12px] text-ink-3 tabular-nums">
           {experiments.total === 0 ? "none created yet" : "of " + experiments.total + " total"}
         </span>
       </div>
@@ -159,12 +143,9 @@ function WebsiteRow({
       {/* Two equal tracks rather than a right-aligned flex row: "Re-check pixel" is wider than
           "Set up pixel", and right-aligning would let that width shift the neighbouring button
           left on whichever rows are already installed. */}
-      <div className="col-start-2 grid grid-cols-2 gap-2 sm:col-start-auto">
+      <div className="col-start-2 grid grid-cols-2 gap-2 lg:col-start-auto">
         <Button variant="outline" size="sm" className="w-full" asChild>
-          <Link href={routes.experiments.new(website.id)}>
-            <FlaskConical aria-hidden />
-            New experiment
-          </Link>
+          <Link href={routes.experiments.new(website.id)}>New experiment</Link>
         </Button>
         <PixelSetupDialog
           website={website}
@@ -173,6 +154,7 @@ function WebsiteRow({
           triggerLabel={pixelStatus === "unknown" ? "Set up pixel" : "Re-check pixel"}
           triggerVariant={pixelStatus === "unknown" ? "default" : "outline"}
           alreadySetUp={pixelStatus !== "unknown"}
+          pixelStatus={pixelStatus}
           triggerClassName="w-full"
         />
       </div>
@@ -228,12 +210,9 @@ function DeleteSelected({
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive" size="sm">
+          <Button variant="destructive-outline" size="sm">
             <Trash2 aria-hidden />
-            Delete
-            <Badge variant="secondary" className="ml-1">
-              {selectedEntries.length}
-            </Badge>
+            Delete {selectedEntries.length}
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
@@ -253,11 +232,14 @@ function DeleteSelected({
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          <ul className="max-h-40 space-y-1 overflow-y-auto text-sm">
+          <ul className="max-h-40 overflow-y-auto rounded-lg border border-divider text-[13.5px]">
             {selectedEntries.map((entry) => (
-              <li key={entry.website.id} className="flex items-baseline gap-2">
-                <span className="font-medium">{entry.website.name}</span>
-                <span className="truncate font-mono text-xs text-muted-foreground">
+              <li
+                key={entry.website.id}
+                className="flex items-baseline gap-2 border-b border-divider px-3 py-2 last:border-b-0"
+              >
+                <span className="font-bold">{entry.website.name}</span>
+                <span className="truncate font-mono text-[12px] text-ink-3">
                   {entry.website.domain}
                 </span>
               </li>
@@ -310,18 +292,21 @@ export function WebsitesTable({
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border border-border/70">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border/70 bg-muted/40 px-4 py-3">
-        <h2 className="text-sm font-medium">Websites</h2>
-        <Badge variant="secondary">{entries.length}</Badge>
-
-        {selectedEntries.length > 0 ? (
-          <span className="text-xs text-muted-foreground">{selectedEntries.length} selected</span>
-        ) : quiet > 0 ? (
-          <span className="text-xs text-amber-700 dark:text-amber-400">
-            {quiet} still {quiet === 1 ? "needs" : "need"} setup
-          </span>
-        ) : null}
+    <section className="overflow-hidden rounded-lg border border-border bg-card">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-5 py-3">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+          <h2 className="font-heading text-[14.5px] font-bold tracking-[-0.01em]">Websites</h2>
+          <span className="text-[12.5px] text-ink-3 tabular-nums">{entries.length}</span>
+          {selectedEntries.length > 0 ? (
+            <span className="text-[12.5px] font-bold text-primary">
+              {selectedEntries.length} selected
+            </span>
+          ) : quiet > 0 ? (
+            <span className="text-[12.5px] font-bold text-warning-text">
+              {quiet} still {quiet === 1 ? "needs" : "need"} setup
+            </span>
+          ) : null}
+        </div>
 
         <div className="ml-auto flex items-center gap-2">
           {selectedEntries.length > 0 ? (
@@ -331,25 +316,18 @@ export function WebsitesTable({
               onDeleted={() => setSelectedIds([])}
             />
           ) : null}
-          <AddWebsiteDialog
-            trigger={
-              <Button size="sm">
-                <Plus aria-hidden />
-                Add website
-              </Button>
-            }
-          />
+          <AddWebsiteDialog trigger={<Button size="sm">+ Add website</Button>} />
         </div>
       </header>
 
-      {/* Column labels only where the row is laid out in columns. Below `sm` each row stacks
+      {/* Column labels only where the row is laid out in columns. Below `lg` each row stacks
           and the values carry their own sub-labels instead — and with no rows at all there are
           no columns to label. */}
       <div
         className={cn(
           ROW_GRID,
-          "hidden border-b border-border/70 px-4 py-2 text-xs font-medium text-muted-foreground",
-          entries.length > 0 && "sm:grid",
+          "table-head hidden border-b border-divider bg-subtle px-[18px] py-[9px]",
+          entries.length > 0 && "lg:grid",
         )}
       >
         <Checkbox
@@ -361,7 +339,7 @@ export function WebsitesTable({
         />
         <span>Website</span>
         <span>Pixel status</span>
-        <span>Experiments</span>
+        <span className="text-right">Experiments</span>
         <span className="text-right">Actions</span>
       </div>
 
@@ -372,31 +350,18 @@ export function WebsitesTable({
          * missing and named — which reads as a starting point instead of as a different screen
          * that disappears once the first website exists.
          */
-        <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
-          <span
-            aria-hidden
-            className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground"
-          >
-            <Globe className="size-5" />
-          </span>
+        <div className="flex flex-col items-start gap-3 px-5 py-7">
           <div className="space-y-1">
-            <p className="text-sm font-medium">No websites yet</p>
-            <p className="mx-auto max-w-sm text-sm text-balance text-muted-foreground">
+            <p className="text-[13.5px] font-bold">No websites yet</p>
+            <p className="max-w-md text-[13.5px] text-pretty text-ink-3">
               Add a website to get its tracking snippet. Everything above fills in once it starts
               recording visitors.
             </p>
           </div>
-          <AddWebsiteDialog
-            trigger={
-              <Button size="sm">
-                <Plus aria-hidden />
-                Add website
-              </Button>
-            }
-          />
+          <AddWebsiteDialog trigger={<Button size="sm">+ Add website</Button>} />
         </div>
       ) : (
-        <div className="divide-y divide-border/70">
+        <div>
           {entries.map((entry) => (
             <WebsiteRow
               key={entry.website.id}

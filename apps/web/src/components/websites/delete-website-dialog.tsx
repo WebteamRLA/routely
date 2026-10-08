@@ -51,7 +51,7 @@ export function DeleteWebsiteDialog({
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button variant="destructive">
+          <Button variant="destructive-outline" className="self-start sm:self-auto">
             <Trash2 aria-hidden />
             Delete website
           </Button>

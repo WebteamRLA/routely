@@ -50,21 +50,22 @@ export function CopyValue({
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-lg bg-muted/60 py-1.5 pr-1.5 pl-3 ring-1 ring-border/70",
+        "flex h-9 items-center gap-2 rounded-md border border-input bg-subtle pr-1 pl-3",
         className,
       )}
     >
-      <span ref={valueRef} className="min-w-0 flex-1 truncate font-mono text-xs select-all">
+      <span ref={valueRef} className="min-w-0 flex-1 truncate font-mono text-[12.5px] select-all">
         {value}
       </span>
       <Button
         type="button"
         variant="ghost"
-        size="icon-sm"
+        size="icon-xs"
+        className="size-7"
         onClick={copy}
         aria-label={copied ? "Copied" : label}
       >
-        {copied ? <Check className="text-primary" aria-hidden /> : <Copy aria-hidden />}
+        {copied ? <Check className="text-success" aria-hidden /> : <Copy aria-hidden />}
       </Button>
       <span aria-live="polite" className="sr-only">
         {copied ? "Copied to clipboard" : ""}

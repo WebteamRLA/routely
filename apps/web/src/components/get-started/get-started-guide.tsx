@@ -1,42 +1,53 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState } from "react";
 import { useFormToast } from "@/hooks/use-form-toast";
-import { Check } from "lucide-react";
 
-import { ManualInstall } from "@/components/get-started/manual-install";
+import { InstallStep, ManualInstall } from "@/components/get-started/manual-install";
 import { SubmitButton } from "@/components/common/submit-button";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { IDLE, type FormState } from "@/lib/form-state";
+import { PIXEL_STATUS, type PixelStatus } from "@/lib/pixel-status";
 import type { SiteProtocol } from "@/generated/prisma/enums";
 import { siteUrl } from "@/lib/site-url";
 import { cn } from "@/lib/utils";
 
-type StepKey = "install" | "verify" | "done";
-
-const STEPS: { key: StepKey; label: string }[] = [
-  { key: "install", label: "Install pixel" },
-  { key: "verify", label: "Verify" },
-  { key: "done", label: "All set" },
-];
-
 /**
- * The Get started guide: install the pixel, verify it fired, done.
+ * The install panel: copy the snippet, add it to `<head>`, verify it — drawn as the design's
+ * single scrolling panel with three numbered rows rather than as a click-through wizard, so the
+ * snippet, the instructions and the check are all visible at once.
  *
- * Progress is local component state, not anything persisted — "pixel detected" is the one
- * fact that outlives the page (derived from events, elsewhere), so there is nothing else here
- * worth saving. Landing back on this page after the pixel is already detected starts on the
- * last step rather than making the customer click through steps that are already satisfied.
+ * It renders the dialog's title and description itself, because the status pill beside the
+ * title depends on the verification state held here. It is only ever mounted inside
+ * `PixelSetupDialog`.
+ *
+ * Nothing here is invented: the status shown is the website's real pixel status as the server
+ * resolved it, overridden only by the result of a check run in this panel. Progress is not
+ * persisted — "pixel detected" is the one fact that outlives the panel, derived elsewhere.
  */
+
+/** What the panel currently knows, most specific first. */
+type CheckState = "checking" | "detected" | "missing" | PixelStatus;
+
+const ROW: Record<CheckState, { label: string; className: string }> = {
+  checking: { label: "Checking…", className: "bg-brand-tint-2 text-[#1F3FB0]" },
+  detected: { label: "Detected", className: "bg-success-bg text-success-text" },
+  missing: { label: "Not detected", className: "bg-danger-bg text-danger-text" },
+  receiving: { label: PIXEL_STATUS.receiving.label, className: "bg-success-bg text-success-text" },
+  connected: { label: PIXEL_STATUS.connected.label, className: "bg-success-bg text-success-text" },
+  unknown: { label: "Not verified yet", className: "bg-divider text-ink-2" },
+};
+
 export function GetStartedGuide({
   website,
   sdkUrl,
   verifyAction,
   verifyUrl,
   startOnDone,
+  pixelStatus,
   onDone,
 }: {
   website: {
@@ -56,168 +67,172 @@ export function GetStartedGuide({
    * report success while the check that sent them here still fails.
    */
   verifyUrl?: string;
-  /** Open straight on the final step, for a website already known to be set up. */
+  /** The website is already known to be set up, so the panel opens showing it as installed. */
   startOnDone: boolean;
+  /** The server-resolved status, when the caller has it; finer than `startOnDone`. */
+  pixelStatus?: PixelStatus;
   /** Dismisses the guide. The caller decides what that means — closing its dialog, here. */
   onDone: () => void;
 }) {
-  const [step, setStep] = useState<StepKey>(startOnDone ? "done" : "install");
-
-  // Wrapping the action lets the guide advance to "done" the moment verification succeeds,
-  // without a useEffect watching the result — the transition belongs with the action that
-  // causes it, not as a reaction to a state change after the fact.
-  async function verifyAndAdvance(previous: FormState, formData: FormData): Promise<FormState> {
-    const result = await verifyAction(previous, formData);
-    if (result.status === "success") {
-      setStep("done");
-    }
-    return result;
-  }
-
-  const [state, formAction] = useActionState(verifyAndAdvance, IDLE);
+  const [state, formAction, isPending] = useActionState(verifyAction, IDLE);
   // The failure message is instructional — check the <head>, clear the cache — so it must not
   // vanish on a timer while the customer is acting on it. `useFormToast` gives errors no
   // duration, so this one stays until dismissed.
   useFormToast(state, { success: "Snippet found — your pixel is connected." });
 
-  const stepIndex = STEPS.findIndex((item) => item.key === step);
+  const base: PixelStatus = pixelStatus ?? (startOnDone ? "connected" : "unknown");
+  const check: CheckState = isPending
+    ? "checking"
+    : state.status === "success"
+      ? "detected"
+      : state.status === "error"
+        ? "missing"
+        : base;
+  const installed = check === "detected" || check === "receiving" || check === "connected";
+  const row = ROW[check];
 
   return (
-    <div className="flex h-full flex-col gap-6 overflow-hidden lg:flex-row">
-      <nav
-        aria-label="Setup guide"
-        className="flex shrink-0 gap-2 lg:w-[220px] lg:flex-col lg:gap-1"
-      >
-        {STEPS.map((item, index) => {
-          const completed = index < stepIndex;
-          const current = index === stepIndex;
-          const reachable = index <= stepIndex;
+    <div className="flex flex-col">
+      <div className="flex flex-wrap items-start justify-between gap-3.5 border-b border-divider py-5 pr-14 pl-[22px]">
+        <div className="min-w-0 flex-[1_1_320px]">
+          <DialogTitle>Install the Routely snippet</DialogTitle>
+          <DialogDescription className="mt-1">
+            Install once on {website.domain}. The same snippet powers every experiment on{" "}
+            {website.name}.
+          </DialogDescription>
+        </div>
+        <span
+          className={cn(
+            "inline-flex h-7 items-center gap-1.5 rounded-sm border px-3 text-[12.5px] font-extrabold whitespace-nowrap",
+            check === "checking"
+              ? "border-[#D5DEFB] bg-brand-tint text-[#1F3FB0]"
+              : installed
+                ? "border-success-border bg-success-bg text-success-strong"
+                : "border-danger-border bg-danger-bg-2 text-danger-text",
+          )}
+        >
+          {check === "checking" ? (
+            <span
+              aria-hidden
+              className="size-3 animate-rl-spin rounded-full border-2 border-[#D5DEFB] border-t-brand"
+            />
+          ) : (
+            <span aria-hidden>{installed ? "✓" : "✕"}</span>
+          )}
+          {check === "checking"
+            ? "Checking…"
+            : installed
+              ? "Installed"
+              : check === "missing"
+                ? "Not detected"
+                : "Not installed"}
+        </span>
+      </div>
 
-          return (
-            <button
-              key={item.key}
-              type="button"
-              disabled={!reachable}
-              onClick={() => setStep(item.key)}
-              aria-current={current ? "step" : undefined}
+      {installed ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-success-border bg-success-bg-2 px-[22px] py-4">
+          <span
+            aria-hidden
+            className="grid size-[30px] shrink-0 place-items-center rounded-full bg-success font-black text-white"
+          >
+            ✓
+          </span>
+          <div className="min-w-0 flex-[1_1_260px]">
+            <p className="font-heading text-[15.5px] font-bold text-success-strong">
+              Routely is installed and ready
+            </p>
+            <p className="mt-0.5 text-[13px] text-pretty text-[#2E5D49]">
+              {check === "detected"
+                ? `Snippet found on ${website.domain} just now.`
+                : `${PIXEL_STATUS[base].hint} on ${website.domain}.`}{" "}
+              It starts recording as soon as an experiment is running on a page it covers.
+            </p>
+          </div>
+          {/* One way out, rather than two onward journeys. Someone who just finished setup
+              wants to see it took effect; sending them straight into the experiment form
+              skips the confirmation they came for. */}
+          <Button
+            className="border-success bg-success hover:border-[#0F8A5C] hover:bg-[#0F8A5C]"
+            onClick={onDone}
+          >
+            Done
+          </Button>
+        </div>
+      ) : null}
+
+      <ManualInstall
+        sdkUrl={sdkUrl}
+        publicSiteId={website.publicSiteId}
+        domain={website.domain}
+        done={installed}
+      />
+
+      <form action={formAction}>
+        <input type="hidden" name="websiteId" value={website.id} />
+        <InstallStep
+          n={3}
+          title="Verify installation"
+          tone={installed ? "done" : "next"}
+          className="border-b-0"
+          aside={
+            <SubmitButton variant={installed ? "outline" : "default"} pendingLabel="Checking…">
+              {installed ? "Verify again" : "Verify installation"}
+            </SubmitButton>
+          }
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor="verify-url">Page to check</Label>
+            <Input
+              id="verify-url"
+              name="url"
+              defaultValue={verifyUrl ?? siteUrl(website)}
+              placeholder={verifyUrl ?? siteUrl(website)}
+              inputMode="url"
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              required
+              aria-invalid={state.fieldErrors?.["url"]?.length ? true : undefined}
+              className="font-mono text-[13px]"
+            />
+            {state.fieldErrors?.["url"]?.length ? (
+              <p className="text-[12.5px] font-semibold text-danger-text">
+                {state.fieldErrors["url"].join(" ")}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex items-center justify-between gap-2.5 rounded-lg border border-divider px-3 py-2.5">
+            <span className="min-w-0 truncate font-mono text-[13px]">{website.domain}</span>
+            <span
+              aria-live="polite"
               className={cn(
-                "flex flex-1 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors lg:flex-none",
-                "outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed",
-                current
-                  ? "bg-muted text-foreground"
-                  : completed
-                    ? "text-foreground hover:bg-muted/60"
-                    : "text-muted-foreground",
+                "shrink-0 rounded-sm px-2 py-[3px] text-[12px] font-extrabold whitespace-nowrap",
+                row.className,
               )}
             >
-              <span
-                aria-hidden
-                className={cn(
-                  "grid size-6 shrink-0 place-items-center rounded-full text-xs font-semibold ring-1",
-                  completed
-                    ? "bg-primary text-primary-foreground ring-primary"
-                    : current
-                      ? "ring-foreground/60"
-                      : "ring-border",
-                )}
-              >
-                {completed ? <Check className="size-3.5" aria-hidden /> : index + 1}
-              </span>
-              <span className="truncate">{item.label}</span>
-            </button>
-          );
-        })}
-      </nav>
+              {row.label}
+            </span>
+          </div>
 
-      <Card className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-        {step === "install" ? (
-          <>
-            <CardHeader>
-              <CardTitle>Install the code</CardTitle>
-              <CardDescription>
-                Two script tags in your <code className="font-mono text-xs">&lt;head&gt;</code>. The
-                same code works on every platform — there is nothing to configure per site.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <ManualInstall sdkUrl={sdkUrl} publicSiteId={website.publicSiteId} />
+          <p className="text-[12.5px] text-pretty text-ink-3">
+            {installed
+              ? `Every experiment on ${website.domain} uses this installation. Nothing to set up per experiment.`
+              : `Any page on ${website.domain} that has the snippet. We load it and look for your site id in the HTML.`}
+          </p>
+        </InstallStep>
+      </form>
 
-              <div className="flex justify-end">
-                <Button onClick={() => setStep("verify")}>Next: verify installation</Button>
-              </div>
-            </CardContent>
-          </>
-        ) : null}
-
-        {step === "verify" ? (
-          <>
-            <CardHeader>
-              <CardTitle>Verify your installation</CardTitle>
-              <CardDescription>
-                Enter a page on {website.domain} and we&apos;ll load it to confirm the snippet is
-                there.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-              <form action={formAction} className="space-y-5">
-                <input type="hidden" name="websiteId" value={website.id} />
-
-                <div className="space-y-2">
-                  <Label htmlFor="verify-url">Page to check</Label>
-                  <div className="flex flex-wrap gap-2">
-                    <Input
-                      id="verify-url"
-                      name="url"
-                      defaultValue={verifyUrl ?? siteUrl(website)}
-                      placeholder={verifyUrl ?? siteUrl(website)}
-                      inputMode="url"
-                      autoComplete="off"
-                      autoCapitalize="none"
-                      spellCheck={false}
-                      required
-                      className="min-w-0 flex-1"
-                    />
-                    <SubmitButton pendingLabel="Checking…">Verify installation</SubmitButton>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Any page on {website.domain} that has the snippet. We load it and look for your
-                    site id in the HTML.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="ghost" onClick={() => setStep("install")}>
-                    Back
-                  </Button>
-                </div>
-              </form>
-            </CardContent>
-          </>
-        ) : null}
-
-        {step === "done" ? (
-          <>
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
-                  <Check className="size-4" aria-hidden />
-                </span>
-                <CardTitle>You&apos;re all set</CardTitle>
-              </div>
-              <CardDescription>
-                The snippet is live on {website.name}. It starts recording as soon as an experiment
-                is running on a page it covers — create one whenever you&apos;re ready.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {/* One way out, rather than two onward journeys. Someone who just finished setup
-                  wants to see it took effect; sending them straight into the experiment form
-                  skips the confirmation they came for. */}
-              <Button onClick={onDone}>Done</Button>
-            </CardContent>
-          </>
-        ) : null}
-      </Card>
+      <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2.5 border-t border-divider bg-card px-[22px] py-3.5">
+        <span className="text-[12.5px] text-ink-3">
+          Website-level · shared by every experiment on {website.name}
+        </span>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={onDone}>
+            {installed ? "Close" : "I'll do this later"}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }

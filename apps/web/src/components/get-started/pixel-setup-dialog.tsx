@@ -2,24 +2,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Rocket } from "lucide-react";
 
 import { GetStartedGuide } from "@/components/get-started/get-started-guide";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import type { SiteProtocol } from "@/generated/prisma/enums";
 import type { FormState } from "@/lib/form-state";
+import type { PixelStatus } from "@/lib/pixel-status";
 
 /**
- * The "Set up Routely" entry point on the Get started page: opens the pixel setup guide in a
- * dialog, so fixing "pixel not detected" doesn't require leaving the page it was noticed on.
+ * The "Set up Routely" entry point on the dashboard: opens the install panel in a dialog, so
+ * fixing "pixel not detected" doesn't require leaving the page it was noticed on.
+ *
+ * The dialog is a bare frame (no padding, no header of its own) because the panel draws the
+ * design's install-modal layout edge to edge, including its title row and sticky footer.
  */
 export function PixelSetupDialog({
   website,
@@ -29,6 +25,7 @@ export function PixelSetupDialog({
   triggerVariant = "default",
   triggerClassName,
   alreadySetUp,
+  pixelStatus,
   verifyUrl,
 }: {
   website: {
@@ -49,6 +46,8 @@ export function PixelSetupDialog({
   triggerClassName?: string;
   /** True when this website is already set up, so the guide opens on its final step. */
   alreadySetUp?: boolean;
+  /** The website's server-resolved status, shown in the panel until a check here replaces it. */
+  pixelStatus?: PixelStatus;
   /** Page the Verify step should check, when the caller opened this about a specific one. */
   verifyUrl?: string;
 }) {
@@ -71,28 +70,19 @@ export function PixelSetupDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm" variant={triggerVariant} className={triggerClassName}>
-          <Rocket aria-hidden />
           {triggerLabel}
         </Button>
       </DialogTrigger>
-      <DialogContent className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="shrink-0 border-b border-border px-6 py-4 pr-12">
-          <DialogTitle>Set up Routely</DialogTitle>
-          <DialogDescription>
-            Install the tracking pixel on {website.domain} and verify it&apos;s receiving data.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="min-h-0 flex-1 px-6 py-6">
-          <GetStartedGuide
-            website={website}
-            sdkUrl={sdkUrl}
-            verifyAction={verifyAction}
-            verifyUrl={verifyUrl}
-            startOnDone={alreadySetUp ?? false}
-            onDone={finish}
-          />
-        </div>
+      <DialogContent className="block max-w-[760px] gap-0 p-0">
+        <GetStartedGuide
+          website={website}
+          sdkUrl={sdkUrl}
+          verifyAction={verifyAction}
+          verifyUrl={verifyUrl}
+          startOnDone={alreadySetUp ?? false}
+          pixelStatus={pixelStatus}
+          onDone={finish}
+        />
       </DialogContent>
     </Dialog>
   );

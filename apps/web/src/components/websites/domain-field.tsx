@@ -45,11 +45,11 @@ export function DomainField({
       {(props) => (
         // The ring is drawn on the wrapper, and suppressed on both children, so the pair reads as
         // a single control on focus rather than two adjacent ones.
-        <div className="flex rounded-lg ring-offset-background focus-within:ring-2 focus-within:ring-ring">
+        <div className="flex rounded-md focus-within:ring-3 focus-within:ring-primary/15">
           <Select value={protocol} onValueChange={(value) => setProtocol(value as SiteProtocol)}>
             <SelectTrigger
               aria-label="Protocol"
-              className="w-[6.5rem] shrink-0 cursor-pointer rounded-r-none border-r-0 focus-visible:ring-0"
+              className="h-auto! w-[6.5rem] shrink-0 cursor-pointer self-stretch rounded-r-none border-r-0 focus-visible:ring-0"
             >
               <SelectValue />
             </SelectTrigger>

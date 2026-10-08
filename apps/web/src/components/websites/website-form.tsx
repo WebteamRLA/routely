@@ -44,34 +44,37 @@ export function WebsiteForm({
   useFormToast(state);
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} className="flex flex-col gap-4">
       {websiteId ? <input type="hidden" name="websiteId" value={websiteId} /> : null}
 
-      <Field
-        name="name"
-        label="Name"
-        hint="Only used to identify this website inside Routely."
-        errors={state.fieldErrors?.["name"]}
-      >
-        {(props) => (
-          <Input
-            {...props}
-            defaultValue={defaultName}
-            placeholder="Acme Store"
-            maxLength={120}
-            autoComplete="off"
-            required
-          />
-        )}
-      </Field>
+      {/* Side by side where there is room, as the design's settings fields are. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,260px),1fr))] items-start gap-3.5">
+        <Field
+          name="name"
+          label="Name"
+          hint="Only used to identify this website inside Routely."
+          errors={state.fieldErrors?.["name"]}
+        >
+          {(props) => (
+            <Input
+              {...props}
+              defaultValue={defaultName}
+              placeholder="Acme Store"
+              maxLength={120}
+              autoComplete="off"
+              required
+            />
+          )}
+        </Field>
 
-      <DomainField
-        defaultProtocol={defaultProtocol}
-        defaultDomain={defaultDomain}
-        errors={state.fieldErrors?.["domain"]}
-      />
+        <DomainField
+          defaultProtocol={defaultProtocol}
+          defaultDomain={defaultDomain}
+          errors={state.fieldErrors?.["domain"]}
+        />
+      </div>
 
-      <div className="flex flex-wrap gap-2 pt-1">
+      <div className="flex flex-wrap gap-2">
         <SubmitButton pendingLabel={pendingLabel}>{submitLabel}</SubmitButton>
         {cancelHref ? (
           <Button variant="ghost" asChild>
