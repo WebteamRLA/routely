@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,7 +34,7 @@ export function CodeBlock({
       await navigator.clipboard.writeText(code);
       setCopied(true);
       clearTimeout(timeout.current);
-      timeout.current = setTimeout(() => setCopied(false), 2000);
+      timeout.current = setTimeout(() => setCopied(false), 1800);
     } catch {
       const node = codeRef.current;
       if (!node) return;
@@ -49,23 +47,24 @@ export function CodeBlock({
   }
 
   return (
-    <div className={cn("group/code relative", className)}>
-      <pre className="overflow-x-auto rounded-lg bg-muted/60 py-3 pr-12 pl-3 ring-1 ring-border/70">
-        <code ref={codeRef} className="font-mono text-xs leading-relaxed whitespace-pre">
+    <div className={cn("flex items-start gap-3 rounded-lg bg-navy px-4 py-3.5", className)}>
+      <pre className="m-0 min-w-0 flex-1 overflow-x-auto">
+        <code
+          ref={codeRef}
+          className="font-mono text-[12.5px] leading-relaxed whitespace-pre text-[#C9D6FF]"
+        >
           {code}
         </code>
       </pre>
 
-      <Button
+      <button
         type="button"
-        variant="outline"
-        size="icon-sm"
         onClick={copy}
         aria-label={copied ? "Copied" : label}
-        className="absolute top-2 right-2"
+        className="h-[30px] shrink-0 cursor-pointer rounded-md bg-brand px-3 text-[12.5px] font-extrabold text-white outline-none hover:bg-[#3D69F5] focus-visible:ring-3 focus-visible:ring-white/40"
       >
-        {copied ? <Check className="text-primary" aria-hidden /> : <Copy aria-hidden />}
-      </Button>
+        {copied ? "Copied ✓" : "Copy"}
+      </button>
 
       <span aria-live="polite" className="sr-only">
         {copied ? "Copied to clipboard" : ""}

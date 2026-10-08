@@ -20,20 +20,27 @@ export function EmptyState({ icon: Icon, title, description, action, className }
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 py-14 text-center",
+        "flex flex-col items-center justify-center gap-2.5 rounded-lg border border-dashed border-[#CBD1DC] bg-card px-6 py-12 text-center",
         className,
       )}
     >
       {Icon ? (
-        <div className="mb-4 rounded-full bg-muted p-3 text-muted-foreground">
+        <div className="grid size-11 place-items-center rounded-lg bg-brand-tint-2 text-primary">
           <Icon className="size-5" aria-hidden />
         </div>
-      ) : null}
-      <h2 className="text-base font-medium">{title}</h2>
+      ) : (
+        <div aria-hidden className="flex gap-1.5">
+          <span className="h-[46px] w-[34px] rounded-md bg-brand" />
+          <span className="h-[46px] w-[34px] rounded-md bg-coral" />
+        </div>
+      )}
+      <h2 className="mt-1.5 font-heading text-xl font-semibold">{title}</h2>
       {description ? (
-        <p className="mt-1 max-w-sm text-sm text-balance text-muted-foreground">{description}</p>
+        <p className="max-w-[440px] text-sm leading-relaxed text-balance text-ink-3">
+          {description}
+        </p>
       ) : null}
-      {action ? <div className="mt-5">{action}</div> : null}
+      {action ? <div className="mt-2 flex flex-wrap justify-center gap-2.5">{action}</div> : null}
     </div>
   );
 }

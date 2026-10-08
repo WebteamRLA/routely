@@ -44,15 +44,16 @@ export function LiftBadge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 text-sm font-medium tabular-nums",
-        flat ? "text-muted-foreground" : lift > 0 ? "text-primary" : "text-destructive",
+        "inline-flex items-center gap-1 text-sm font-extrabold tabular-nums",
+        flat ? "text-ink-2" : lift > 0 ? "text-success-text" : "text-danger-text",
         className,
       )}
       title="Relative change in conversion rate versus the control. Descriptive only — not a significance test."
     >
       <Icon className="size-3.5" aria-hidden />
       {lift > 0 && !flat ? "+" : ""}
-      {(lift * 100).toFixed(1)}%
+      {lift < 0 && !flat ? "−" : ""}
+      {Math.abs(lift * 100).toFixed(1)}%
     </span>
   );
 }

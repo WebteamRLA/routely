@@ -30,20 +30,19 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        "flex flex-col items-center justify-center rounded-xl border border-dashed border-border px-6 py-14 text-center",
+        "flex flex-col items-start gap-2 rounded-lg border border-danger-border bg-card px-6 py-8",
         className,
       )}
     >
-      <div className="mb-4 rounded-full bg-destructive/10 p-3 text-destructive">
-        <AlertTriangle className="size-5" aria-hidden />
+      <div className="flex items-center gap-2 text-xs font-extrabold tracking-[0.08em] text-danger-text uppercase">
+        <AlertTriangle className="size-3.5" aria-hidden />
+        Couldn&rsquo;t load
       </div>
-      <h2 className="text-base font-medium">{title}</h2>
-      <p className="mt-1 max-w-sm text-sm text-balance text-muted-foreground">{description}</p>
-      {digest ? (
-        <p className="mt-3 font-mono text-xs text-muted-foreground">Reference: {digest}</p>
-      ) : null}
+      <h2 className="font-heading text-lg font-semibold">{title}</h2>
+      <p className="max-w-[560px] text-sm text-ink-3">{description}</p>
+      {digest ? <p className="font-mono text-xs text-ink-3">Reference: {digest}</p> : null}
       {onRetry ? (
-        <Button variant="outline" className="mt-5" onClick={onRetry}>
+        <Button variant="dark" className="mt-1.5" onClick={onRetry}>
           <RotateCcw aria-hidden />
           Try again
         </Button>

@@ -51,7 +51,7 @@ export function Field({
   const describedBy = [errorId, hintId].filter(Boolean).join(" ") || undefined;
 
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("space-y-1.5", className)}>
       <Label htmlFor={id}>
         {label}
         {required ? (
@@ -69,13 +69,13 @@ export function Field({
       })}
 
       {errors?.length ? (
-        <p id={errorId} className="text-xs text-destructive">
+        <p id={errorId} className="text-[12.5px] font-semibold text-danger-text">
           {errors.join(" ")}
         </p>
       ) : null}
 
       {hint ? (
-        <p id={hintId} className="text-xs text-muted-foreground">
+        <p id={hintId} className="text-[12.5px] text-ink-3">
           {hint}
         </p>
       ) : null}
