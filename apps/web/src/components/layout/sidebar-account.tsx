@@ -1,4 +1,7 @@
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import { signOutAction } from "@/server/auth/actions";
 import type { SessionUser } from "@/server/auth/session";
@@ -14,50 +17,79 @@ function initials(user: Pick<SessionUser, "name" | "email">): string {
 }
 
 /**
- * Who is signed in, and how to stop being signed in — pinned to the bottom of the sidebar.
- *
- * This replaced an avatar dropdown in the top bar. The dropdown held only a name, an email and
- * a sign-out item, so it cost a click to reach a two-line label and one action; here the same
- * information is simply visible, and signing out is one click instead of two. It also puts
- * account controls in the one column that is about *navigation and identity*, leaving the top
- * bar to the page.
- *
- * A Server Component wrapping a form, so signing out is a plain form submission to a Server
- * Action — it works with JavaScript disabled.
+ * The profile button at the foot of the sidebar, and the account menu it opens upward: who is
+ * signed in, and "Log out". Signing out is a plain form submission to a Server Action, so it
+ * works with JavaScript disabled once the menu is open.
  */
 export function SidebarAccount({
   user,
-  collapsed = false,
   className,
 }: {
   user: Pick<SessionUser, "name" | "email" | "image">;
-  collapsed?: boolean;
   className?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const name = user.name?.trim() || user.email;
+
   return (
-    <div className={cn("border-t border-border px-3 py-3", className)}>
-      <div className="flex items-center gap-2.5 rounded-lg px-3 py-2">
-        <Avatar className="size-7 shrink-0">
-          {user.image ? <AvatarImage src={user.image} alt="" /> : null}
-          <AvatarFallback className="text-[11px]">{initials(user)}</AvatarFallback>
-        </Avatar>
-
-        {/* Collapsed, the avatar alone identifies the account; the text folds away on the same
-         * timing as the nav labels so the whole rail narrows as one movement. */}
-        <div
-          className={cn(
-            "min-w-0 overflow-hidden transition-[max-width,opacity] duration-300 ease-in-out",
-            collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100",
-          )}
-        >
-          <p className="truncate text-sm font-medium">{user.name ?? "Signed in"}</p>
-          <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+    <div ref={rootRef} className={cn("relative border-t border-white/8 pt-2.5", className)}>
+      {open ? (
+        <div className="absolute inset-x-0 bottom-[calc(100%+6px)] z-60 rounded-lg bg-white p-1 text-foreground shadow-[0_14px_36px_rgba(0,0,0,0.35)]">
+          <div className="mb-1 min-w-0 border-b border-divider px-2.5 pt-2.5 pb-[9px]">
+            <div className="truncate text-[13px] font-extrabold">{name}</div>
+            <div className="truncate text-xs text-ink-3">{user.email}</div>
+          </div>
+          <form action={signOutAction}>
+            <SignOutButton />
+          </form>
         </div>
-      </div>
+      ) : null}
 
-      <form action={signOutAction}>
-        <SignOutButton collapsed={collapsed} />
-      </form>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-label="Account menu"
+        aria-expanded={open}
+        className={cn(
+          "flex w-full cursor-pointer items-center gap-2.5 rounded-md p-1.5 text-left text-white outline-none",
+          "hover:bg-white/7 focus-visible:ring-3 focus-visible:ring-primary/40",
+          open && "bg-white/7",
+        )}
+      >
+        {user.image ? (
+          // eslint-disable-next-line @next/next/no-img-element -- a Google avatar URL; next/image would need the host allow-listed for a 30px picture.
+          <img src={user.image} alt="" className="size-[30px] shrink-0 rounded-full object-cover" />
+        ) : (
+          <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-coral text-xs font-extrabold text-white">
+            {initials(user)}
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-bold">{name}</span>
+          <span className="block truncate text-xs text-white/60">{user.email}</span>
+        </span>
+        <span aria-hidden className="text-[11px] text-white/60">
+          {open ? "▼" : "▲"}
+        </span>
+      </button>
     </div>
   );
 }

@@ -2,37 +2,41 @@
 
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 
+/** The design's toast marker: a small rotated square, coral for news and red-tinted for errors. */
+function Diamond({ className }: { className: string }) {
+  return <span aria-hidden className={`block size-[7px] shrink-0 rotate-45 ${className}`} />;
+}
+
 /**
  * Toast host, mounted once in the root layout.
  *
- * Styled from the app's own theme tokens rather than sonner's defaults, so a toast is
- * recognisably part of the product in either colour scheme and does not need a second palette
- * kept in sync with the first.
- *
- * `richColors` is deliberately off. It paints success green and error red across the whole
- * surface, which reads as an alarm for what is usually a routine confirmation; the icon and
- * the wording carry the meaning instead, and the destructive token is reserved for the errors
- * that genuinely warrant it.
+ * The design's toast: navy, bottom-centre, a coral diamond in place of an icon, gone after 2.8s.
+ * Errors keep the same surface — the wording carries the meaning, and the diamond turns red so
+ * the difference does not rest on reading alone.
  */
 export function Toaster(props: ToasterProps) {
   return (
     <Sonner
-      position="bottom-right"
-      // Applies to successes and errors alike. Kept here as the single place the timing is
-      // set, so changing it does not mean hunting for a second value elsewhere.
-      duration={3000}
-      closeButton
+      position="bottom-center"
+      duration={2800}
+      icons={{
+        success: <Diamond className="bg-coral" />,
+        info: <Diamond className="bg-coral" />,
+        warning: <Diamond className="bg-[#F5B544]" />,
+        error: <Diamond className="bg-[#FF7A66]" />,
+      }}
       toastOptions={{
+        unstyled: true,
         classNames: {
           toast:
-            "group rounded-lg border border-border bg-popover text-popover-foreground shadow-lg",
-          title: "text-sm font-medium",
-          description: "text-sm text-muted-foreground",
-          actionButton: "bg-primary text-primary-foreground",
-          cancelButton: "bg-muted text-muted-foreground",
-          closeButton: "border-border bg-popover text-muted-foreground",
-          error: "border-destructive/30 [&_[data-icon]]:text-destructive",
-          success: "[&_[data-icon]]:text-emerald-600 dark:[&_[data-icon]]:text-emerald-400",
+            "flex w-full items-center gap-2.5 rounded-lg bg-navy px-[18px] py-3 text-[13.5px] font-bold text-white shadow-[0_12px_30px_rgba(10,22,51,0.3)]",
+          title: "font-bold",
+          description: "text-[12.5px] font-medium text-white/70",
+          icon: "flex size-auto items-center",
+          actionButton:
+            "ml-auto h-7 shrink-0 cursor-pointer rounded-md bg-primary px-2.5 text-xs font-bold text-white",
+          cancelButton:
+            "h-7 shrink-0 cursor-pointer rounded-md bg-white/10 px-2.5 text-xs font-bold text-white",
         },
       }}
       {...props}

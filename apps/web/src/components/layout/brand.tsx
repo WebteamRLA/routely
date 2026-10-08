@@ -1,26 +1,37 @@
 import Link from "next/link";
-import { Split } from "lucide-react";
 
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
 /**
+ * The design's logo mark: two rectangles, brand blue and coral — the two arms of a split.
+ * Drawn in markup rather than shipped as an image so it stays crisp at every size.
+ */
+export function BrandMark({ className }: { className?: string }) {
+  return (
+    <span aria-hidden className={cn("flex size-6 shrink-0 overflow-hidden rounded-md", className)}>
+      <span className="flex-1 bg-brand" />
+      <span className="flex-1 bg-coral" />
+    </span>
+  );
+}
+
+/**
  * The product wordmark.
  *
- * `size="lg"` is the standalone treatment used on unauthenticated screens, where the mark is
- * the only branding on the page; `sm` is the inline treatment for the dashboard chrome.
+ * `size="lg"` is the standalone treatment used on unauthenticated screens; `sm` is the inline
+ * treatment for the dashboard chrome. `tone="light"` is for the navy surfaces.
  */
 export function Brand({
   className,
   href = routes.experiments.list,
   size = "sm",
-  showLabel = true,
+  tone = "dark",
 }: {
   className?: string;
   href?: string;
   size?: "sm" | "lg";
-  /** Hidden by the collapsed sidebar, which only has room for the mark. */
-  showLabel?: boolean;
+  tone?: "dark" | "light";
 }) {
   const large = size === "lg";
 
@@ -28,29 +39,15 @@ export function Brand({
     <Link
       href={href}
       className={cn(
-        "inline-flex items-center rounded-md font-semibold tracking-tight",
-        "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-        large ? "gap-2.5 text-base" : "gap-2 text-sm",
+        "inline-flex items-center gap-2.5 rounded-md font-heading tracking-[-0.01em] no-underline hover:no-underline",
+        "outline-none focus-visible:ring-3 focus-visible:ring-primary/30",
+        tone === "light" ? "text-white hover:text-white" : "text-foreground hover:text-foreground",
+        large ? "text-xl font-bold" : "text-[19px] font-semibold",
         className,
       )}
     >
-      <span
-        className={cn(
-          "grid shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground",
-          large ? "size-10 shadow-sm" : "size-7 rounded-md",
-        )}
-      >
-        <Split className={large ? "size-5" : "size-4"} aria-hidden />
-      </span>
-      {/* Always rendered so the collapse animates as a width/opacity fade instead of a snap. */}
-      <span
-        className={cn(
-          "overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-in-out",
-          showLabel ? "max-w-[120px] opacity-100" : "max-w-0 opacity-0",
-        )}
-      >
-        Routely
-      </span>
+      <BrandMark />
+      Routely
     </Link>
   );
 }

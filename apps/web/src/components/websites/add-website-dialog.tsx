@@ -116,12 +116,24 @@ function AddWebsiteForm({
 export function AddWebsiteDialog({
   onCreated,
   trigger = DEFAULT_TRIGGER,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   onCreated?: (website: CreatedWebsite) => void;
-  trigger?: React.ReactNode;
+  /** Omitted (`null`) when the dialog is opened from elsewhere through `open`. */
+  trigger?: React.ReactNode | null;
+  /** Controlled mode, for an opener that unmounts as it opens the dialog (the sidebar's
+   * website menu closes when an item is chosen, and would take an inner trigger with it). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
 
   // Remounts the form on each open so its action state starts fresh. Without this, the result
   // of the previous submission would still be showing — and a second website could not be
@@ -129,8 +141,15 @@ export function AddWebsiteDialog({
   const [session, setSession] = useState(0);
 
   function handleOpenChange(next: boolean) {
-    if (next) setSession((value) => value + 1);
     setOpen(next);
+  }
+
+  // Bumped on each transition to open, whether it came through the trigger or from a
+  // controlling parent — a controlled open never passes through `handleOpenChange`.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setSession((value) => value + 1);
   }
 
   function handleSuccess(website: CreatedWebsite) {
@@ -146,7 +165,7 @@ export function AddWebsiteDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      {trigger === null ? null : <DialogTrigger asChild>{trigger}</DialogTrigger>}
 
       <DialogContent className="max-w-md">
         <DialogHeader>

@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { requireSession } from "@/server/auth/session";
+import * as websiteService from "@/server/services/website.service";
 
 /**
  * The authorization boundary for the entire dashboard.
@@ -12,6 +13,15 @@ import { requireSession } from "@/server/auth/session";
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
+  // For the sidebar's website menu. Ownership-scoped like every other read.
+  const websites = await websiteService.listWebsites(session.user.id);
 
-  return <AppShell user={session.user}>{children}</AppShell>;
+  return (
+    <AppShell
+      user={session.user}
+      websites={websites.map(({ id, name, domain }) => ({ id, name, domain }))}
+    >
+      {children}
+    </AppShell>
+  );
 }
