@@ -33,7 +33,3 @@ export function findVisitor(
     where: { websiteId_anonymousId: { websiteId, anonymousId } },
   });
 }
-
-export function countVisitorsForWebsite(websiteId: string, client: DbClient = db): Promise<number> {
-  return client.visitor.count({ where: { websiteId } });
-}

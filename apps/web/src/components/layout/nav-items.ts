@@ -1,29 +1,44 @@
 import { routes } from "@/lib/routes";
 
 export interface NavItem {
-  href: string;
   label: string;
-  /** Other path prefixes that should light this item up — the experiment wizard and detail
-   * pages highlight "Experiments", as in the design. */
-  also?: string[];
+  href: string;
+  active: boolean;
+  /** Shown as a pill (Experiments and Manage projects only, as in the design). */
+  count?: number;
 }
 
 /**
- * Shared by the desktop sidebar and the mobile drawer so the two can never disagree.
- *
- * Ordered as the design's sidebar. "Dashboard" is the Get started page: the account's figures,
- * its websites and their install state. The design's "Manage projects" and "Settings" entries
- * have no counterpart yet — a website's settings live on its own page, reached from the
- * website menu above the nav.
+ * The design's WORKSPACE nav, in its order. Active rules (DESIGN.md §1.3): the wizard and the
+ * experiment detail light up "Experiments"; Settings → Team is still "Settings". Without a
+ * project only "Manage projects" exists.
  */
-export const NAV_ITEMS: NavItem[] = [
-  { href: routes.getStarted, label: "Dashboard", also: ["/websites"] },
-  { href: routes.experiments.list, label: "Experiments", also: ["/experiments/"] },
-  { href: routes.metrics.list, label: "Metrics & goals", also: ["/metrics/"] },
-  { href: routes.integrations, label: "Integrations" },
-];
+export function buildNav(
+  pathname: string,
+  projectId: string | null,
+  counts: { experiments: number; projects: number },
+): NavItem[] {
+  const manage: NavItem = {
+    label: "Manage projects",
+    href: routes.projects,
+    active: pathname === routes.projects || pathname.startsWith(`${routes.projects}/`),
+    count: counts.projects,
+  };
+  if (!projectId) return [manage];
 
-export function isNavItemActive(item: NavItem, pathname: string): boolean {
-  if (pathname === item.href) return true;
-  return (item.also ?? []).some((prefix) => pathname.startsWith(prefix));
+  const p = routes.project(projectId);
+  const under = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  return [
+    { label: "Dashboard", href: p.dashboard, active: pathname === p.dashboard },
+    {
+      label: "Experiments",
+      href: p.experiments(),
+      active: under(p.experiments()),
+      count: counts.experiments,
+    },
+    { label: "Metrics & goals", href: p.metrics(), active: under(p.metrics()) },
+    { label: "Integrations", href: p.integrations(), active: under(p.integrations()) },
+    manage,
+    { label: "Settings", href: p.settings(), active: under(`${p.dashboard}/settings`) },
+  ];
 }

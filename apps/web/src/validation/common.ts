@@ -63,42 +63,6 @@ export const absoluteUrlSchema = z
     }
   });
 
-/**
- * A bare hostname such as `acme.com` or `shop.acme.co.uk`.
- * Accepts a pasted URL and reduces it to its host, because that is what users usually paste.
- */
-export const domainSchema = z
-  .string()
-  .trim()
-  .min(1, "Required")
-  .max(253, "Too long")
-  .transform((value) => {
-    const withScheme = /^https?:\/\//i.test(value) ? value : `https://${value}`;
-    try {
-      return new URL(withScheme).hostname.toLowerCase();
-    } catch {
-      return value.toLowerCase();
-    }
-  })
-  .refine(
-    (host) => /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/.test(host),
-    "Enter a valid domain, for example acme.com",
-  );
-
-/** Human-readable name for a website or experiment. */
-export const displayNameSchema = z
-  .string()
-  .trim()
-  .min(1, "Required")
-  .max(120, "Must be 120 characters or fewer");
-
-/** Percentage of visitors on the control page entered into an experiment at all. */
-export const trafficAllocationSchema = z
-  .number()
-  .int("Must be a whole number")
-  .min(1, "Must be at least 1%")
-  .max(100, "Must be at most 100%");
-
 /** Inclusive date range used by dashboard queries. */
 export const dateRangeSchema = z
   .object({
@@ -111,3 +75,33 @@ export const dateRangeSchema = z
   });
 
 export type DateRange = z.infer<typeof dateRangeSchema>;
+
+/**
+ * An IANA time zone such as `Europe/London` or `America/New_York`.
+ *
+ * Checked by asking the runtime's own time-zone database rather than a hard-coded list: the
+ * same database is what later formats reporting days, so anything it accepts here it can use.
+ */
+export const timezoneSchema = z
+  .string()
+  .trim()
+  .min(1, "Choose a time zone.")
+  .max(64, "Choose a time zone.")
+  .refine((zone) => isValidTimeZone(zone), "Choose a valid time zone, e.g. Europe/London.");
+
+export function isValidTimeZone(zone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** An email address, lowercased. Deliberately simple: the prototype's own rule. */
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254, "Enter a valid email address.")
+  .regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Enter a valid email address.");

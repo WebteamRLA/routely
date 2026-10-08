@@ -22,17 +22,6 @@ export type ExperimentWithWebsite = Prisma.ExperimentGetPayload<{
   include: { website: true } & typeof VARIANTS_INCLUDE;
 }>;
 
-export function listExperimentsForWebsite(
-  websiteId: string,
-  userId: string,
-  client: DbClient = db,
-): Promise<Experiment[]> {
-  return client.experiment.findMany({
-    where: { websiteId, website: { userId } },
-    orderBy: { createdAt: "desc" },
-  });
-}
-
 export function findExperimentForUser(
   experimentId: string,
   userId: string,
@@ -41,21 +30,6 @@ export function findExperimentForUser(
   return client.experiment.findFirst({
     where: { id: experimentId, website: { userId } },
     include: { website: true, ...VARIANTS_INCLUDE },
-  });
-}
-
-/**
- * Active experiments for one website, as published to the browser by the config endpoint.
- * Deliberately keyed on the website id resolved from a public site id, never on a user.
- */
-export function listActiveExperiments(
-  websiteId: string,
-  client: DbClient = db,
-): Promise<ExperimentWithVariants[]> {
-  return client.experiment.findMany({
-    where: { websiteId, status: "ACTIVE" },
-    orderBy: { createdAt: "asc" },
-    include: VARIANTS_INCLUDE,
   });
 }
 
@@ -80,22 +54,6 @@ export function listActiveExperimentsExcluding(
 }
 
 /**
- * Resolves an experiment during ingestion, confirming it belongs to the reporting website.
- * Includes variants so the caller can verify a claimed variant id actually belongs to this
- * experiment before trusting it.
- */
-export function findActiveExperimentForWebsite(
-  experimentId: string,
-  websiteId: string,
-  client: DbClient = db,
-): Promise<ExperimentWithVariants | null> {
-  return client.experiment.findFirst({
-    where: { id: experimentId, websiteId, status: "ACTIVE" },
-    include: VARIANTS_INCLUDE,
-  });
-}
-
-/**
  * Resolves an experiment by its public share token.
  *
  * Unscoped by user by design — the token is the credential. It is looked up on a unique index,
@@ -111,87 +69,6 @@ export function findExperimentByShareToken(
   });
 }
 
-export interface ExperimentQuery {
-  status?: ExperimentStatus;
-  /** Case-insensitive substring match on the name. */
-  search?: string;
-}
-
-/**
- * Every experiment the user owns, across all their websites, newest first.
- *
- * Filtering happens in the query rather than in memory: a customer with many experiments
- * should not transfer all of them to render a filtered list, and the `[websiteId, createdAt]`
- * index keeps the ordering cheap.
- */
-export function listExperimentsForUser(
-  userId: string,
-  query: ExperimentQuery = {},
-  client: DbClient = db,
-): Promise<ExperimentWithWebsite[]> {
-  return client.experiment.findMany({
-    where: {
-      website: { userId },
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.search ? { name: { contains: query.search, mode: "insensitive" as const } } : {}),
-    },
-    orderBy: { createdAt: "desc" },
-    include: { website: true, ...VARIANTS_INCLUDE },
-  });
-}
-
-/** How many experiments the user has in each status, for the tab counts. */
-export async function countExperimentsByStatus(
-  userId: string,
-  client: DbClient = db,
-): Promise<Record<ExperimentStatus, number>> {
-  const rows = await client.experiment.groupBy({
-    by: ["status"],
-    where: { website: { userId } },
-    _count: { _all: true },
-  });
-
-  const totals: Record<ExperimentStatus, number> = {
-    DRAFT: 0,
-    ACTIVE: 0,
-    PAUSED: 0,
-    ARCHIVED: 0,
-  };
-  for (const row of rows) {
-    totals[row.status] = row._count._all;
-  }
-  return totals;
-}
-
-/**
- * Experiment counts per website for one user, split into total and currently running.
- *
- * One grouped query covering every website at once, rather than a count per row: the Get
- * started table lists them all, and a per-row query would scale with how many websites an
- * account has.
- */
-export async function countExperimentsByWebsite(
-  userId: string,
-  client: DbClient = db,
-): Promise<Map<string, { total: number; active: number }>> {
-  const rows = await client.experiment.groupBy({
-    by: ["websiteId", "status"],
-    where: { website: { userId } },
-    _count: { _all: true },
-  });
-
-  const totals = new Map<string, { total: number; active: number }>();
-
-  for (const row of rows) {
-    const entry = totals.get(row.websiteId) ?? { total: 0, active: 0 };
-    entry.total += row._count._all;
-    if (row.status === "ACTIVE") entry.active += row._count._all;
-    totals.set(row.websiteId, entry);
-  }
-
-  return totals;
-}
-
 export function createExperiment(
   data: Prisma.ExperimentUncheckedCreateInput,
   client: DbClient = db,
@@ -202,7 +79,7 @@ export function createExperiment(
 export function updateExperiment(
   experimentId: string,
   userId: string,
-  data: Prisma.ExperimentUpdateInput,
+  data: Prisma.ExperimentUpdateManyArgs["data"],
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
   return client.experiment.updateMany({
@@ -222,7 +99,7 @@ export function updateExperiment(
  */
 export async function replaceVariants(
   experimentId: string,
-  variants: { id?: string; url: string; weight: number }[],
+  variants: { id?: string; url: string; weight: number; changes?: Prisma.InputJsonValue }[],
   client: DbClient = db,
 ): Promise<void> {
   const existing = await client.experimentVariant.findMany({
@@ -238,14 +115,17 @@ export async function replaceVariants(
 
   for (const [index, variant] of variants.entries()) {
     const position = index + 1;
-    if (variant.id) {
+    const changes = variant.changes !== undefined ? { changes: variant.changes } : {};
+    // Only ids that already belong to this experiment are updated; any other id (stale, or
+    // forged in a form body) is treated as a new arm rather than touching someone else's row.
+    if (variant.id && existing.some((row) => row.id === variant.id)) {
       await client.experimentVariant.update({
         where: { id: variant.id },
-        data: { url: variant.url, weight: variant.weight, position },
+        data: { url: variant.url, weight: variant.weight, position, ...changes },
       });
     } else {
       await client.experimentVariant.create({
-        data: { experimentId, url: variant.url, weight: variant.weight, position },
+        data: { experimentId, url: variant.url, weight: variant.weight, position, ...changes },
       });
     }
   }
@@ -259,4 +139,71 @@ export function deleteExperiment(
   return client.experiment.deleteMany({
     where: { id: experimentId, website: { userId } },
   });
+}
+
+/** One experiment, scoped to a project *and* its owner. */
+export function findExperimentInProject(
+  experimentId: string,
+  websiteId: string,
+  userId: string,
+  client: DbClient = db,
+): Promise<ExperimentWithWebsite | null> {
+  return client.experiment.findFirst({
+    where: { id: experimentId, websiteId, website: { userId } },
+    include: { website: true, ...VARIANTS_INCLUDE },
+  });
+}
+
+export interface ProjectExperimentQuery {
+  status?: ExperimentStatus;
+  type?: Experiment["type"];
+  /** Case-insensitive substring of the name or URL. */
+  search?: string;
+}
+
+/** A project's experiments, newest first, with variants. */
+export function listExperimentsForProject(
+  websiteId: string,
+  userId: string,
+  query: ProjectExperimentQuery = {},
+  client: DbClient = db,
+): Promise<ExperimentWithVariants[]> {
+  const search = query.search?.trim();
+  return client.experiment.findMany({
+    where: {
+      websiteId,
+      website: { userId },
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.type ? { type: query.type } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" as const } },
+              { controlUrl: { contains: search, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    include: VARIANTS_INCLUDE,
+  });
+}
+
+/** Experiment counts per website and status for one user. */
+export async function countExperimentsByWebsiteAndStatus(
+  userId: string,
+  client: DbClient = db,
+): Promise<Map<string, Record<ExperimentStatus, number>>> {
+  const rows = await client.experiment.groupBy({
+    by: ["websiteId", "status"],
+    where: { website: { userId } },
+    _count: { _all: true },
+  });
+  const totals = new Map<string, Record<ExperimentStatus, number>>();
+  for (const row of rows) {
+    const entry = totals.get(row.websiteId) ?? { DRAFT: 0, ACTIVE: 0, PAUSED: 0, ARCHIVED: 0 };
+    entry[row.status] += row._count._all;
+    totals.set(row.websiteId, entry);
+  }
+  return totals;
 }

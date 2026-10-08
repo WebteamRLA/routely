@@ -2,60 +2,836 @@ import "server-only";
 
 import { randomBytes } from "node:crypto";
 
-import type { Experiment, ExperimentStatus, Website } from "@/generated/prisma/client";
-import { controlUrlsConflict, isSameSite } from "@/lib/url";
+import { env } from "@/env";
+import type { Experiment, ExperimentStatus, Metric, Prisma } from "@/generated/prisma/client";
+import {
+  armName,
+  type DraftErrors,
+  type ExperimentDraft,
+  type ExperimentKind,
+  type ExperimentStatusKey,
+  MAX_ARMS,
+  type WizardStepKey,
+} from "@/lib/domain";
+import { pathOf } from "@/lib/domain-normalize";
+import { normalizeTargeting } from "@/lib/targeting";
+import { validateDraft } from "@/lib/validate-draft";
+import type { ArmTotals, ExperimentDetail, ExperimentListItem } from "@/lib/view-models";
 import { db } from "@/server/db";
 import { conflict, notFound, validationFailed } from "@/server/errors";
+import {
+  armsOf,
+  countingFromKey,
+  countingKey,
+  displayStatus,
+  draftSourceOf,
+  flattenDraftErrors,
+  kindKey,
+  matchFromKey,
+  metricGoalView,
+  onProjectDomain,
+  pageRuleOf,
+  pageRulesOverlap,
+  primaryGoalView,
+  statusFromKey,
+  statusKey,
+  typeFromKind,
+} from "@/server/mappers";
+import * as activityRepo from "@/server/repositories/activity.repository";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
-import * as websiteRepo from "@/server/repositories/website.repository";
+import * as metricRepo from "@/server/repositories/metric.repository";
+import type * as websiteRepo from "@/server/repositories/website.repository";
+import { primaryTotalsFor } from "@/server/services/analytics.service";
+import { projectDomains, requireProject } from "@/server/services/website.service";
 import { parseOrThrow } from "@/server/validate";
 import {
-  type ExperimentVariantInput,
-  changeExperimentStatusSchema,
-  createExperimentSchema,
-  updateExperimentSchema,
+  type ExperimentDraftInput,
+  changeSchema,
+  editLiveExperimentSchema,
+  endExperimentSchema,
+  experimentDraftSchema,
 } from "@/validation/experiment";
 
 /**
  * Experiment business logic.
  *
  * As with websites, `actorUserId` is threaded into every query — here through the parent
- * website relation — so ownership is enforced in the same statement that reads or writes.
+ * website relation — so ownership is enforced in the same statement that reads or writes. The
+ * project-scoped functions (the new UI) additionally require the experiment to belong to the
+ * project in the URL, so `/p/A/experiments/<id of B's experiment>` is "not found" even for
+ * the owner of both.
  *
- * Two rules live here rather than in the Zod schemas, because both need data the schema
- * cannot see: the same-site rule needs the website's domain, and the conflict rule needs the
- * website's other experiments.
+ * Rules that need data a Zod schema cannot see live here: the same-site rule needs the
+ * project's domains, the conflict rule needs the project's other experiments, goal ownership
+ * needs its metrics.
+ *
+ * Status mapping (database → UI): DRAFT = draft, ACTIVE = running, PAUSED = paused,
+ * ARCHIVED = completed (+ `winnerPosition`).
  */
+
+// ===========================================================================================
+// Project-scoped API (the new UI)
+// ===========================================================================================
+
+const UNTITLED = "Untitled experiment";
+
+/** Display name of the acting user for activity rows. */
+async function actorName(actorUserId: string): Promise<string | null> {
+  const user = await db.user.findUnique({
+    where: { id: actorUserId },
+    select: { name: true, email: true },
+  });
+  return user ? user.name?.trim() || user.email : null;
+}
+
+async function logActivity(
+  experimentId: string,
+  actorUserId: string,
+  text: string,
+  client: Parameters<typeof activityRepo.recordActivity>[1] = db,
+): Promise<void> {
+  await activityRepo.recordActivity(
+    { experimentId, actorName: await actorName(actorUserId), text },
+    client,
+  );
+}
+
+/** An experiment of the project, ownership-checked. NOT_FOUND otherwise. */
+async function requireExperimentInProject(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+): Promise<experimentRepo.ExperimentWithWebsite> {
+  const experiment = await experimentRepo.findExperimentInProject(
+    experimentId,
+    projectId,
+    actorUserId,
+  );
+  if (!experiment) throw notFound("That experiment does not exist.");
+  return experiment;
+}
+
+async function metricsById(projectId: string, actorUserId: string): Promise<Map<string, Metric>> {
+  const metrics = await metricRepo.listMetricsForProject(projectId, actorUserId);
+  return new Map(metrics.map((metric) => [metric.id, metric]));
+}
+
+function daysRunning(experiment: Experiment, now: Date): number {
+  if (!experiment.publishedAt) return 0;
+  const end = experiment.status === "ARCHIVED" && experiment.stoppedAt ? experiment.stoppedAt : now;
+  return Math.max(1, Math.ceil((end.getTime() - experiment.publishedAt.getTime()) / 86_400_000));
+}
+
+function toListItem(
+  experiment: experimentRepo.ExperimentWithVariants,
+  metrics: Map<string, Metric>,
+  totals: ArmTotals[] | undefined,
+  now: Date,
+): ExperimentListItem {
+  const arms = armsOf(experiment);
+  const armTotals = arms.map(
+    (arm) =>
+      totals?.find((t) => t.position === arm.position) ?? { position: arm.position, v: 0, c: 0 },
+  );
+  return {
+    id: experiment.id,
+    projectId: experiment.websiteId,
+    name: experiment.name,
+    type: kindKey(experiment.type),
+    status: statusKey(experiment.status),
+    displayStatus: displayStatus(experiment.status, experiment.winnerPosition),
+    url: experiment.controlUrl,
+    path: pathOf(experiment.controlUrl),
+    hypothesis: experiment.description ?? "",
+    coverage: experiment.trafficAllocation,
+    arms,
+    goal: primaryGoalView(experiment, metrics),
+    counting: countingKey(experiment.countingMode),
+    winnerPosition: experiment.status === "ARCHIVED" ? experiment.winnerPosition : null,
+    createdAt: experiment.createdAt.toISOString(),
+    updatedAt: experiment.updatedAt.toISOString(),
+    publishedAt: experiment.publishedAt?.toISOString() ?? null,
+    stoppedAt: experiment.stoppedAt?.toISOString() ?? null,
+    daysRunning: daysRunning(experiment, now),
+    totals: armTotals,
+    visitors: armTotals.reduce((sum, t) => sum + t.v, 0),
+    conversions: armTotals.reduce((sum, t) => sum + t.c, 0),
+  };
+}
+
+export interface ExperimentListFilters {
+  status?: ExperimentStatusKey | "all";
+  type?: ExperimentKind | "all";
+  q?: string;
+  /** `updated` (default) | `created` | `name` | `visitors` | `cr`. */
+  sort?: "updated" | "created" | "name" | "visitors" | "cr";
+}
 
 /**
- * Permitted status transitions.
- *
- * Modelling this as data rather than a chain of `if`s means the rules are visible in one
- * place and the UI can derive which buttons to show from the same table. ARCHIVED is
- * terminal: an archived experiment keeps its collected data but can never collect more.
+ * A project's experiments for the list (and dashboard), with all-time per-arm totals on each
+ * experiment's primary goal. `q` matches name or URL, case-insensitively.
  */
-const ALLOWED_TRANSITIONS: Record<ExperimentStatus, readonly ExperimentStatus[]> = {
-  DRAFT: ["ACTIVE", "ARCHIVED"],
-  ACTIVE: ["PAUSED", "ARCHIVED"],
-  PAUSED: ["ACTIVE", "ARCHIVED"],
-  ARCHIVED: [],
-};
-
-export function listExperiments(actorUserId: string, websiteId: string): Promise<Experiment[]> {
-  return experimentRepo.listExperimentsForWebsite(websiteId, actorUserId);
-}
-
-/** All the actor's experiments, filtered, for the experiments list page. */
-export function listAllExperiments(
+export async function listForProject(
   actorUserId: string,
-  query: experimentRepo.ExperimentQuery = {},
-): Promise<experimentRepo.ExperimentWithWebsite[]> {
-  return experimentRepo.listExperimentsForUser(actorUserId, query);
+  projectId: string,
+  filters: ExperimentListFilters = {},
+  now: Date = new Date(),
+): Promise<ExperimentListItem[]> {
+  const project = await requireProject(actorUserId, projectId);
+  const experiments = await experimentRepo.listExperimentsForProject(project.id, actorUserId, {
+    ...(filters.status && filters.status !== "all"
+      ? { status: statusFromKey(filters.status) }
+      : {}),
+    ...(filters.type && filters.type !== "all" ? { type: typeFromKind(filters.type) } : {}),
+    ...(filters.q?.trim() ? { search: filters.q.trim() } : {}),
+  });
+
+  const [metrics, totals] = await Promise.all([
+    metricsById(project.id, actorUserId),
+    primaryTotalsFor(actorUserId, experiments),
+  ]);
+
+  const items = experiments.map((e) => toListItem(e, metrics, totals.get(e.id), now));
+  const rate = (item: ExperimentListItem) =>
+    item.visitors ? item.conversions / item.visitors : -1;
+  const sorters: Record<string, (a: ExperimentListItem, b: ExperimentListItem) => number> = {
+    updated: (a, b) => b.updatedAt.localeCompare(a.updatedAt),
+    created: (a, b) => b.createdAt.localeCompare(a.createdAt),
+    name: (a, b) => a.name.localeCompare(b.name),
+    visitors: (a, b) => b.visitors - a.visitors,
+    cr: (a, b) => rate(b) - rate(a),
+  };
+  return items.sort(sorters[filters.sort ?? "updated"] ?? sorters["updated"]!);
 }
 
-export function countByStatus(actorUserId: string) {
-  return experimentRepo.countExperimentsByStatus(actorUserId);
+/** Counts per status for the list's tabs (unfiltered). */
+export async function countForProject(
+  actorUserId: string,
+  projectId: string,
+): Promise<Record<ExperimentStatusKey | "all", number>> {
+  const project = await requireProject(actorUserId, projectId);
+  const rows = await db.experiment.groupBy({
+    by: ["status"],
+    where: { websiteId: project.id },
+    _count: { _all: true },
+  });
+  const counts = { all: 0, draft: 0, running: 0, paused: 0, completed: 0 };
+  for (const row of rows) {
+    counts[statusKey(row.status)] += row._count._all;
+    counts.all += row._count._all;
+  }
+  return counts;
 }
+
+/** Everything the detail page needs: arms with changes, targeting, goals, activity, share. */
+export async function getExperimentDetail(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+  now: Date = new Date(),
+): Promise<ExperimentDetail> {
+  const experiment = await requireExperimentInProject(actorUserId, projectId, experimentId);
+  const [metrics, totals, activities] = await Promise.all([
+    metricsById(projectId, actorUserId),
+    primaryTotalsFor(actorUserId, [experiment]),
+    activityRepo.listActivities(experiment.id),
+  ]);
+
+  const base = toListItem(experiment, metrics, totals.get(experiment.id), now);
+  const secondaryGoals = experiment.secondaryMetricIds.flatMap((id) => {
+    const metric = metrics.get(id);
+    return metric ? [metricGoalView(metric)] : [];
+  });
+
+  return {
+    ...base,
+    targeting: normalizeTargeting(experiment.targeting, experiment.controlUrl),
+    secondaryMetricIds: [...experiment.secondaryMetricIds],
+    secondaryGoals,
+    keepWinner: experiment.keepWinner,
+    locked: experiment.status !== "DRAFT",
+    share: {
+      token: experiment.shareToken,
+      sharedAt: experiment.sharedAt?.toISOString() ?? null,
+      url: experiment.shareToken
+        ? `${env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "")}/share/${encodeURIComponent(experiment.shareToken)}`
+        : null,
+    },
+    activities: activities.map((row) => ({
+      id: row.id,
+      text: row.text,
+      actorName: row.actorName,
+      createdAt: row.createdAt.toISOString(),
+    })),
+    draftSource: draftSourceOf(experiment),
+  };
+}
+
+/** The wizard's source for an existing experiment (feed to `draftFromExperiment`). */
+export async function getExperimentDraftSource(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+) {
+  const experiment = await requireExperimentInProject(actorUserId, projectId, experimentId);
+  return draftSourceOf(experiment);
+}
+
+// -------------------------------------------------------------------------------------------
+// Draft → database
+// -------------------------------------------------------------------------------------------
+
+interface DraftData {
+  experiment: Omit<Prisma.ExperimentUncheckedCreateInput, "websiteId" | "status" | "variants">;
+  variants: { id?: string; url: string; weight: number; changes: Prisma.InputJsonValue }[];
+}
+
+/**
+ * Maps a structurally valid draft onto columns. Lenient by design — it is also what saving an
+ * incomplete draft stores — so it never throws; the launch path validates before calling it.
+ *
+ * Metric references are filtered to the project's own metrics (`ownedMetrics`), so a draft can
+ * never point a goal at another project's metric.
+ */
+function draftToData(draft: ExperimentDraftInput, ownedMetrics: Set<string>): DraftData {
+  const type = typeFromKind(draft.type);
+  const isAb = type === "AB";
+  const controlUrl = draft.url.trim();
+  const targeting = normalizeTargeting(draft.targeting, controlUrl);
+  const [control, ...variants] = draft.arms;
+  const goalMetricId =
+    draft.goalMode === "event" && draft.goal && ownedMetrics.has(draft.goal) ? draft.goal : null;
+  const conversionUrl = draft.goalMode === "url" ? draft.convUrl.trim() || null : null;
+
+  return {
+    experiment: {
+      name: draft.name.trim() || UNTITLED,
+      description: draft.hypothesis.trim() || null,
+      type,
+      controlUrl,
+      // The page rule's simple forms map onto the legacy match column the config still reads;
+      // contains/wildcard/regex live in `targeting` only.
+      controlMatchType: targeting.match === "starts" ? "PREFIX" : "EXACT",
+      controlWeight: control?.weight ?? 50,
+      targeting: targeting as unknown as Prisma.InputJsonValue,
+      trafficAllocation: draft.coverage,
+      conversionUrl,
+      conversionMatchType: matchFromKey(draft.convMatch),
+      goalMetricId,
+      secondaryMetricIds: [...new Set(draft.secondary)].filter(
+        (id) => ownedMetrics.has(id) && id !== goalMetricId,
+      ),
+      countingMode: countingFromKey(draft.counting),
+    },
+    variants: variants.map((arm) => ({
+      ...(arm.id ? { id: arm.id } : {}),
+      url: isAb ? "" : arm.url.trim(),
+      weight: arm.weight,
+      changes: (isAb ? arm.changes : []) as unknown as Prisma.InputJsonValue,
+    })),
+  };
+}
+
+/** The parsed draft as the `ExperimentDraft` shape `validateDraft` expects. */
+function asDraft(input: ExperimentDraftInput, projectId: string): ExperimentDraft {
+  return {
+    id: input.id ?? null,
+    projectId,
+    type: input.type,
+    name: input.name,
+    url: input.url,
+    hypothesis: input.hypothesis,
+    arms: input.arms.map((arm, index) => ({
+      ...(arm.id ? { id: arm.id } : {}),
+      name: armName(index),
+      url: arm.url,
+      weight: arm.weight,
+      changes: arm.changes.map((change) => ({ ...change })),
+    })),
+    coverage: input.coverage,
+    targeting: normalizeTargeting(input.targeting, input.url),
+    goalMode: input.goalMode,
+    goal: input.goal,
+    convUrl: input.convUrl,
+    convMatch: input.convMatch,
+    secondary: input.secondary,
+    counting: input.counting,
+  };
+}
+
+function parseDraft(input: unknown, projectId: string): ExperimentDraftInput {
+  const raw = (input ?? {}) as Record<string, unknown>;
+  return parseOrThrow(experimentDraftSchema, { ...raw, projectId }, "Check the experiment setup.");
+}
+
+/**
+ * Everything that stops a draft launching: the wizard's own rules (`validateDraft`, so the
+ * messages match what the form shows), then the rules only the server can check. Keyed by step.
+ */
+async function launchErrors(
+  draft: ExperimentDraftInput,
+  project: websiteRepo.WebsiteWithDomains,
+  ownedMetrics: Set<string>,
+  excludeExperimentId: string | undefined,
+): Promise<DraftErrors> {
+  const errors = validateDraft(asDraft(draft, project.id));
+  const add = (step: WizardStepKey, key: string, message: string) => {
+    (errors[step] ??= {})[key] ??= message;
+  };
+
+  const domains = projectDomains(project);
+  const offDomain = `Must be a URL on ${domains.join(" or ")} (or a subdomain).`;
+  const isAb = draft.type === "ab";
+
+  if (draft.arms.length < 2) add("variants", "arms", "Add at least one variant.");
+  if (draft.arms.length > MAX_ARMS) {
+    add("variants", "arms", "An experiment can have at most 5 arms (Control + 4 variants).");
+  }
+
+  // Same-site: every URL the experiment touches must be on one of the project's domains.
+  if (draft.url && !onProjectDomain(draft.url, domains)) add("basics", "url", offDomain);
+  draft.arms.forEach((arm, index) => {
+    if (index === 0) return;
+    if (!isAb && arm.url && !onProjectDomain(arm.url, domains)) {
+      add("variants", `v${index}`, offDomain);
+    }
+    if (isAb) {
+      arm.changes.forEach((change) => {
+        const parsed = changeSchema.safeParse(change);
+        if (!parsed.success) {
+          add(
+            "variants",
+            `v${index}`,
+            `${armName(index)}: ${parsed.error.issues[0]?.message ?? "invalid change"}`,
+          );
+        }
+      });
+    }
+  });
+
+  if (draft.goalMode === "url") {
+    if (draft.convUrl && !onProjectDomain(draft.convUrl, domains)) add("goal", "conv", offDomain);
+  } else if (draft.goal && !ownedMetrics.has(draft.goal)) {
+    add("goal", "goal", "Choose a metric from this project.");
+  }
+  if (draft.secondary.some((id) => !ownedMetrics.has(id))) {
+    add("goal", "secondary", "Secondary goals must be metrics from this project.");
+  }
+
+  // One active experiment per page, against the page rule (targeting) rather than the bare URL.
+  if (!errors.basics?.["url"] && !errors.targeting?.["pattern"]) {
+    const candidate = {
+      url: draft.url.trim(),
+      targeting: normalizeTargeting(draft.targeting, draft.url.trim()),
+    };
+    const clash = await findActiveClash(project.id, candidate, excludeExperimentId);
+    if (clash) {
+      add(
+        "targeting",
+        "pattern",
+        `“${clash.name}” is already running on this page. Pause or end it first, or narrow the targeting.`,
+      );
+    }
+  }
+
+  return errors;
+}
+
+async function findActiveClash(
+  websiteId: string,
+  candidate: { url: string; targeting: ReturnType<typeof normalizeTargeting> },
+  excludeExperimentId?: string,
+): Promise<Experiment | undefined> {
+  const active = await experimentRepo.listActiveExperimentsExcluding(
+    websiteId,
+    excludeExperimentId,
+  );
+  return active.find((other) => pageRulesOverlap(candidate, pageRuleOf(other)));
+}
+
+function hasAnyError(errors: DraftErrors): boolean {
+  return Object.values(errors).some((fields) => fields && Object.keys(fields).length > 0);
+}
+
+/** Writes a draft's data onto an existing experiment row and reconciles its variants. */
+async function writeDraft(
+  tx: Prisma.TransactionClient,
+  experimentId: string,
+  actorUserId: string,
+  data: DraftData,
+  extra: Prisma.ExperimentUncheckedUpdateManyInput = {},
+): Promise<void> {
+  const result = await experimentRepo.updateExperiment(
+    experimentId,
+    actorUserId,
+    { ...(data.experiment as Prisma.ExperimentUncheckedUpdateManyInput), ...extra },
+    tx,
+  );
+  if (result.count === 0) throw notFound("That experiment does not exist.");
+  await experimentRepo.replaceVariants(experimentId, data.variants, tx);
+}
+
+async function createFromDraft(
+  tx: Prisma.TransactionClient,
+  websiteId: string,
+  data: DraftData,
+  status: ExperimentStatus,
+): Promise<Experiment> {
+  return experimentRepo.createExperiment(
+    {
+      ...data.experiment,
+      websiteId,
+      status,
+      ...(status === "ACTIVE" ? { publishedAt: new Date() } : {}),
+      variants: {
+        create: data.variants.map((variant, index) => ({
+          url: variant.url,
+          weight: variant.weight,
+          changes: variant.changes,
+          position: index + 1,
+        })),
+      },
+    },
+    tx,
+  );
+}
+
+/**
+ * Creates or updates a DRAFT from the wizard. Lenient: an empty name becomes "Untitled
+ * experiment", URLs may be blank or half-typed — only the structure is checked. Editing a
+ * draft whose `id` is no longer a draft is refused (it has launched; its setup is fixed).
+ */
+export async function saveDraft(
+  actorUserId: string,
+  projectId: string,
+  input: unknown,
+): Promise<{ id: string }> {
+  const project = await requireProject(actorUserId, projectId);
+  const draft = parseDraft(input, project.id);
+  const owned = await metricRepo.ownedMetricIds(project.id, [
+    ...(draft.goal ? [draft.goal] : []),
+    ...draft.secondary,
+  ]);
+  const data = draftToData(draft, owned);
+
+  if (draft.id) {
+    const existing = await requireExperimentInProject(actorUserId, project.id, draft.id);
+    if (existing.status !== "DRAFT") {
+      throw conflict("This experiment has already launched, so its setup can no longer be edited.");
+    }
+    await db.$transaction(async (tx) => {
+      await writeDraft(tx, existing.id, actorUserId, data);
+      await logActivity(existing.id, actorUserId, "Draft updated", tx);
+    });
+    return { id: existing.id };
+  }
+
+  const created = await db.$transaction(async (tx) => {
+    const experiment = await createFromDraft(tx, project.id, data, "DRAFT");
+    await logActivity(experiment.id, actorUserId, "Experiment created as draft", tx);
+    return experiment;
+  });
+  return { id: created.id };
+}
+
+/**
+ * Validates a draft completely and launches it: creates (or updates the existing draft) and sets
+ * it ACTIVE with `publishedAt`. Field errors are keyed `step.field` — the wizard's own keys
+ * (`basics.url`, `variants.v1`, `goal.conv`, `targeting.pattern`, …) — so the wizard can route
+ * each to its step; server-only rules use the same keys (`variants.arms`, `goal.secondary`).
+ */
+export async function launch(
+  actorUserId: string,
+  projectId: string,
+  input: unknown,
+): Promise<{ id: string }> {
+  const project = await requireProject(actorUserId, projectId);
+  const draft = parseDraft(input, project.id);
+  const owned = await metricRepo.ownedMetricIds(project.id, [
+    ...(draft.goal ? [draft.goal] : []),
+    ...draft.secondary,
+  ]);
+
+  const existing = draft.id
+    ? await requireExperimentInProject(actorUserId, project.id, draft.id)
+    : null;
+  if (existing && existing.status !== "DRAFT") {
+    throw conflict("This experiment has already launched.");
+  }
+
+  const errors = await launchErrors(draft, project, owned, existing?.id);
+  if (hasAnyError(errors)) {
+    throw validationFailed(
+      "Fix the highlighted fields before launching.",
+      flattenDraftErrors(errors),
+    );
+  }
+
+  const data = draftToData(draft, owned);
+  const launchedText = `Launched to ${draft.coverage}% of matching traffic`;
+
+  const id = await db.$transaction(async (tx) => {
+    if (existing) {
+      await writeDraft(tx, existing.id, actorUserId, data, {
+        status: "ACTIVE",
+        ...(existing.publishedAt ? {} : { publishedAt: new Date() }),
+      });
+      await logActivity(existing.id, actorUserId, launchedText, tx);
+      return existing.id;
+    }
+    const created = await createFromDraft(tx, project.id, data, "ACTIVE");
+    await logActivity(created.id, actorUserId, "Experiment created", tx);
+    await logActivity(created.id, actorUserId, launchedText, tx);
+    return created.id;
+  });
+
+  return { id };
+}
+
+/** Running → paused. Visitors see control and nothing is collected while paused. */
+export async function pause(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+): Promise<void> {
+  const experiment = await requireExperimentInProject(actorUserId, projectId, experimentId);
+  if (experiment.status !== "ACTIVE") throw conflict("Only a running experiment can be paused.");
+  await db.$transaction(async (tx) => {
+    await experimentRepo.updateExperiment(experiment.id, actorUserId, { status: "PAUSED" }, tx);
+    await logActivity(experiment.id, actorUserId, "Experiment paused", tx);
+  });
+}
+
+/** Paused → running, re-checking that no other running experiment has claimed the page since. */
+export async function resume(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+): Promise<void> {
+  const experiment = await requireExperimentInProject(actorUserId, projectId, experimentId);
+  if (experiment.status !== "PAUSED") throw conflict("Only a paused experiment can be resumed.");
+
+  const clash = await findActiveClash(experiment.websiteId, pageRuleOf(experiment), experiment.id);
+  if (clash) {
+    throw conflict(
+      `“${clash.name}” is now running on this page. Pause or end it before resuming this one.`,
+    );
+  }
+
+  await db.$transaction(async (tx) => {
+    await experimentRepo.updateExperiment(experiment.id, actorUserId, { status: "ACTIVE" }, tx);
+    await logActivity(experiment.id, actorUserId, "Experiment resumed", tx);
+  });
+}
+
+/**
+ * Ends a running or paused experiment (→ completed). `winnerPosition`: 0 = control,
+ * n = variant n, null = no winner. `keepWinner` (keep redirecting all traffic to the winning
+ * URL) applies only to a Split URL test with a variant winner, and is ignored otherwise.
+ */
+export async function end(actorUserId: string, input: unknown): Promise<void> {
+  const { projectId, experimentId, winnerPosition, keepWinner } = parseOrThrow(
+    endExperimentSchema,
+    input,
+  );
+  const experiment = await requireExperimentInProject(actorUserId, projectId, experimentId);
+  if (experiment.status !== "ACTIVE" && experiment.status !== "PAUSED") {
+    throw conflict("Only a running or paused experiment can be ended.");
+  }
+  if (winnerPosition !== null && winnerPosition > experiment.variants.length) {
+    throw validationFailed("Choose one of this experiment’s arms.", {
+      winnerPosition: ["Choose one of this experiment’s arms."],
+    });
+  }
+
+  const keep = keepWinner && experiment.type === "SPLIT_URL" && (winnerPosition ?? 0) > 0;
+  const text =
+    winnerPosition === null
+      ? "Ended with no winner"
+      : `Ended · ${armName(winnerPosition)} declared winner${keep ? " · 100% redirected to winner" : ""}`;
+
+  await db.$transaction(async (tx) => {
+    await experimentRepo.updateExperiment(
+      experiment.id,
+      actorUserId,
+      { status: "ARCHIVED", stoppedAt: new Date(), winnerPosition, keepWinner: keep },
+      tx,
+    );
+    await logActivity(experiment.id, actorUserId, text, tx);
+  });
+}
+
+/** Copies an experiment's setup into a new DRAFT named "Copy of …". Results are not copied. */
+export async function duplicate(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+): Promise<{ id: string }> {
+  const source = await requireExperimentInProject(actorUserId, projectId, experimentId);
+  const name = `Copy of ${source.name}`.slice(0, 120);
+
+  const created = await db.$transaction(async (tx) => {
+    const experiment = await experimentRepo.createExperiment(
+      {
+        websiteId: source.websiteId,
+        name,
+        description: source.description,
+        type: source.type,
+        controlUrl: source.controlUrl,
+        controlMatchType: source.controlMatchType,
+        controlWeight: source.controlWeight,
+        targeting: (source.targeting ?? undefined) as Prisma.InputJsonValue | undefined,
+        trafficAllocation: source.trafficAllocation,
+        conversionName: source.conversionName,
+        conversionUrl: source.conversionUrl,
+        conversionMatchType: source.conversionMatchType,
+        goalMetricId: source.goalMetricId,
+        secondaryMetricIds: [...source.secondaryMetricIds],
+        countingMode: source.countingMode,
+        primaryMetric: source.primaryMetric,
+        status: "DRAFT",
+        variants: {
+          create: source.variants.map((variant) => ({
+            url: variant.url,
+            weight: variant.weight,
+            position: variant.position,
+            changes: (variant.changes ?? []) as Prisma.InputJsonValue,
+          })),
+        },
+      },
+      tx,
+    );
+    await logActivity(experiment.id, actorUserId, `Duplicated from “${source.name}”`, tx);
+    return experiment;
+  });
+
+  return { id: created.id };
+}
+
+/** Deletes a draft or completed experiment. Running/paused ones must be ended first. */
+export async function remove(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+): Promise<void> {
+  const experiment = await requireExperimentInProject(actorUserId, projectId, experimentId);
+  if (experiment.status === "ACTIVE" || experiment.status === "PAUSED") {
+    throw conflict("End this experiment before deleting it.");
+  }
+  const result = await experimentRepo.deleteExperiment(experiment.id, actorUserId);
+  if (result.count === 0) throw notFound("That experiment does not exist.");
+}
+
+/**
+ * Edits allowed after launch: name, hypothesis, traffic weights (same arm count, sum 100),
+ * coverage, secondary goals, counting mode. URLs, changes, targeting and the primary goal are
+ * fixed once visitors have been bucketed against them. Drafts are edited with `saveDraft`.
+ */
+export async function editLive(actorUserId: string, input: unknown): Promise<void> {
+  const data = parseOrThrow(editLiveExperimentSchema, input, "Check the changes.");
+  const experiment = await requireExperimentInProject(
+    actorUserId,
+    data.projectId,
+    data.experimentId,
+  );
+  if (experiment.status === "DRAFT") {
+    throw conflict("Drafts are edited in the setup wizard.");
+  }
+
+  const update: Prisma.ExperimentUncheckedUpdateManyInput = {};
+  const changed: string[] = [];
+
+  if (data.name !== undefined && data.name !== experiment.name) {
+    update.name = data.name;
+    changed.push("name");
+  }
+  if (data.hypothesis !== undefined && data.hypothesis !== (experiment.description ?? "")) {
+    update.description = data.hypothesis || null;
+    changed.push("hypothesis");
+  }
+  if (data.coverage !== undefined && data.coverage !== experiment.trafficAllocation) {
+    update.trafficAllocation = data.coverage;
+    changed.push(`coverage → ${data.coverage}%`);
+  }
+  if (data.counting !== undefined) {
+    const mode = countingFromKey(data.counting);
+    if (mode !== experiment.countingMode) {
+      update.countingMode = mode;
+      changed.push("counting");
+    }
+  }
+  if (data.secondary !== undefined) {
+    const owned = await metricRepo.ownedMetricIds(experiment.websiteId, data.secondary);
+    if (data.secondary.some((id) => !owned.has(id))) {
+      throw validationFailed("Secondary goals must be metrics from this project.", {
+        "goal.secondary": ["Secondary goals must be metrics from this project."],
+      });
+    }
+    update.secondaryMetricIds = [...new Set(data.secondary)].filter(
+      (id) => id !== experiment.goalMetricId,
+    );
+    changed.push("secondary goals");
+  }
+
+  let weights: number[] | undefined;
+  if (data.weights !== undefined) {
+    if (data.weights.length !== experiment.variants.length + 1) {
+      throw validationFailed("Arms can’t be added or removed after launch.", {
+        "traffic.sum": ["Arms can’t be added or removed after launch."],
+      });
+    }
+    const sum = data.weights.reduce((total, weight) => total + weight, 0);
+    if (sum !== 100) {
+      throw validationFailed(`Allocation adds up to ${sum}%. It must equal 100%.`, {
+        "traffic.sum": [`Allocation adds up to ${sum}%. It must equal 100%.`],
+      });
+    }
+    weights = data.weights;
+    update.controlWeight = weights[0]!;
+    changed.push(`traffic split → ${weights.join(" / ")}`);
+  }
+
+  if (changed.length === 0) return;
+
+  await db.$transaction(async (tx) => {
+    await experimentRepo.updateExperiment(experiment.id, actorUserId, update, tx);
+    if (weights) {
+      for (const variant of experiment.variants) {
+        await tx.experimentVariant.update({
+          where: { id: variant.id },
+          data: { weight: weights[variant.position] ?? variant.weight },
+        });
+      }
+    }
+    await logActivity(experiment.id, actorUserId, `Edited: ${changed.join(", ")}`, tx);
+  });
+}
+
+/** Share-link functions, checked against the project as well as the owner. */
+export async function setSharing(
+  actorUserId: string,
+  projectId: string,
+  experimentId: string,
+  mode: "enable" | "rotate" | "disable",
+): Promise<{ token: string | null; url: string | null }> {
+  await requireExperimentInProject(actorUserId, projectId, experimentId);
+  const updated =
+    mode === "enable"
+      ? await enableSharing(actorUserId, experimentId)
+      : mode === "rotate"
+        ? await rotateShareToken(actorUserId, experimentId)
+        : await disableSharing(actorUserId, experimentId);
+  return {
+    token: updated.shareToken,
+    url: updated.shareToken
+      ? `${env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "")}/share/${encodeURIComponent(updated.shareToken)}`
+      : null,
+  };
+}
+
+// ===========================================================================================
+// Unscoped lookups and share-link primitives (legacy redirect pages, setSharing, /share)
+// ===========================================================================================
 
 export async function getExperiment(
   actorUserId: string,
@@ -68,276 +844,6 @@ export async function getExperiment(
   }
 
   return experiment;
-}
-
-/**
- * Every experiment URL must live on the website it belongs to.
- *
- * Without this, an experiment could redirect a website's visitors to an unrelated domain —
- * the customer's own visitors, sent somewhere they never agreed to. It also prevents the
- * quieter mistake of pointing at a staging host and wondering why nothing is recorded.
- *
- * The conversion URL is held to the same rule: conversions are attributed by the snippet
- * running on the goal page, and that snippet belongs to this website. A goal on a different
- * domain could never record anything, so accepting it would only produce a silent dud. Every
- * variant's redirect target is held to it for the same reason as the control URL.
- */
-function assertSameSite(
-  website: Pick<Website, "domain">,
-  urls: { controlUrl: string; variants: ExperimentVariantInput[]; conversionUrl: string },
-): void {
-  const offenders: Record<string, string[]> = {};
-  const onSite = (url: string) => isSameSite(url, website.domain);
-  const message = `Must be a URL on ${website.domain} or one of its subdomains.`;
-
-  if (!onSite(urls.controlUrl)) offenders["controlUrl"] = [message];
-  if (!onSite(urls.conversionUrl)) offenders["conversionUrl"] = [message];
-
-  urls.variants.forEach((variant, index) => {
-    if (!onSite(variant.url)) {
-      offenders[`variants.${index}.url`] = [message];
-    }
-  });
-
-  if (Object.keys(offenders).length > 0) {
-    throw validationFailed(
-      `Experiment URLs must be on ${website.domain}, the domain this website is configured for.`,
-      offenders,
-    );
-  }
-}
-
-/**
- * Refuses a control URL already claimed by another active experiment on the same website.
- *
- * Two active experiments matching the same page would each try to bucket and redirect the
- * same visitor, and the winner would come down to evaluation order — producing results that
- * silently mix two tests. Checked at creation and at edit so the problem surfaces while the
- * experiment is still a draft, and again on activation, which is the moment it becomes real.
- */
-async function assertNoActiveConflict(
-  websiteId: string,
-  candidate: { url: string; match: Experiment["controlMatchType"] },
-  excludeExperimentId?: string,
-): Promise<void> {
-  const active = await experimentRepo.listActiveExperimentsExcluding(
-    websiteId,
-    excludeExperimentId,
-  );
-
-  const clash = active.find((other) =>
-    controlUrlsConflict(candidate, { url: other.controlUrl, match: other.controlMatchType }),
-  );
-
-  if (clash) {
-    throw validationFailed(
-      `“${clash.name}” is already running on that control URL. Pause or archive it before starting another test on the same page.`,
-      { controlUrl: ["Another active experiment already targets this page."] },
-    );
-  }
-}
-
-export async function createExperiment(actorUserId: string, input: unknown): Promise<Experiment> {
-  const data = parseOrThrow(createExperimentSchema, input, "Check the experiment setup.");
-
-  // The website must belong to the actor; otherwise an experiment could be attached to
-  // someone else's website by supplying its id.
-  const website = await websiteRepo.findWebsiteForUser(data.websiteId, actorUserId);
-  if (!website) {
-    throw notFound("That website does not exist.");
-  }
-
-  assertSameSite(website, data);
-  await assertNoActiveConflict(website.id, {
-    url: data.controlUrl,
-    match: data.controlMatchType,
-  });
-
-  return experimentRepo.createExperiment({
-    websiteId: website.id,
-    name: data.name,
-    description: data.description ?? null,
-    controlUrl: data.controlUrl,
-    controlMatchType: data.controlMatchType,
-    conversionUrl: data.conversionUrl,
-    conversionMatchType: data.conversionMatchType,
-    primaryMetric: data.primaryMetric,
-    trafficAllocation: data.trafficAllocation,
-    controlWeight: data.controlWeight,
-    // Experiments always begin as drafts: nothing is redirected until someone activates it.
-    status: "DRAFT",
-    variants: {
-      create: data.variants.map((variant, index) => ({
-        url: variant.url,
-        weight: variant.weight,
-        position: index + 1,
-      })),
-    },
-  });
-}
-
-/**
- * Applies changes to an experiment.
- *
- * The caller may send a partial update, but the URL rules only make sense against the
- * complete configuration, so the stored record is merged with the changes before validation.
- * Editing the targets of a running experiment is rejected: existing visitors are already
- * bucketed against the old configuration, and mixing both under one experiment id would
- * silently corrupt the comparison. That lock covers the whole variant set, not just each
- * URL's text — adding or removing an arm after visitors are already bucketed against the old
- * set would be the same corruption by another route.
- *
- * **Traffic weights are deliberately outside that lock.** Re-weighting only changes the odds
- * for visitors who have not been bucketed yet; every existing assignment is permanent, so no
- * already-collected result changes meaning. Being able to shift traffic — or park an arm at 0
- * — while a test runs is the point of having weights at all.
- */
-export async function updateExperiment(
-  actorUserId: string,
-  experimentId: string,
-  changes: Record<string, unknown>,
-): Promise<Experiment> {
-  const existing = await getExperiment(actorUserId, experimentId);
-
-  // Spreading a key whose value is `undefined` still overwrites — `{a: 1, ...{a: undefined}}`
-  // is `{a: undefined}` — so "not submitted" has to be dropped before the merge rather than
-  // relied on to fall through to the stored value.
-  const supplied = Object.fromEntries(
-    Object.entries(changes).filter(([, value]) => value !== undefined),
-  );
-
-  const merged = parseOrThrow(
-    updateExperimentSchema,
-    {
-      experimentId,
-      name: existing.name,
-      description: existing.description ?? undefined,
-      controlUrl: existing.controlUrl,
-      controlMatchType: existing.controlMatchType,
-      controlWeight: existing.controlWeight,
-      variants: existing.variants.map((variant) => ({
-        id: variant.id,
-        url: variant.url,
-        weight: variant.weight,
-      })),
-      conversionName: existing.conversionName ?? undefined,
-      conversionUrl: existing.conversionUrl,
-      conversionMatchType: existing.conversionMatchType,
-      primaryMetric: existing.primaryMetric,
-      trafficAllocation: existing.trafficAllocation,
-      ...supplied,
-    },
-    "Check the experiment setup.",
-  );
-
-  // Structure — which arms exist and where they point — is what the running-experiment lock
-  // guards. Weight is compared separately below, because it is allowed to change at any time.
-  const variantsStructurallyChanged =
-    merged.variants.length !== existing.variants.length ||
-    merged.variants.some(
-      (variant, index) =>
-        variant.id !== existing.variants[index]?.id ||
-        variant.url !== existing.variants[index]?.url,
-    );
-
-  const variantsChanged =
-    variantsStructurallyChanged ||
-    merged.variants.some((variant, index) => variant.weight !== existing.variants[index]?.weight);
-
-  const targetsChanged =
-    merged.controlUrl !== existing.controlUrl ||
-    merged.conversionUrl !== existing.conversionUrl ||
-    merged.controlMatchType !== existing.controlMatchType ||
-    merged.conversionMatchType !== existing.conversionMatchType ||
-    variantsStructurallyChanged;
-
-  if (targetsChanged && existing.status !== "DRAFT") {
-    throw validationFailed(
-      "This experiment has already started, so its URLs are fixed. Archive it and create a new one to test different pages.",
-    );
-  }
-
-  assertSameSite(existing.website, merged);
-
-  if (targetsChanged) {
-    await assertNoActiveConflict(
-      existing.websiteId,
-      { url: merged.controlUrl, match: merged.controlMatchType },
-      experimentId,
-    );
-  }
-
-  const { experimentId: _id, variants, ...data } = merged;
-
-  await db.$transaction(async (tx) => {
-    const result = await experimentRepo.updateExperiment(
-      experimentId,
-      actorUserId,
-      {
-        ...data,
-        description: data.description ?? null,
-        conversionName: data.conversionName ?? null,
-      },
-      tx,
-    );
-
-    if (result.count === 0) {
-      throw notFound("That experiment does not exist.");
-    }
-
-    if (variantsChanged) {
-      await experimentRepo.replaceVariants(experimentId, variants, tx);
-    }
-  });
-
-  return getExperiment(actorUserId, experimentId);
-}
-
-/** Moves an experiment through its lifecycle, stamping the start and stop timestamps. */
-export async function changeStatus(actorUserId: string, input: unknown): Promise<Experiment> {
-  const { experimentId, status } = parseOrThrow(changeExperimentStatusSchema, input);
-  const existing = await getExperiment(actorUserId, experimentId);
-
-  if (existing.status === status) {
-    return existing;
-  }
-
-  if (!ALLOWED_TRANSITIONS[existing.status].includes(status)) {
-    throw conflict(`An experiment cannot go from ${existing.status} to ${status}.`);
-  }
-
-  // Activation is the moment the conflict actually matters, so it is re-checked here even
-  // though creation and editing already checked it — another experiment may have been
-  // activated in between.
-  if (status === "ACTIVE") {
-    await assertNoActiveConflict(
-      existing.websiteId,
-      { url: existing.controlUrl, match: existing.controlMatchType },
-      experimentId,
-    );
-  }
-
-  await experimentRepo.updateExperiment(experimentId, actorUserId, {
-    status,
-    // publishedAt marks the first activation only, so a pause/resume cycle does not reset it.
-    ...(status === "ACTIVE" && existing.publishedAt === null ? { publishedAt: new Date() } : {}),
-    ...(status === "ARCHIVED" ? { stoppedAt: new Date() } : {}),
-  });
-
-  return getExperiment(actorUserId, experimentId);
-}
-
-export async function deleteExperiment(actorUserId: string, experimentId: string): Promise<void> {
-  const result = await experimentRepo.deleteExperiment(experimentId, actorUserId);
-
-  if (result.count === 0) {
-    throw notFound("That experiment does not exist.");
-  }
-}
-
-/** Status values an experiment may currently move to. Drives which controls the UI offers. */
-export function allowedTransitions(status: ExperimentStatus): readonly ExperimentStatus[] {
-  return ALLOWED_TRANSITIONS[status];
 }
 
 /**

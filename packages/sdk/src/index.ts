@@ -23,14 +23,15 @@
  *
  */
 
+import { drainQueue, isTrackKey, runCommand } from "./api";
 import {
   markAssignmentSent,
   readAssignment,
   resolveAssignment,
   resolveAssignmentStores,
 } from "./assignment";
+import { applyWhenReady } from "./changes";
 import { revealPage } from "./cloak";
-import { claimConversion, findGoalMatches } from "./conversion";
 import { loadConfig } from "./config";
 import { claimPageView } from "./dedupe";
 import {
@@ -39,14 +40,23 @@ import {
   attachEngagement,
   createEngagementTimer,
 } from "./engagement";
+import { getSessionStorage } from "./env";
 import { SDK_PROTOCOL_VERSION } from "./contract";
-import type { ConfigResponse } from "./contract";
+import type {
+  ChangeConfig,
+  ConfigResponse,
+  LiveExperimentConfig,
+  LockedExperimentConfig,
+  TrackedEvent,
+} from "./contract";
 import { type Identity, resolveIdentity } from "./identity";
 import { resolveInclusion } from "./inclusion";
+import { type Preview, readPreview, withPreview, withoutPreview } from "./preview";
 import { decide, performRedirect } from "./redirect";
-import { sendConversion, sendPageEvents, sendTimeOnPage } from "./track";
+import { type VisitContext, detectDevice, isBotAgent, isTargeted, pageMatches } from "./targeting";
+import { pageEvents, sendEvents } from "./track";
 import { DEFAULT_TIMEOUT_MS } from "./transport";
-import { normalizeUrl, readHandoff, stripHandoff } from "./url";
+import { isSameUrl, normalizeUrl, readHandoff, stripHandoff } from "./url";
 
 export * from "./contract";
 export { resolveIdentity, isValidVisitorId } from "./identity";
@@ -58,9 +68,11 @@ export { normalizeUrl, urlMatches, isSameUrl, withHandoff, readHandoff } from ".
 export { claimPageView } from "./dedupe";
 export { revealPage } from "./cloak";
 export { createEngagementTimer, attachEngagement } from "./engagement";
-export { findGoalMatches, claimConversion } from "./conversion";
+export { matches, pageMatches, isTargeted, detectDevice } from "./targeting";
+export { applyChange, applyToElement } from "./changes";
+export { readPreview } from "./preview";
 
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "0.2.0";
 
 /** Replaced at build time by esbuild's `define`. */
 declare const __ROUTELY_API_BASE__: string;
@@ -77,7 +89,17 @@ export interface RoutelyOptions {
   debug: boolean;
 }
 
-/** What `boot()` resolves to. Exposed on `window.routely` for debugging an installation. */
+/** One experiment this page load takes part in. */
+export interface Participation {
+  experimentId: string;
+  /** `null` is control. */
+  variantId: string | null;
+}
+
+/**
+ * `window.routely`: the public API plus what the SDK did, for debugging an installation.
+ * Installed synchronously, before the configuration request, so `track` works immediately.
+ */
 export interface RoutelyState {
   version: string;
   protocol: number;
@@ -87,16 +109,22 @@ export interface RoutelyState {
   experiments: ConfigResponse["experiments"];
   /** True when the configuration could not be loaded — the SDK then does nothing. */
   degraded: boolean;
-  /** The experiment claiming this page, and the arm the visitor is in (`null` is control). */
-  assignment: { experimentId: string; variantId: string | null } | null;
+  /** The first experiment this page takes part in (kept for v3-era debugging habits). */
+  assignment: Participation | null;
+  /** Every experiment this page takes part in. */
+  assignments: Participation[];
   /** What the SDK did on this page load. */
-  action: "none" | "stay" | "redirect" | "skip";
+  action: "none" | "stay" | "apply" | "redirect" | "skip";
   /** True when this page load handed events to the browser for delivery. */
   reported: boolean;
+  /** Set when this page load is a preview: an arm is forced and nothing is reported. */
+  preview: Preview | null;
   /** The visible-time accumulator, exposed for debugging an installation. */
   engagement?: EngagementTimer;
-  /** Experiments whose conversion goal this page load satisfied. */
-  conversions: string[];
+  /** Sends a custom event. Returns whether the browser accepted it for delivery. */
+  track(key: string): boolean;
+  /** Queue-compatible entry point: `routely.push(["track", key])`. */
+  push(entry: unknown): void;
 }
 
 declare global {
@@ -139,6 +167,12 @@ export function findScript(): HTMLScriptElement | null {
   return document.querySelector<HTMLScriptElement>("script[data-site-id]");
 }
 
+/** The current page, normalised the way the server will store it. */
+function currentUrl(): string {
+  const href = window.location.href;
+  return normalizeUrl(href) ?? href;
+}
+
 /**
  * Starts the SDK. Resolves to the resulting state, or `null` when there was nothing to do.
  *
@@ -158,6 +192,7 @@ export async function boot(): Promise<RoutelyState | null> {
   // that redirected here, and identity must be resolved with that in hand.
   const href = window.location.href;
   const handoff = readHandoff(href);
+  const preview = readPreview(href);
 
   // Identity is resolved synchronously: it depends on nothing external, so it is available
   // even when the network is not.
@@ -169,7 +204,24 @@ export async function boot(): Promise<RoutelyState | null> {
   // customer's own analytics as though they were campaign parameters.
   cleanUrl(href);
 
-  const config = await loadConfig(options.apiBase, options.siteId, options.timeoutMs);
+  // A crawler sees the control page and is never reported: no redirect, no change, no event.
+  const bot = isBotAgent(typeof navigator !== "undefined" ? navigator.userAgent || "" : "");
+
+  const send = (events: TrackedEvent[]) =>
+    // A preview reports nothing at all — not a page view, not a custom event.
+    !preview && !bot && sendEvents(options.apiBase, options.siteId, identity.id, events);
+
+  const track = (key: unknown): boolean => {
+    try {
+      if (!isTrackKey(key)) return false;
+      log(`track ${key}`);
+      return send([{ type: "track", key, url: currentUrl(), ts: Date.now() }]);
+    } catch {
+      return false;
+    }
+  };
+
+  const queued = typeof window !== "undefined" ? window.routely : undefined;
 
   const state: RoutelyState = {
     version: SDK_VERSION,
@@ -177,113 +229,299 @@ export async function boot(): Promise<RoutelyState | null> {
     siteId: options.siteId,
     visitorId: identity.id,
     identitySource: identity.source,
-    experiments: config?.experiments ?? [],
-    degraded: config === null,
+    experiments: [],
+    degraded: false,
     assignment: null,
+    assignments: [],
     action: "none",
     reported: false,
-    conversions: [],
+    preview,
+    track,
+    push: (entry) => runCommand(entry, track),
   };
 
-  const publish = () => {
-    // Every path out of `boot` funnels through here, so one call covers them all. The single
-    // exception is a redirect: the page is being replaced, and revealing the control page for
-    // the duration of that navigation is the flash the anti-flickering script exists to
-    // remove. That script's own timeout still lifts the overlay if the navigation stalls.
-    if (state.action !== "redirect") revealPage();
+  // Installed before the configuration request: custom events need no configuration — the
+  // server matches them against the project's metrics — so they must not wait on one.
+  window.routely = state;
+  drainQueue(queued, track);
 
-    if (typeof window !== "undefined") window.routely = state;
-    return state;
-  };
+  const config = await loadConfig(
+    options.apiBase,
+    options.siteId,
+    options.timeoutMs,
+    preview?.experimentId,
+  );
+  state.experiments = config?.experiments ?? [];
+  state.degraded = config === null;
 
   if (state.degraded) {
     log("configuration unavailable — doing nothing");
-    return publish();
+    revealPage();
+    return state;
   }
 
-  log(`${state.experiments.length} active experiment(s)`);
+  log(`${state.experiments.length} experiment(s)`);
+
+  if (preview) {
+    runPreview(state, preview, href, log);
+    return state;
+  }
+
+  if (bot) {
+    log("crawler user agent — showing the control page, reporting nothing");
+    state.action = "skip";
+    revealPage();
+    return state;
+  }
+
+  const url = normalizeUrl(href) ?? href;
+  const visit: VisitContext = {
+    href,
+    referrer: typeof document !== "undefined" ? document.referrer : "",
+    device: detectDevice(
+      navigator.userAgent || "",
+      window.innerWidth || 0,
+      navigator.maxTouchPoints || 0,
+    ),
+    isNewVisitor: identity.isNew,
+  };
+
+  // A completed test that keeps its winner: redirect straight there, no assignment, no events.
+  for (const experiment of state.experiments) {
+    if (experiment.locked && redirectToWinner(experiment, href, visit)) {
+      log(`sending traffic to the winner of ${experiment.id}`);
+      state.action = "redirect";
+      return state;
+    }
+  }
 
   const stores = resolveAssignmentStores();
+  const events: TrackedEvent[] = [];
+  const reportedAssignments: string[] = [];
+  const changes: ChangeConfig[] = [];
+  let redirect: { target: string; experimentId: string } | null = null;
 
-  // Checked before the redirect decision: a redirect ends this page load, and a page that is
-  // a conversion goal is never also a control page — the server refuses to create an
-  // experiment where those URLs coincide — so the two cannot compete.
-  recordConversions(options, state, stores, href, log);
+  const participate = (
+    experiment: LiveExperimentConfig,
+    variantId: string | null,
+    { pageView = true }: { pageView?: boolean } = {},
+  ) => {
+    state.assignments.push({ experimentId: experiment.id, variantId });
+    const stored = readAssignment(experiment.id, stores);
+    const includeAssignment = stored ? !stored.sent : true;
+    if (includeAssignment) reportedAssignments.push(experiment.id);
+    events.push(
+      ...pageEvents(
+        { experimentId: experiment.id, variantId, url },
+        { includeAssignment, includePageView: pageView && claimPageView(experiment.id, url) },
+      ),
+    );
+  };
 
   // A decision carried in from a redirect seeds the assignment on this origin, where storage
-  // from the previous one is unavailable. `undefined` (not `null`) means "no forced value" —
-  // `null` is itself meaningful now (forced to control), so the two cannot share one sentinel.
-  const forcedVariantId = (experiment: { id: string }): string | null | undefined =>
+  // from the previous one is unavailable. `undefined` (not `null`) means "no forced value".
+  const forced = (experiment: { id: string }): string | null | undefined =>
     handoff && handoff.experimentId === experiment.id ? handoff.variant : undefined;
 
-  const decision = decide(
-    href,
-    state.experiments,
-    (experiment) =>
-      // `resolveAssignment` applies `forced` only when nothing is stored, so a query string
-      // can never move an existing visitor.
-      resolveAssignment(experiment, stores, { forced: forcedVariantId(experiment) }).variantId,
-    { visitorId: identity.id },
-    (experiment) => resolveInclusion(experiment.id, experiment.trafficAllocation, stores).included,
-  );
+  for (const experiment of state.experiments) {
+    if (experiment.locked || experiment.preview) continue;
 
-  if (!decision) {
-    log("no experiment matches this page");
-    return publish();
-  }
+    // A Split URL variant's own page. The page rule describes the *entry* page (the control),
+    // so the variant page usually fails it — yet it is where that arm's visitors actually are.
+    // A visitor already holding (or handed) this arm is measured here: page view and visible
+    // time belong to the page they saw, not to the control page they were redirected from.
+    if (experiment.type === "redirect" && !pageMatches(experiment.targeting, href)) {
+      const arm = experiment.arms.find(
+        (candidate) => candidate.position > 0 && candidate.url && isSameUrl(href, candidate.url),
+      );
+      if (!arm) continue;
+      const handed = forced(experiment);
+      const held = handed !== undefined ? handed : readAssignment(experiment.id, stores)?.variantId;
+      if (held === undefined || held !== arm.variantId) continue;
+      participate(experiment, resolveAssignment(experiment, stores, { forced: handed }).variantId);
+      continue;
+    }
+    if (!pageMatches(experiment.targeting, href)) continue;
 
-  state.action = decision.action;
-
-  if (decision.action === "skip") {
-    log(`skipping ${decision.experiment.id}: ${decision.reason}`);
-
-    if (decision.reason === "excluded") {
-      // Not part of the experiment at all: no assignment was ever drawn for them, so there is
-      // nothing to surface and nothing to report.
-      return publish();
+    // Targeting and coverage gate *entry*. A visitor already holding an arm keeps it, so a
+    // "new visitors" test does not flip back to control on their second page view.
+    // A visitor handed over by this experiment's own redirect was gated on the page they came
+    // from, and arrives without the parameters that page's conditions may have read.
+    if (!readAssignment(experiment.id, stores) && forced(experiment) === undefined) {
+      if (!isTargeted(experiment.targeting, visit)) {
+        log(`not targeted by ${experiment.id}`);
+        continue;
+      }
+      if (!resolveInclusion(experiment.id, experiment.coverage, stores).included) {
+        log(`excluded from ${experiment.id} by coverage`);
+        continue;
+      }
     }
 
-    // An assignment still exists for a visitor already on a variant; surface it so the state
-    // is honest about which arm they are in even when nothing happened this page load.
-    const stored = resolveAssignment(decision.experiment, stores, {
-      forced: forcedVariantId(decision.experiment),
-    });
-    state.assignment = { experimentId: decision.experiment.id, variantId: stored.variantId };
-    report(options, state, stores, href);
-    trackEngagement(options, state, href);
-    return publish();
+    if (experiment.type === "ab") {
+      const { variantId } = resolveAssignment(experiment, stores);
+      const arm = experiment.arms.find((candidate) => candidate.variantId === variantId);
+      if (arm?.changes) changes.push(...arm.changes);
+      participate(experiment, variantId);
+      log(`${experiment.id}: arm ${arm?.position ?? 0}`);
+      continue;
+    }
+
+    // At most one redirect per page load: the first redirect test claiming the page wins.
+    if (redirect) continue;
+
+    const decision = decide(
+      href,
+      [experiment],
+      (candidate) => resolveAssignment(candidate, stores, { forced: forced(candidate) }).variantId,
+      { visitorId: identity.id },
+    );
+    if (!decision) continue;
+
+    if (decision.action === "skip") {
+      log(`${experiment.id}: ${decision.reason}`);
+      // An assignment still exists for a visitor already on a variant; report the page they
+      // are actually on so the state is honest about which arm they are in.
+      const stored = resolveAssignment(experiment, stores, { forced: forced(experiment) });
+      participate(experiment, stored.variantId);
+      continue;
+    }
+
+    // A visitor about to be redirected never sees this page: record the assignment only, and
+    // let the variant page record its own page view and visible time.
+    participate(experiment, decision.variantId, { pageView: decision.action !== "redirect" });
+    if (decision.action === "redirect") {
+      redirect = { target: decision.target, experimentId: experiment.id };
+    }
   }
 
-  state.assignment = { experimentId: decision.experiment.id, variantId: decision.variantId };
+  state.assignment = state.assignments[0] ?? null;
 
-  // Reported before navigating: `sendBeacon` survives the unload, so the events are not lost
-  // to the redirect that immediately follows them.
-  report(options, state, stores, href);
+  // The site-level page view: page-visit metrics and URL goals are matched against it by the
+  // server. Last in the batch, so the assignments above are recorded before it is evaluated.
+  if (claimPageView("", url)) events.push({ type: "page", url, ts: Date.now() });
 
-  if (decision.action === "redirect") {
-    log(`redirecting to ${decision.target}`);
-    performRedirect(decision.target, decision.experiment.id);
-    return publish();
+  // One beacon for the whole page load, sent before any navigation: `sendBeacon` survives the
+  // unload, so the events are not lost to the redirect that immediately follows them.
+  if (events.length > 0 && send(events)) {
+    state.reported = true;
+    for (const experimentId of reportedAssignments) markAssignmentSent(experimentId, stores);
   }
 
-  log(`staying on the control page (${decision.variantId ?? "control"})`);
-  trackEngagement(options, state, href);
-  return publish();
+  if (redirect) {
+    log(`redirecting to ${redirect.target}`);
+    state.action = "redirect";
+    performRedirect(redirect.target, redirect.experimentId);
+    // The page is being replaced; revealing it now would be the flash the cloak prevents.
+    return state;
+  }
+
+  trackEngagement(options, state, url);
+
+  if (changes.length > 0) {
+    state.action = "apply";
+    applyWhenReady(changes, revealPage);
+  } else {
+    state.action = state.assignments.length > 0 ? "stay" : "none";
+    revealPage();
+  }
+  return state;
+}
+
+/** How soon a second winner redirect for one experiment counts as a bounce, not a revisit. */
+const WINNER_BOUNCE_MS = 10_000;
+
+/**
+ * Sends a visitor on a completed test's page to its winner.
+ *
+ * Unlike a live test this is every visit, not once per session — the winner *is* the page now
+ * — so the loop guard is different: never to the page already displayed, and never twice for
+ * the same experiment within a few seconds, which is what a bounce between two pages looks like.
+ */
+function redirectToWinner(
+  experiment: LockedExperimentConfig,
+  href: string,
+  visit: VisitContext,
+): boolean {
+  if (!pageMatches(experiment.targeting, href) || !isTargeted(experiment.targeting, visit)) {
+    return false;
+  }
+  if (isSameUrl(href, experiment.target)) return false;
+
+  const session = getSessionStorage();
+  const key = "routely_w_" + experiment.id;
+  try {
+    const last = Number(session?.getItem(key));
+    if (last > 0 && Date.now() - last < WINNER_BOUNCE_MS) return false;
+    session?.setItem(key, String(Date.now()));
+  } catch {
+    // Without storage, the same-URL guard above is the one that remains.
+  }
+
+  try {
+    window.location.replace(experiment.target);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Measures how long the visitor keeps this page visible.
+ * A preview: force the requested arm and show it, storing and sending nothing.
  *
- * Started only where the visitor actually remains — the control page when they were not
- * redirected, and the variant page they arrived on. A control page that is about to redirect
- * is skipped: the visitor is there for milliseconds, and counting that would drag the
- * control arm's average down for a reason that has nothing to do with the page.
+ * The page rule is not checked — the link was made for this experiment on purpose — and
+ * neither are targeting or coverage, which decide who *enters* a live test.
  */
-function trackEngagement(options: RoutelyOptions, state: RoutelyState, href: string): void {
-  if (!state.assignment || typeof document === "undefined") return;
+function runPreview(
+  state: RoutelyState,
+  preview: Preview,
+  href: string,
+  log: (...args: unknown[]) => void,
+): void {
+  const experiment = state.experiments.find(
+    (candidate): candidate is LiveExperimentConfig =>
+      !candidate.locked && candidate.id === preview.experimentId,
+  );
+  const arm = experiment?.arms.find((candidate) => candidate.position === preview.position);
 
-  const url = normalizeUrl(href) ?? href;
-  const { experimentId, variantId } = state.assignment;
+  if (!experiment || !arm) {
+    log("preview: no such experiment or arm");
+    revealPage();
+    return;
+  }
+
+  state.assignment = { experimentId: experiment.id, variantId: arm.variantId };
+  state.assignments = [state.assignment];
+  log(`preview: ${experiment.id} arm ${arm.position}`);
+
+  if (experiment.type === "redirect") {
+    if (arm.position > 0 && arm.url && !isSameUrl(withoutPreview(href), arm.url)) {
+      state.action = "redirect";
+      try {
+        window.location.replace(withPreview(arm.url, preview));
+        return;
+      } catch {
+        // Stay and show the page.
+      }
+    }
+    state.action = "stay";
+    revealPage();
+    return;
+  }
+
+  state.action = "apply";
+  applyWhenReady(arm.changes ?? [], revealPage);
+}
+
+/**
+ * Measures how long the visitor keeps this page visible, for every experiment it takes part in.
+ *
+ * Not started on a page that is about to redirect: the visitor is there for milliseconds, and
+ * counting that would drag the control arm's average down for a reason that has nothing to do
+ * with the page.
+ */
+function trackEngagement(options: RoutelyOptions, state: RoutelyState, url: string): void {
+  if (state.assignments.length === 0 || typeof document === "undefined") return;
 
   const timer = createEngagementTimer({
     visible: document.visibilityState !== "hidden",
@@ -292,106 +530,23 @@ function trackEngagement(options: RoutelyOptions, state: RoutelyState, href: str
   attachEngagement(timer, (durationMs, isFinal) => {
     // Below the threshold a non-final flush is not worth a request; the final one always goes.
     if (!isFinal && durationMs < MIN_FLUSH_MS) return;
-    sendTimeOnPage(
+    if (!(durationMs > 0)) return;
+    sendEvents(
       options.apiBase,
       options.siteId,
       state.visitorId,
-      {
+      state.assignments.map(({ experimentId, variantId }) => ({
+        type: "time_on_page" as const,
         experimentId,
         variantId,
         url,
-      },
-      durationMs,
+        durationMs: Math.round(durationMs),
+        ts: Date.now(),
+      })),
     );
   });
 
   state.engagement = timer;
-}
-
-/**
- * Records a conversion for every experiment whose goal this page satisfies.
- *
- * Only for experiments the visitor is actually assigned to. Reaching the thank-you page
- * without ever having been bucketed is not a conversion *in this experiment* — the visitor
- * arrived by some other route, and counting them would credit the test for traffic it never
- * touched.
- */
-function recordConversions(
-  options: RoutelyOptions,
-  state: RoutelyState,
-  stores: ReturnType<typeof resolveAssignmentStores>,
-  href: string,
-  log: (...args: unknown[]) => void,
-): void {
-  const matches = findGoalMatches(href, state.experiments);
-  if (matches.length === 0) return;
-
-  const url = normalizeUrl(href) ?? href;
-
-  for (const experiment of matches) {
-    const assignment = readAssignment(experiment.id, stores);
-
-    if (!assignment) {
-      log(`goal matched for ${experiment.id} but this visitor was never assigned`);
-      continue;
-    }
-
-    // Refreshing the thank-you page, returning to it tomorrow, or a second copy of the SDK on
-    // the page all stop here. The database's unique constraint is the real guarantee.
-    if (!claimConversion(experiment.id)) {
-      log(`conversion already recorded for ${experiment.id}`);
-      continue;
-    }
-
-    log(`conversion for ${experiment.id} (${assignment.variantId ?? "control"})`);
-    sendConversion(options.apiBase, options.siteId, state.visitorId, {
-      experimentId: experiment.id,
-      variantId: assignment.variantId,
-      url,
-    });
-
-    state.conversions.push(experiment.id);
-    state.reported = true;
-  }
-}
-
-/**
- * Reports the page view, and the assignment the first time it is made.
- *
- * The URL is normalised before it leaves the browser so the value sent is the one the server
- * will store — the server normalises again regardless, because a URL that arrives over the
- * network is an assertion rather than a fact, but sending the canonical form keeps the two
- * from disagreeing about what page a visitor was on.
- */
-function report(
-  options: RoutelyOptions,
-  state: RoutelyState,
-  stores: ReturnType<typeof resolveAssignmentStores>,
-  href: string,
-): void {
-  if (!state.assignment) return;
-
-  const url = normalizeUrl(href) ?? href;
-  const { experimentId, variantId } = state.assignment;
-
-  const stored = readAssignment(experimentId, stores);
-  const includeAssignment = stored ? !stored.sent : true;
-  const includePageView = claimPageView(experimentId, url);
-
-  if (!includeAssignment && !includePageView) return;
-
-  const sent = sendPageEvents(
-    options.apiBase,
-    options.siteId,
-    state.visitorId,
-    { experimentId, variantId, url },
-    { includeAssignment, includePageView },
-  );
-
-  if (sent) {
-    state.reported = true;
-    if (includeAssignment) markAssignmentSent(experimentId, stores);
-  }
 }
 
 /**
@@ -415,6 +570,7 @@ function cleanUrl(href: string): void {
 if (typeof document !== "undefined") {
   // The rejection handler is the last line of defence. Everything inside `boot` already
   // resolves rather than throwing, so reaching this would be a bug — but a tracking script is
-  // exactly the wrong place to find out about one via the customer's error reporting.
-  void boot().catch(() => {});
+  // exactly the wrong place to find out about one via the customer's error reporting. The
+  // page is revealed on that path too: a cloak left up by a crashed SDK would be a blank site.
+  void boot().catch(() => revealPage());
 }

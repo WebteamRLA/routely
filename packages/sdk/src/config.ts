@@ -1,4 +1,4 @@
-import type { ConfigResponse, ExperimentConfig } from "./contract";
+import type { ArmConfig, ConfigResponse, ExperimentConfig, TargetingConfig } from "./contract";
 import { SDK_PROTOCOL_VERSION } from "./contract";
 import { type KeyValueStore, getSessionStorage } from "./env";
 import { getJson } from "./transport";
@@ -42,23 +42,43 @@ export function isConfigResponse(value: unknown): value is ConfigResponse {
   );
 }
 
+function isTargetingConfig(value: unknown): value is TargetingConfig {
+  const t = value as Partial<TargetingConfig> | null;
+  return (
+    typeof t === "object" &&
+    t !== null &&
+    typeof t.match === "string" &&
+    typeof t.pattern === "string" &&
+    Array.isArray(t.devices) &&
+    Array.isArray(t.conditions)
+  );
+}
+
+function isArmConfig(value: unknown, type: unknown): value is ArmConfig {
+  const arm = value as Partial<ArmConfig> | null;
+  return (
+    typeof arm === "object" &&
+    arm !== null &&
+    typeof arm.position === "number" &&
+    typeof arm.weight === "number" &&
+    (arm.variantId === null || typeof arm.variantId === "string") &&
+    // A redirect arm without a URL could not be followed; an A/B arm's changes must be a list.
+    (type === "redirect" ? typeof arm.url === "string" : Array.isArray(arm.changes ?? []))
+  );
+}
+
 function isExperimentConfig(value: unknown): value is ExperimentConfig {
   if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<ExperimentConfig>;
+  const candidate = value as Partial<Record<keyof ExperimentConfig | "arms" | "target", unknown>>;
+
+  if (typeof candidate.id !== "string" || !isTargetingConfig(candidate.targeting)) return false;
+  if (candidate.locked === true) return typeof candidate.target === "string";
 
   return (
-    typeof candidate.id === "string" &&
-    typeof candidate.controlWeight === "number" &&
-    Array.isArray(candidate.variants) &&
-    candidate.variants.length > 0 &&
-    candidate.variants.every(
-      (variant) =>
-        typeof variant.id === "string" &&
-        typeof variant.url === "string" &&
-        typeof variant.weight === "number",
-    ) &&
-    typeof candidate.control?.url === "string" &&
-    typeof candidate.goal?.url === "string"
+    (candidate.type === "redirect" || candidate.type === "ab") &&
+    Array.isArray(candidate.arms) &&
+    candidate.arms.length > 0 &&
+    candidate.arms.every((arm) => isArmConfig(arm, candidate.type))
   );
 }
 
@@ -106,8 +126,16 @@ export function writeCachedConfig(
   }
 }
 
-export function configUrl(apiBase: string, siteId: string): string {
-  return `${apiBase}/api/v1/config?siteId=${encodeURIComponent(siteId)}`;
+/**
+ * `v` asks for protocol v4 — without it the endpoint answers in v3 for the bundles cached before
+ * v4 existed. `preview` additionally returns that experiment whatever its status, for the
+ * preview link; such a response is never cached.
+ */
+export function configUrl(apiBase: string, siteId: string, preview?: string): string {
+  return (
+    `${apiBase}/api/v1/config?v=${SDK_PROTOCOL_VERSION}&siteId=${encodeURIComponent(siteId)}` +
+    (preview ? `&preview=${encodeURIComponent(preview)}` : "")
+  );
 }
 
 /**
@@ -118,13 +146,16 @@ export async function loadConfig(
   apiBase: string,
   siteId: string,
   timeoutMs?: number,
+  preview?: string,
 ): Promise<ConfigResponse | null> {
-  const store = getSessionStorage();
+  // A preview reads and writes no cache: it must see the experiment as it is now, and must not
+  // leave a draft's configuration behind for the visitor's next ordinary page load.
+  const store = preview ? null : getSessionStorage();
 
   const cached = readCachedConfig(siteId, store);
   if (cached) return cached;
 
-  const fetched = await getJson<unknown>(configUrl(apiBase, siteId), timeoutMs);
+  const fetched = await getJson<unknown>(configUrl(apiBase, siteId, preview), timeoutMs);
   if (!isConfigResponse(fetched)) return null;
 
   writeCachedConfig(siteId, fetched, store);

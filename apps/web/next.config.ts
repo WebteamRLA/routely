@@ -5,8 +5,17 @@ import type { NextConfig } from "next";
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 
-/** Where the built SDK bundle actually lives, produced by `npm run sdk:build`. */
-const SDK_BUNDLE_PATH = "/sdk/v1/sdk.js";
+/**
+ * Where the built SDK bundle actually lives, produced by `npm run sdk:build`.
+ *
+ * v2 speaks protocol v4 (A/B changes, targeting, `track()`). `/sdk/v1/` still exists — the
+ * build copies the same file there — because it was served `immutable` for a year and pages may
+ * reference it directly; the API keeps answering the v3 bundles those browsers may hold.
+ */
+const SDK_BUNDLE_PATH = "/sdk/v2/sdk.js";
+
+/** A moving pointer: a bad bundle must not be stuck in browser caches for long. */
+const SHORT_CACHE = "public, max-age=300, stale-while-revalidate=86400";
 
 /**
  * Vercel builds and packages the app itself, and rejects `output: "standalone"`.
@@ -45,12 +54,19 @@ const nextConfig: NextConfig = {
         headers: [
           // Short cache: this URL is a moving pointer, so a bad deploy must not be stuck in
           // browser caches for long. `stale-while-revalidate` keeps it fast anyway.
-          {
-            key: "Cache-Control",
-            value: "public, max-age=300, stale-while-revalidate=86400",
-          },
+          { key: "Cache-Control", value: SHORT_CACHE },
           // The snippet loads cross-origin from customer sites. A classic <script> does not
           // need CORS, but this makes the bundle usable from a module import or a fetch too.
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+        ],
+      },
+      {
+        // Rebuilt in place on every deploy (no content hash in the name), so — unlike v1, which
+        // was marked immutable before that was noticed — it is cached like the pointer.
+        source: "/sdk/v2/:file*",
+        headers: [
+          { key: "Cache-Control", value: SHORT_CACHE },
           { key: "Access-Control-Allow-Origin", value: "*" },
           { key: "X-Content-Type-Options", value: "nosniff" },
         ],

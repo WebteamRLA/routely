@@ -1,8 +1,14 @@
 import type { NextRequest } from "next/server";
 
-import type { ConfigResponse, ExperimentConfig } from "@routely/sdk/contract";
-import { SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
-import * as experimentRepo from "@/server/repositories/experiment.repository";
+import type {
+  ConfigResponse,
+  ExperimentConfig,
+  LegacyConfigResponse,
+  LegacyExperimentConfig,
+} from "@routely/sdk/contract";
+import { LEGACY_PROTOCOL_VERSION, SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
+import { countryFromHeaders, toV3Experiment, toV4Experiment, usesGeo } from "@/lib/sdk-config";
+import * as configRepo from "@/server/repositories/config.repository";
 import * as websiteService from "@/server/services/website.service";
 import { configRequestSchema } from "@/validation/tracking";
 
@@ -19,7 +25,19 @@ import { configRequestSchema } from "@/validation/tracking";
  * **Only ACTIVE experiments are published.** That is the mechanism behind the lifecycle
  * guarantees: a draft cannot affect a visitor because it never reaches the browser, and
  * pausing takes effect as soon as caches expire because the experiment simply stops being
- * listed. There is no separate "is this paused?" check on the client to get wrong.
+ * listed. There is no separate "is this paused?" check on the client to get wrong. The two
+ * additions in protocol v4 are equally explicit: a completed Split URL test that keeps its
+ * winner is published as a `locked` redirect, and a preview link (`&preview=<id>`) adds that one
+ * experiment whatever its status — ids are unguessable, and a preview is never assigned or
+ * tracked.
+ *
+ * **Protocol.** `?v=4` gets the v4 shape. Anything else gets v3, because bundles fetched from
+ * the immutable `/sdk/v1/` path may run from browser caches for a year and do not send `v`.
+ *
+ * **Location targeting is resolved here**, from the platform's geo header
+ * (`x-vercel-ip-country`, else `cf-ipcountry`): an experiment the visitor's country fails is
+ * left out. An unknown country is included — see `passesGeo`. A response that depends on the
+ * country is marked `private` so no shared cache serves it to a visitor from elsewhere.
  */
 
 /** The Prisma adapter uses a Node database driver, so this cannot run on the Edge runtime. */
@@ -44,14 +62,18 @@ const CORS_HEADERS = {
   "Access-Control-Max-Age": "86400",
 } as const;
 
-function json(body: unknown, status: number, cacheable: boolean) {
+type Caching = "public" | "private" | "none";
+
+function json(body: unknown, status: number, caching: Caching) {
   return Response.json(body, {
     status,
     headers: {
       ...CORS_HEADERS,
-      "Cache-Control": cacheable
-        ? `public, max-age=${TTL_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`
-        : "no-store",
+      "Cache-Control":
+        caching === "none"
+          ? "no-store"
+          : `${caching}, max-age=${TTL_SECONDS}, stale-while-revalidate=${STALE_SECONDS}`,
+      Vary: "X-Vercel-IP-Country, CF-IPCountry",
       "X-Content-Type-Options": "nosniff",
     },
   });
@@ -62,41 +84,56 @@ export function OPTIONS() {
 }
 
 export async function GET(request: NextRequest) {
+  const params = request.nextUrl.searchParams;
   const parsed = configRequestSchema.safeParse({
-    siteId: request.nextUrl.searchParams.get("siteId") ?? "",
+    siteId: params.get("siteId") ?? "",
+    v: params.get("v") ?? undefined,
+    preview: params.get("preview") ?? undefined,
   });
 
   if (!parsed.success) {
     // A malformed id is a broken installation, so say so — but do not cache the answer, in
     // case the snippet is corrected a moment later.
-    return json({ error: "Invalid siteId" }, 400, false);
+    return json({ error: "Invalid siteId" }, 400, "none");
   }
 
-  const website = await websiteService.resolveWebsiteByPublicSiteId(parsed.data.siteId);
+  const { siteId, preview } = parsed.data;
+  const website = await websiteService.resolveWebsiteByPublicSiteId(siteId);
 
   // An unknown-but-well-formed id returns an empty configuration rather than 404. A deleted
   // website leaves its snippet installed on pages nobody will update, and those pages should
-  // quietly do nothing instead of logging an error on every view. The SDK's behaviour is the
-  // same either way: no experiments, no redirect.
-  const experiments = website ? await experimentRepo.listActiveExperiments(website.id) : [];
+  // quietly do nothing instead of logging an error on every view.
+  const rows = website ? await configRepo.listConfigExperiments(website.id) : [];
+
+  if (parsed.data.v !== String(SDK_PROTOCOL_VERSION)) {
+    const body: LegacyConfigResponse = {
+      v: LEGACY_PROTOCOL_VERSION,
+      siteId,
+      ttl: TTL_SECONDS,
+      experiments: rows
+        .map(toV3Experiment)
+        .filter((experiment): experiment is LegacyExperimentConfig => experiment !== null),
+    };
+    return json(body, 200, "public");
+  }
+
+  const country = countryFromHeaders(request.headers);
+  const experiments = rows
+    .map((row) => toV4Experiment(row, country))
+    .filter((experiment): experiment is ExperimentConfig => experiment !== null);
+
+  if (website && preview) {
+    const row = await configRepo.findPreviewExperiment(preview, website.id);
+    const previewed = row ? toV4Experiment(row, null, { preview: true }) : null;
+    if (previewed) experiments.push(previewed);
+  }
 
   const body: ConfigResponse = {
     v: SDK_PROTOCOL_VERSION,
-    siteId: parsed.data.siteId,
+    siteId,
     ttl: TTL_SECONDS,
-    experiments: experiments.map((experiment): ExperimentConfig => ({
-      id: experiment.id,
-      control: { url: experiment.controlUrl, match: experiment.controlMatchType },
-      controlWeight: experiment.controlWeight,
-      variants: experiment.variants.map((variant) => ({
-        id: variant.id,
-        url: variant.url,
-        weight: variant.weight,
-      })),
-      goal: { url: experiment.conversionUrl, match: experiment.conversionMatchType },
-      trafficAllocation: experiment.trafficAllocation,
-    })),
+    experiments,
   };
 
-  return json(body, 200, true);
+  return json(body, 200, preview ? "none" : rows.some(usesGeo) ? "private" : "public");
 }

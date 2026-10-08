@@ -44,29 +44,29 @@ export function findAssignment(
 }
 
 /**
- * Visitors per arm, keyed by variant id — `null` is the control arm. Served entirely by the
- * `[experimentId, variantId]` index, so it stays a count over the index rather than a scan.
- *
- * Returns a `Map` rather than a plain object: a plain object's keys are always strings, so a
- * `null` key would silently become the string `"null"` — a real footgun given how much this
- * data model leans on `null` meaning something specific.
+ * The visitor's assignments in this website's **running** experiments, with each experiment's
+ * goals — what a `page` or `track` event is matched against to derive conversions. Only
+ * assignments that already exist: a conversion never creates one.
  */
-export async function countAssignmentsByVariant(
-  experimentId: string,
-  range?: { from: Date; to: Date },
+export function listActiveAssignmentsForVisitor(
+  visitorId: string,
+  websiteId: string,
   client: DbClient = db,
-): Promise<Map<string | null, number>> {
-  const rows = await client.assignment.groupBy({
-    by: ["variantId"],
-    where: {
-      experimentId,
-      // Filtered on the same window as the conversions counted against it. Leaving the
-      // denominator unbounded while the numerator is windowed would understate every rate in
-      // a date-ranged view — badly, for an experiment that has been running a long time.
-      ...(range ? { assignedAt: { gte: range.from, lte: range.to } } : {}),
+) {
+  return client.assignment.findMany({
+    where: { visitorId, experiment: { websiteId, status: "ACTIVE" } },
+    select: {
+      id: true,
+      experimentId: true,
+      variantId: true,
+      experiment: {
+        select: {
+          goalMetricId: true,
+          conversionUrl: true,
+          conversionMatchType: true,
+          secondaryMetricIds: true,
+        },
+      },
     },
-    _count: { _all: true },
   });
-
-  return new Map(rows.map((row) => [row.variantId, row._count._all]));
 }

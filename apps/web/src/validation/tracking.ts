@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
+import { LEGACY_PROTOCOL_VERSION, SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
 import { EventType } from "@/generated/prisma/enums";
 import { absoluteUrlSchema, idSchema, publicSiteIdSchema } from "@/validation/common";
 
@@ -35,6 +35,7 @@ const MAX_DURATION_MS = 6 * 60 * 60 * 1000;
 export const MAX_CLOCK_SKEW_PAST_MS = 24 * 60 * 60 * 1000;
 export const MAX_CLOCK_SKEW_FUTURE_MS = 5 * 60 * 1000;
 
+/** An experiment-scoped event, as both protocols send it. */
 export const trackedEventSchema = z
   .object({
     experimentId: idSchema,
@@ -59,27 +60,83 @@ export const trackedEventSchema = z
 /** Cap on events per request, so one client cannot force an unbounded transaction. */
 export const MAX_EVENTS_PER_BATCH = 50;
 
-export const eventBatchSchema = z.object({
-  /**
-   * Wire protocol version, taken from the contract rather than written out here.
-   *
-   * A hand-copied number is a version mismatch waiting to happen, and this one is invisible
-   * when it breaks: a batch that fails this check is discarded silently by `ingest`, so a stale
-   * literal drops every event with no error anywhere. Importing the constant makes a bump
-   * update both ends at once.
-   */
-  v: z.literal(SDK_PROTOCOL_VERSION),
+/**
+ * Custom event keys. Wider than the metric-key rule (`validation/metric.ts`) so a key sent by a
+ * tag manager in another casing is still received and simply matches no metric, rather than
+ * being indistinguishable from a malformed request.
+ */
+export const trackKeySchema = z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/, "Invalid event key");
+
+/** v4 site-level events: a page view on any page, and `routely.track(key)`. */
+export const pageEventSchema = z.object({
+  type: z.literal("page"),
+  url: absoluteUrlSchema,
+  ts: z.number().int().positive(),
+});
+
+export const trackEventSchema = z.object({
+  type: z.literal("track"),
+  key: trackKeySchema,
+  url: absoluteUrlSchema,
+  ts: z.number().int().positive(),
+});
+
+/**
+ * v4 experiment events. `conversion` is gone from the browser's vocabulary: conversions are
+ * derived server-side from `page` and `track` against assignments already stored, so accepting
+ * one here would only reopen a way to claim them.
+ */
+const experimentEventV4Schema = trackedEventSchema.refine((event) => event.type !== "conversion", {
+  message: "Conversions are derived by the server",
+});
+
+export const siteEventSchema = z.discriminatedUnion("type", [pageEventSchema, trackEventSchema]);
+
+/**
+ * One v4 event: site-level when `type` says so, otherwise experiment-scoped. A union by `type`
+ * rather than `discriminatedUnion`, because the experiment branch already carries its own enum.
+ */
+export const trackedEventV4Schema = z.union([siteEventSchema, experimentEventV4Schema]);
+
+const batchBase = {
   siteId: publicSiteIdSchema,
   visitorId: anonymousIdSchema,
+};
+
+/**
+ * Wire protocol versions are taken from the contract rather than written out here.
+ *
+ * A hand-copied number is a version mismatch waiting to happen, and this one is invisible when
+ * it breaks: a batch that fails this check is discarded silently by `ingest`, so a stale
+ * literal drops every event with no error anywhere.
+ */
+export const eventBatchV4Schema = z.object({
+  v: z.literal(SDK_PROTOCOL_VERSION),
+  ...batchBase,
+  events: z.array(trackedEventV4Schema).min(1).max(MAX_EVENTS_PER_BATCH),
+});
+
+/** v3 bundles — still running from browser caches — send experiment events only. */
+export const eventBatchV3Schema = z.object({
+  v: z.literal(LEGACY_PROTOCOL_VERSION),
+  ...batchBase,
   events: z.array(trackedEventSchema).min(1).max(MAX_EVENTS_PER_BATCH),
 });
+
+export const eventBatchSchema = z.discriminatedUnion("v", [eventBatchV4Schema, eventBatchV3Schema]);
 
 /** Query parameters of the SDK config endpoint. */
 export const configRequestSchema = z.object({
   siteId: publicSiteIdSchema,
+  /** `4` from a v4 bundle; absent (or anything else) from a v3 one, which gets the v3 shape. */
+  v: z.string().optional(),
+  /** An experiment id from a preview link. */
+  preview: idSchema.optional(),
 });
 
 export type TrackedEventInput = z.infer<typeof trackedEventSchema>;
+export type TrackedEventV4Input = z.infer<typeof trackedEventV4Schema>;
+export type SiteEventInput = z.infer<typeof siteEventSchema>;
 export type EventBatchInput = z.infer<typeof eventBatchSchema>;
 
 /**

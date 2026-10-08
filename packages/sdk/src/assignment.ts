@@ -1,4 +1,4 @@
-import type { ExperimentConfig, ExperimentVariantConfig } from "./contract";
+import type { LiveExperimentConfig } from "./contract";
 import { type KeyValueStore, createMemoryStore, getLocalStorage } from "./env";
 
 /**
@@ -97,7 +97,7 @@ export function writeAssignment(
  */
 export function drawArm(
   controlWeight: number,
-  variants: Pick<ExperimentVariantConfig, "id" | "weight">[],
+  variants: { id: string; weight: number }[],
   random: () => number = Math.random,
 ): string | null {
   const clean = (weight: number) => (Number.isFinite(weight) && weight > 0 ? weight : 0);
@@ -146,17 +146,24 @@ export interface AssignmentResult {
  * "forced to control" could share one falsy sentinel.
  */
 export function resolveAssignment(
-  experiment: Pick<ExperimentConfig, "id" | "controlWeight" | "variants">,
+  experiment: Pick<LiveExperimentConfig, "id" | "arms">,
   stores: KeyValueStore[],
   options: { forced?: string | null; random?: () => number; now?: number } = {},
 ): AssignmentResult {
   const existing = readAssignment(experiment.id, stores);
   if (existing) return { variantId: existing.variantId, isNew: false };
 
+  let controlWeight = 0;
+  const variants: { id: string; weight: number }[] = [];
+  for (const arm of experiment.arms) {
+    if (arm.variantId === null) controlWeight = arm.weight;
+    else variants.push({ id: arm.variantId, weight: arm.weight });
+  }
+
   const variantId =
     options.forced !== undefined
       ? options.forced
-      : drawArm(experiment.controlWeight, experiment.variants, options.random);
+      : drawArm(controlWeight, variants, options.random);
 
   writeAssignment(experiment.id, { variantId, at: options.now ?? Date.now(), sent: false }, stores);
 

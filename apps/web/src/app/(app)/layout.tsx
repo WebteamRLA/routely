@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/layout/app-shell";
+import { currentProject } from "@/components/projects/current";
 import { requireSession } from "@/server/auth/session";
 import * as websiteService from "@/server/services/website.service";
 
@@ -13,13 +14,23 @@ import * as websiteService from "@/server/services/website.service";
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
-  // For the sidebar's website menu. Ownership-scoped like every other read.
-  const websites = await websiteService.listWebsites(session.user.id);
+  // The switcher's projects, ownership-scoped like every other read.
+  const projects = await websiteService.listProjects(session.user.id);
+  const remembered = await currentProject(session.user.id, projects);
 
   return (
     <AppShell
-      user={session.user}
-      websites={websites.map(({ id, name, domain }) => ({ id, name, domain }))}
+      user={{ name: session.user.name, email: session.user.email, image: session.user.image }}
+      projects={projects.map((p) => ({
+        id: p.id,
+        name: p.name,
+        domain: p.domain,
+        domains: p.domains,
+        iconUrl: p.iconUrl,
+        archived: p.archived,
+        experiments: p.counts.total,
+      }))}
+      rememberedProjectId={remembered?.id ?? null}
     >
       {children}
     </AppShell>

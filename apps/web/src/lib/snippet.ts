@@ -58,6 +58,10 @@ export interface AntiFlickerOptions {
  *     whole mechanism has to be safe against: a cloak that never lifts is a blank site, which
  *     is far worse than the flicker it replaces.
  *
+ * It also starts the `window.routely` queue, with a `track` that queues: a custom event fired by
+ * the page or a tag manager before the bundle has loaded — `routely.track("signup")` — is then
+ * kept and replayed by the SDK instead of throwing on an undefined function.
+ *
  * The SDK reveals the page early by calling `window.__routelyReveal()` as soon as it knows the
  * visitor is staying — so in the common case the overlay lasts only as long as the decision,
  * and the timeout is a backstop rather than the mechanism.
@@ -80,7 +84,7 @@ export function buildAntiFlickerSnippet({
   return `<!-- Routely anti-flickering script -->
 <script>
 var routelyTimeout = ${timeoutMs};
-!function(d,w,i,t){try{var h=d.head||d.getElementsByTagName("head")[0];if(!h||d.getElementById(i))return;var s=d.createElement("style");s.id=i;s.appendChild(d.createTextNode("${css}"));h.appendChild(s);var done=false;w.__routelyReveal=function(){if(done)return;done=true;try{s.parentNode&&s.parentNode.removeChild(s)}catch(e){}};setTimeout(w.__routelyReveal,t)}catch(e){}}(document,window,"routely-cloak",routelyTimeout);
+!function(d,w,i,t){try{var r=w.routely=w.routely||[];r.track=r.track||function(k){w.routely.push(["track",k])};var h=d.head||d.getElementsByTagName("head")[0];if(!h||d.getElementById(i))return;var s=d.createElement("style");s.id=i;s.appendChild(d.createTextNode("${css}"));h.appendChild(s);var done=false;w.__routelyReveal=function(){if(done)return;done=true;try{s.parentNode&&s.parentNode.removeChild(s)}catch(e){}};setTimeout(w.__routelyReveal,t)}catch(e){}}(document,window,"routely-cloak",routelyTimeout);
 </script>`;
 }
 

@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { routes } from "@/lib/routes";
+import { LAST_PROJECT_COOKIE, routes } from "@/lib/routes";
 import { getSession } from "@/server/auth/session";
 import { isAppError } from "@/server/errors";
 import * as googleOAuth from "@/server/services/google-oauth.service";
@@ -13,21 +13,25 @@ export const runtime = "nodejs";
 /**
  * Completes the Google Sheets consent flow.
  *
- * Every outcome ends as a redirect back to `/integrations` carrying a short code, which the page
- * turns into a message. Nothing is rendered here: this URL is reached by a redirect from Google
+ * Every outcome ends as a redirect back to the integrations page of the project the customer started
+ * from (remembered in the `rl_project` cookie before the flow began; the legacy `/integrations`
+ * redirect when there is none) carrying a short code, which the page turns into a message. Nothing is rendered here: this URL is reached by a redirect from Google
  * and its content would be discarded anyway, and a redirect means the authorization code does not
  * linger in the address bar.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const store = await cookies();
+  // Only an id: the page it leads to re-checks ownership, so a forged cookie reaches a 404.
+  const projectId = store.get(LAST_PROJECT_COOKIE)?.value;
+  const target = projectId ? routes.project(projectId).integrations() : routes.currentIntegrations;
   const back = (outcome: string): NextResponse =>
-    NextResponse.redirect(new URL(`${routes.integrations}?${outcome}`, request.url), {
+    NextResponse.redirect(new URL(`${target}?${outcome}`, request.url), {
       status: 303,
     });
 
   const session = await getSession();
   if (!session) return NextResponse.redirect(new URL(routes.login, request.url), { status: 303 });
 
-  const store = await cookies();
   const cookieNonce = store.get(googleOAuth.STATE_COOKIE)?.value;
 
   // Consumed whatever happens, so a state value can never be replayed.

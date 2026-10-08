@@ -1,148 +1,129 @@
 import { z } from "zod";
 
-import { ExperimentStatus, PrimaryMetric, UrlMatchType } from "@/generated/prisma/enums";
-import { isSameUrl } from "@/lib/url";
-import {
-  absoluteUrlSchema,
-  displayNameSchema,
-  idSchema,
-  trafficAllocationSchema,
-} from "@/validation/common";
+import { idSchema } from "@/validation/common";
 
-export const urlMatchTypeSchema = z.enum(UrlMatchType);
-export const experimentStatusSchema = z.enum(ExperimentStatus);
-export const primaryMetricSchema = z.enum(PrimaryMetric);
+// -------------------------------------------------------------------------------------------
+// The wizard draft (new UI). `ExperimentDraft` in `lib/domain.ts` is the shape; these schemas
+// check its *structure* and bounds. Whether a draft is launchable is `lib/validate-draft` plus
+// the service's own rules (same-site, conflicts, goal ownership).
+// -------------------------------------------------------------------------------------------
 
-/**
- * An arm's share of the traffic entered into the experiment, relative to the other arms.
- * `0` is allowed — it parks an arm without deleting it — but the schema rejects a set where
- * *every* arm is 0, since that leaves no arm to draw and nothing to divide by.
- */
-export const armWeightSchema = z
-  .number()
-  .int("Must be a whole number")
-  .min(0, "Cannot be negative")
-  .max(100, "Must be at most 100");
-
-/** One redirect target. `id` is present when editing an existing variant, absent for a new
- * one — that's what lets the service tell "update this row" from "create this row" apart. */
-export const experimentVariantSchema = z.object({
-  id: idSchema.optional(),
-  url: absoluteUrlSchema,
-  weight: armWeightSchema.default(50),
-});
-
-const experimentFields = z.object({
-  websiteId: idSchema,
-  name: displayNameSchema,
-  description: z.string().trim().max(500, "Must be 500 characters or fewer").optional(),
-
-  controlUrl: absoluteUrlSchema,
-  controlMatchType: urlMatchTypeSchema.default("EXACT"),
-  controlWeight: armWeightSchema.default(50),
-  variants: z.array(experimentVariantSchema).min(1, "At least one variant is required"),
-
-  /** Label for the goal. Optional — the UI falls back to the experiment's name. */
-  conversionName: z.string().trim().max(120, "Must be 120 characters or fewer").optional(),
-  conversionUrl: absoluteUrlSchema,
-  conversionMatchType: urlMatchTypeSchema.default("EXACT"),
-  primaryMetric: primaryMetricSchema.default("CONVERSION_RATE"),
-
-  trafficAllocation: trafficAllocationSchema.default(100),
-});
+export const CHANGE_PROPS = ["text", "bg", "image"] as const;
+export const EDITOR_ELEMENTS = ["eyebrow", "headline", "sub", "cta", "trust", "image"] as const;
+export const MAX_CHANGES_PER_ARM = 50;
 
 /**
- * Cross-field rules that prevent an experiment from being unable to produce a meaningful
- * result. Each of these is a configuration mistake that looks fine field-by-field:
+ * One A/B element change. The SDK writes `value` into the customer's page, so the two
+ * attribute-shaped props are held to what they claim to be:
  *
- *  - control === a variant would redirect a visitor to the page they are already on, which the
- *    SDK's loop guard would suppress, silently starving that arm.
- *  - two variants sharing a URL is the same mistake between two arms instead of one — a
- *    duplicate redirect target that can never be told apart in results.
- *  - conversion === control converts every control visitor on arrival, pinning that arm at
- *    100% and making the comparison meaningless.
- *  - conversion === a variant does the same to that arm.
+ *  - `bg` becomes a CSS background colour — no `;`, braces or angle brackets, so it cannot
+ *    smuggle further declarations or markup.
+ *  - `image` becomes an `src` — an http(s) URL or a site-relative path, never `javascript:` or
+ *    `data:`.
+ *
+ * `text` is set as text content (never HTML), so it only needs a length bound.
  */
-function applyUrlRules<
-  T extends z.ZodType<{
-    controlUrl: string;
-    controlWeight: number;
-    variants: { url: string; weight: number }[];
-    conversionUrl: string;
-  }>,
->(schema: T) {
-  return schema.superRefine((value, ctx) => {
-    // Every arm parked at 0 leaves no arm to draw and nothing to normalise against — the one
-    // weight combination that cannot produce an experiment at all.
-    const totalWeight =
-      value.controlWeight + value.variants.reduce((sum, variant) => sum + variant.weight, 0);
-    if (totalWeight <= 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["controlWeight"],
-        message: "At least one arm must receive some traffic",
-      });
+export const changeSchema = z
+  .object({
+    selector: z
+      .string()
+      .trim()
+      .min(1, "Choose the element to change.")
+      .max(500, "Selector is too long"),
+    prop: z.enum(CHANGE_PROPS),
+    value: z.string().max(5000, "Must be 5000 characters or fewer"),
+    el: z.enum(EDITOR_ELEMENTS).optional(),
+  })
+  .superRefine((change, ctx) => {
+    if (change.prop === "bg" && !/^[#a-z0-9(),.%\s-]{1,64}$/i.test(change.value.trim())) {
+      ctx.addIssue({ code: "custom", path: ["value"], message: "Enter a colour, e.g. #F0603F" });
     }
-
-    value.variants.forEach((variant, index) => {
-      if (isSameUrl(value.controlUrl, variant.url)) {
+    if (change.prop === "image") {
+      const value = change.value.trim();
+      const isPath = value.startsWith("/") && !value.startsWith("//");
+      const isHttp = /^https?:\/\//i.test(value);
+      if (!isPath && !isHttp) {
         ctx.addIssue({
           code: "custom",
-          path: ["variants", index, "url"],
-          message: "A variant URL must be different from the control URL",
+          path: ["value"],
+          message: "Use an image URL starting with https:// or /",
         });
       }
-
-      if (isSameUrl(value.conversionUrl, variant.url)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["variants", index, "url"],
-          message: "A variant URL must be different from the conversion URL",
-        });
-      }
-
-      const duplicateAt = value.variants.findIndex(
-        (other, otherIndex) => otherIndex < index && isSameUrl(other.url, variant.url),
-      );
-      if (duplicateAt !== -1) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["variants", index, "url"],
-          message: "Two variants can't point at the same URL",
-        });
-      }
-    });
-
-    if (isSameUrl(value.conversionUrl, value.controlUrl)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["conversionUrl"],
-        message: "The conversion URL must be different from the control URL",
-      });
     }
   });
-}
 
-export const createExperimentSchema = applyUrlRules(experimentFields);
-
-/**
- * Updates carry every URL field so the cross-field rules can be re-evaluated against the
- * complete result; the caller merges the stored experiment with the user's changes first.
- */
-export const updateExperimentSchema = applyUrlRules(
-  experimentFields.omit({ websiteId: true }).extend({ experimentId: idSchema }),
-);
-
-export const experimentIdSchema = z.object({
-  experimentId: idSchema,
+/** Lenient form for saving a draft: anything structurally a change is kept as typed. */
+const draftChangeSchema = z.object({
+  selector: z.string().max(500).default(""),
+  prop: z.enum(CHANGE_PROPS),
+  value: z.string().max(5000).default(""),
+  el: z.enum(EDITOR_ELEMENTS).optional(),
 });
 
-export const changeExperimentStatusSchema = z.object({
-  experimentId: idSchema,
-  status: experimentStatusSchema,
+const draftArmSchema = z.object({
+  id: idSchema.nullish(),
+  name: z.string().max(60).optional(),
+  url: z.string().trim().max(2048, "Must be 2048 characters or fewer").default(""),
+  weight: z.coerce
+    .number()
+    .int("Must be a whole number")
+    .min(0, "Cannot be negative")
+    .max(100, "Must be at most 100"),
+  changes: z.array(draftChangeSchema).max(MAX_CHANGES_PER_ARM).default([]),
 });
 
-export type ExperimentVariantInput = z.infer<typeof experimentVariantSchema>;
-export type CreateExperimentInput = z.infer<typeof createExperimentSchema>;
-export type UpdateExperimentInput = z.infer<typeof updateExperimentSchema>;
-export type ChangeExperimentStatusInput = z.infer<typeof changeExperimentStatusSchema>;
+/** Structural check of an `ExperimentDraft` — what `saveDraft` accepts. */
+export const experimentDraftSchema = z.object({
+  id: idSchema.nullish(),
+  projectId: idSchema,
+  type: z.enum(["redirect", "ab"]),
+  name: z.string().trim().max(120, "Must be 120 characters or fewer").default(""),
+  url: z.string().trim().max(2048, "Must be 2048 characters or fewer").default(""),
+  hypothesis: z.string().trim().max(2000, "Must be 2000 characters or fewer").default(""),
+  arms: z
+    .array(draftArmSchema)
+    .min(1, "At least one arm is required")
+    .max(5, "An experiment can have at most 5 arms (Control + 4 variants)."),
+  coverage: z.coerce
+    .number()
+    .int()
+    .min(1, "Must be at least 1%")
+    .max(100, "Must be at most 100%")
+    .default(100),
+  /** Parsed tolerantly by `normalizeTargeting` in the service. */
+  targeting: z.unknown(),
+  goalMode: z.enum(["url", "event"]).default("url"),
+  goal: z.string().trim().max(64).default(""),
+  convUrl: z.string().trim().max(2048, "Must be 2048 characters or fewer").default(""),
+  convMatch: z.enum(["exact", "starts"]).default("exact"),
+  secondary: z.array(idSchema).max(20, "At most 20 secondary goals").default([]),
+  counting: z.enum(["unique", "all"]).default("unique"),
+});
+
+export type ExperimentDraftInput = z.infer<typeof experimentDraftSchema>;
+
+/** Ending an experiment: `winnerPosition` 0 = control, n = variant n, null = no winner. */
+export const endExperimentSchema = z.object({
+  projectId: idSchema,
+  experimentId: idSchema,
+  winnerPosition: z.coerce.number().int().min(0).max(4).nullable(),
+  keepWinner: z.boolean().default(false),
+});
+
+/** Edits allowed while an experiment is running or paused. Everything else is fixed. */
+export const editLiveExperimentSchema = z.object({
+  projectId: idSchema,
+  experimentId: idSchema,
+  name: z.string().trim().min(3, "Use at least 3 characters.").max(120).optional(),
+  hypothesis: z.string().trim().max(2000).optional(),
+  /** Per-arm percentages, control first; must keep the arm count and sum to 100. */
+  weights: z.array(z.coerce.number().int().min(0).max(100)).min(2).max(5).optional(),
+  coverage: z.coerce.number().int().min(1).max(100).optional(),
+  secondary: z.array(idSchema).max(20).optional(),
+  counting: z.enum(["unique", "all"]).optional(),
+});
+
+export const projectExperimentSchema = z.object({
+  projectId: idSchema,
+  experimentId: idSchema,
+});

@@ -21,10 +21,9 @@ import * as sheetsSync from "@/server/services/sheets-sync.service";
  * `checkInstallOnPageAction` in `pixel.actions.ts` is the existing precedent.
  */
 
-/** Revalidates every page that shows a website's sheet status. */
+/** Revalidates every page that shows a website's sheet status (all live under /p/<id>). */
 function revalidateSheetViews(websiteId: string): void {
-  revalidatePath(routes.integrations);
-  revalidatePath(routes.websites.detail(websiteId));
+  revalidatePath(routes.project(websiteId).dashboard, "layout");
 }
 
 export type PickerTokenResult = { ok: true; accessToken: string } | { ok: false; message: string };
@@ -170,7 +169,8 @@ export async function disconnectSheetsAction(
   const result = await runAction(() => sheetsSync.disconnect(user.id));
   if (!result.ok) return result.state;
 
-  revalidatePath(routes.integrations);
+  // The grant is per account, so every project's integrations page changes.
+  revalidatePath("/p/[projectId]", "layout");
 
   return { status: "success", message: "Google disconnected. Your spreadsheets were not changed." };
 }

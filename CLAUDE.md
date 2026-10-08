@@ -11,8 +11,12 @@ context into a fresh session.
 
 ## 1. What this is
 
-A **redirect URL testing platform** — an A/B testing tool where the two variations are two
-different URLs, not two versions of one page.
+An **experimentation platform** with two kinds of test:
+
+- **Split URL tests** (`type: SPLIT_URL`) — the arms are different URLs. Visitors to the control
+  URL are redirected to one of up to four variant URLs.
+- **A/B tests** (`type: AB`) — one page; each variant is a list of element changes (text, colour,
+  image) on CSS selectors, made in a visual editor and applied by the SDK without a redirect.
 
 ```
                     ┌─ 50% ─► /pricing      (control — visitor stays)
@@ -20,10 +24,15 @@ visitor ─► /pricing ┤                                                  ─
                     └─ 50% ─► /pricing-v2   (variant — redirected)
 ```
 
-A customer adds a **website**, installs one tracking snippet on it, then creates
-**experiments**. Each experiment has a control URL, a variant URL and a conversion URL. The
-SDK on the customer's pages decides which arm each visitor is in, redirects the variant half,
-and reports page views, visible time and conversions back.
+A customer creates a **project** (the database calls it a `Website`), installs one tracking
+snippet on it, then creates **experiments** through a 7-step wizard (Type → Setup → Variants →
+Traffic → Targeting → Goals → Review & launch). The SDK decides each visitor's arm, redirects or
+applies changes, and reports page views, visible time and goal events back; conversions are
+decided server-side.
+
+The UI is a faithful implementation of the HTML design prototype
+(`github.com/RaihanSoft/routely-design`, `index.html`). The prototype is the source of truth for
+layout, copy and interactions; see §5 "The UI follows the design prototype".
 
 Modelled on [Mida](https://mida.so). The user (`rakibul@blinto.co`) built this over a series
 of numbered "Parts", each with its own spec.
@@ -64,34 +73,45 @@ this machine), **Zod** for validation, **Vitest** for tests, **tsx** for CLI scr
 ```
 routely/
 ├── apps/web/                 Next.js dashboard + public API — the only deployable
-│   ├── prisma/               schema.prisma, migrations/, seed.ts, verify.ts
+│   ├── prisma/               schema.prisma, migrations/, seed.ts (3 rich projects), verify.ts
 │   ├── prisma7.config.ts     Prisma 7 CLI config (loads apps/web/.env via dotenv)
 │   └── src/
 │       ├── app/              routes (see §4)
 │       ├── components/
-│       │   ├── ui/           shadcn/ui primitives — generated, excluded from lint
-│       │   ├── layout/       app shell, sidebar, top bar, brand, user menu
-│       │   ├── common/       page header, empty/error/loading states, field, step, code block
-│       │   ├── auth/         Google button, login illustration
-│       │   ├── websites/     form, card, install snippet, copy value, delete dialog
-│       │   └── experiments/  form, results, arm results, status controls, lift badge, filters
+│       │   ├── ui/           shadcn button + sonner toaster, rethemed to the design's exact values
+│       │   ├── rl/           design primitives (status pill, traffic bar, modal, tabs, …)
+│       │   ├── layout/       shell: sidebar, project switcher, nav, profile menu, drawer, leave guard
+│       │   ├── projects/     project modal (favicon probe), manage-projects rows/dialogs
+│       │   ├── dashboard/    KPI strip, live experiments, needs-a-decision, empty state
+│       │   ├── experiments/  list/ and detail/ (header, setup, activity, share), end/delete modals
+│       │   ├── results/      verdict hero, scorecards, chart, comparison + CI, goals, traffic, h2h
+│       │   ├── wizard/       the 7-step create/edit wizard, launch + leave modals
+│       │   ├── editor/       visual editor, mock page, preview modal, preview links
+│       │   ├── tracking/     install panel + modal, getInstallInfo
+│       │   ├── metrics/      metrics & events table, new-metric modal, GTM panel
+│       │   ├── integrations/ Google Sheets card (+ Picker), CDN panel
+│       │   ├── settings/     project settings, domains, team (seam)
+│       │   └── login/        Google button, login showcase
 │       ├── server/           server-only; never imported by a client component
 │       │   ├── db.ts         the single PrismaClient (+ PrismaPg adapter)
 │       │   ├── errors.ts     AppError taxonomy → HTTP status mapping
 │       │   ├── validate.ts   parseOrThrow — the only Zod → AppError bridge
 │       │   ├── auth/         config.ts, index.ts, session.ts (the seam), actions.ts
-│       │   ├── repositories/ website, experiment, visitor, assignment, event, conversion
-│       │   ├── services/     website, experiment, ingest, analytics
-│       │   ├── actions/      Server Actions: website, experiment, share, types
+│       │   ├── repositories/ website, experiment, visitor, assignment, event, conversion, config, …
+│       │   ├── services/     website (projects), experiment, metric, member, analytics, dashboard,
+│       │   │                 ingest, url-check, cdn, pixel, sheets …
+│       │   ├── actions/      Server Actions: project, experiment, metric, url-check, pixel, share, …
 │       │   └── http/         rate-limit.ts, bot-filter.ts
-│       ├── validation/       Zod schemas: common, website, experiment, tracking
-│       ├── lib/              routes, url, format, date-range, snippet, form-state, auth-errors
+│       ├── validation/       Zod schemas
+│       ├── lib/              pure, client-safe logic + tests: domain (shared vocabulary), stats,
+│       │                     verdict, validate-draft, qa, targeting, traffic, editor, format,
+│       │                     view-models (types), sdk-config, goal-match, url, snippet, routes …
 │       ├── generated/prisma/ Prisma client output — GITIGNORED, regenerated on build
 │       └── proxy.ts          Next 16's renamed middleware (optimistic auth check only)
 ├── packages/sdk/             the tracking SDK — vanilla TS, zero dependencies
-│   ├── build.mjs             esbuild → dist/sdk.js, size-budgeted, publishes to apps/web/public
-│   ├── src/                  see §6
-│   └── test/                 8 suites, no DOM required
+│   ├── build.mjs             esbuild → dist/sdk.js, size-budgeted, publishes to apps/web/public/sdk/v2
+│   ├── src/                  see §7
+│   └── test/                 no DOM required (changes are tested against a fake DOM)
 ├── infra/
 │   ├── docker-compose.dev.yml    Postgres only (the app runs on the host)
 │   └── nginx/conf.d/             app.conf, cdn.conf — production reference configs
@@ -99,41 +119,82 @@ routely/
 ```
 
 **Read the docs in `docs/` before large changes.** They carry the reasoning, not just the
-shape — particularly `SDK-DEPLOYMENT.md`, which explains why time-on-page is approximate and
-must be labelled as such wherever it appears.
+shape — particularly `SDK-DEPLOYMENT.md`, which explains the v4 protocol and why time-on-page is
+approximate and must be labelled as such wherever it appears.
 
 ---
 
 ## 4. Routes
 
-| Route | Group | Notes |
-| --- | --- | --- |
-| `/` | — | Routes to `/dashboard` or `/login` |
-| `/login` | `(auth)` | Google sign-in, centred layout |
-| `/dashboard` | `(app)` | Website list |
-| `/websites/new`, `/websites/[websiteId]` | `(app)` | Create; detail with install snippet + settings |
-| `/experiments` | `(app)` | All experiments: status tabs, search, lift column |
-| `/experiments/new`, `/experiments/[experimentId]` | `(app)` | Create; detail with results, status, edit, share |
-| `/share/[token]` | — | **Public**, read-only results. No session. `noindex` |
-| `/integrations` | `(app)` | Google Sheets connection, destination, sync history |
-| `/api/auth/[...nextauth]` | — | Auth.js handlers, Node runtime |
-| `/api/integrations/google/start` | — | **POST only.** Mints signed state, redirects to Google |
-| `/api/integrations/google/callback` | — | Verifies state, exchanges the code, stores the connection |
-| `/api/cron/sheets-sync` | — | Scheduled daily sync. Requires `Authorization: Bearer $CRON_SECRET` |
-| `/api/v1/config` | — | **Public.** Active experiments for a site id |
-| `/api/v1/events` | — | **Public.** Event ingestion |
+Everything a customer works on is scoped to a project: `/p/[projectId]/…`, where `projectId` is
+`Website.id`. `(app)/p/[projectId]/layout.tsx` loads the project through `requireProject` (not
+owned → not found). The last project visited is remembered in the `rl_project` cookie.
+
+| Route | Notes |
+| --- | --- |
+| `/` | → remembered project's dashboard, else the first active project, else `/projects` |
+| `/login` | Google sign-in in the design's two-column layout (`?signedOut=1` shows the notice) |
+| `/projects` | Manage projects: search, switch, edit, archive/restore, delete, create |
+| `/p/[projectId]` | Dashboard: KPI strip, live experiments, needs a decision, empty state |
+| `/p/[projectId]/experiments` | List: status tabs, search, type filter, sort (all in the URL) |
+| `/p/[projectId]/experiments/new` | Wizard (`?type=ab\|redirect`, `?step=`) |
+| `/p/[projectId]/experiments/[id]` | Detail: `?tab=results\|setup\|activity`, `?range=`, `?goal=` |
+| `/p/[projectId]/experiments/[id]/edit` | Wizard on a draft (non-drafts redirect to detail) |
+| `/p/[projectId]/metrics` | Metrics & goals: `?tab=metrics\|gtm` |
+| `/p/[projectId]/integrations` | `?tab=sheets\|cdn`; renders the Google OAuth flash |
+| `/p/[projectId]/settings/[tab]` | `project` · `install` · `team` |
+| `/share/[token]` | **Public**, read-only results. No session. `noindex` |
+| `/get-started`, `/experiments…`, `/websites/[id]`, `/metrics…`, `/integrations` | Legacy — redirect into the current project |
+| `/api/auth/[...nextauth]` | Auth.js handlers, Node runtime |
+| `/api/integrations/google/start` | **POST only.** Mints signed state, redirects to Google |
+| `/api/integrations/google/callback` | Verifies state, stores the connection, returns to `/p/<rl_project>/integrations` |
+| `/api/cron/sheets-sync` | Scheduled daily sync. Requires `Authorization: Bearer $CRON_SECRET` |
+| `/api/v1/config` | **Public.** Experiments for a site id (protocol v4; v3 shape for old bundles) |
+| `/api/v1/events` | **Public.** Event ingestion |
 
 Route groups carry no URL segment. `(app)` owns the authorization boundary and the dashboard
 chrome; `(auth)` is chrome-free.
-
-The user's naming is **website**, not "site". `/experiments/[id]/edit` does not exist — editing
-is inline on the detail page, matching the website settings pattern.
 
 ---
 
 ## 5. Architecture decisions already settled
 
 Do not undo these without a reason. Each was chosen against a specific alternative.
+
+### The UI follows the design prototype
+
+The whole UI was replaced with the HTML prototype's structure (`RaihanSoft/routely-design`).
+Inline styles in that prototype are the spec: tokens live in `globals.css` (`navy`, `ink-2/3`,
+`brand`, `coral`, `success*`/`warning*`/`danger*`, `arm-*`, the `nav:` 900px breakpoint) and the
+exact control values are baked into `components/ui` and `components/rl`. Reuse those — don't
+introduce shadcn defaults or new one-off styles. Where the prototype is a mock, the app either
+does the real thing (URL checks, install verification, GTM test event, launch) or shows a
+clearly labelled **service seam**; it never shows invented numbers (fake latencies, fake
+traffic estimates). Deliberate departures: Google-only sign-in (locked stack), image changes take
+a real image URL, A/B changes carry an editable CSS selector, GTM code uses
+`routely.push(['track', key])` so it works before the SDK loads.
+
+### Project = Website
+
+The design's "project" is the `Website` model; the name stays in the database and in services
+(`website.service` owns project logic). A project has a primary `domain` plus `WebsiteDomain`
+rows; the same-site rule accepts any of them and their subdomains. Archiving pauses running
+experiments and hides the project from the switcher.
+
+### Service seams: team, CDN
+
+`ProjectMember` rows are stored and shown, but **grant no access** — authorization is still
+owner-only (`Website.userId`). The CDN panel's figures are placeholders (`placeholder: true`)
+and purge only records a time. Both are labelled in the UI. Extending either for real is a
+backend task, not a UI one.
+
+### Layers
+
+`lib/` is pure and client-safe (statistics, verdicts, wizard validation, QA/readiness, targeting,
+traffic rules — ported from the prototype and parity-fuzzed against it). `lib/domain.ts` is the
+shared vocabulary; `lib/view-models.ts` the types services return. Pages load via services and
+pass plain props; mutations are Server Actions that take one object and return
+`ActionResult<T>` (wizard field errors are keyed `step.field`).
 
 ### Authorization is structural, not remembered
 
@@ -202,7 +263,9 @@ Nothing is denormalised into a counter column that could drift:
 | Visitors per arm | `count(assignments)` grouped by variant |
 | Page views | `count(events)` where `type = 'page_view'` |
 | Visible time | `sum(events.durationMs)` where `type = 'time_on_page'` |
-| Conversions | `count(conversions)` grouped by variant |
+| Conversions (counting *unique*) | `count(conversions)` for the goal's `goalKey`, grouped by variant |
+| Conversions (counting *all*) | `count(events)` where `type = 'conversion'` and `goalKey` matches |
+| Metric "last received" / 24h | `metric_hits` (every custom event and matching page visit) |
 | Conversion rate | conversions ÷ **assigned** visitors |
 
 `events` and `conversions` both carry `variant`, so **aggregation never needs a join**.
@@ -259,20 +322,23 @@ These constraints carry the product's guarantees. **Do not weaken them.**
 | `websites.publicSiteId` unique | The public identifier in the snippet is globally unique |
 | `visitors (websiteId, anonymousId)` unique | One row per browser per website; concurrent requests converge |
 | `assignments (experimentId, visitorId)` unique | **A visitor can never hold both arms** |
-| `conversions.assignmentId` unique | **A refresh cannot inflate the conversion count** |
+| `conversions (assignmentId, goalKey)` unique | **A refresh cannot inflate any goal's count** — one conversion per visitor per goal (`goalKey` is `"url"` or a metric id) |
+| `metrics (websiteId, key)` unique | An event key means one metric per project |
 | `experiments.shareToken` unique | Safe to look up a public results page by token alone |
 | `sheets_connections.userId` unique | One Google *authorisation* per account (not a destination) |
 | `website_sheet_targets.websiteId` unique | One spreadsheet per website |
 
-Enum values: `ExperimentStatus` (DRAFT/ACTIVE/PAUSED/ARCHIVED), `UrlMatchType` (EXACT/PREFIX),
-`Variant` (CONTROL/VARIANT), `EventType` (`page_view`, `assignment`, `time_on_page`,
+Enum values: `ExperimentStatus` (DRAFT/ACTIVE/PAUSED/ARCHIVED — the UI shows ARCHIVED as
+"Completed", and as "Winner" when `winnerPosition > 0`), `ExperimentType` (SPLIT_URL/AB),
+`CountingMode` (UNIQUE/ALL), `MetricKind` (CUSTOM_EVENT/PAGE_VISIT), `UrlMatchType`
+(EXACT/PREFIX), `EventType` (`page_view`, `assignment`, `time_on_page`,
 `conversion` — lowercase, because the user specified those names and they are the literal wire
 strings the SDK sends, so no translation layer exists).
 
 Application-level rules enforced in `experiment.service.ts`:
 
-- **Same-site rule.** Control, variant *and* conversion URLs must be on the website's domain or
-  a subdomain. `isSameSite` is dot-anchored so `evil-acme.com` and `acme.com.evil.test` are both
+- **Same-site rule.** Control, variant *and* conversion URLs must be on one of the project's
+  domains (primary or extra) or a subdomain. `isSameSite` is dot-anchored so `evil-acme.com` and `acme.com.evil.test` are both
   rejected. (The conversion URL was included beyond the original spec: a goal on another domain
   could never record anything, so allowing it would only create silent duds.)
 - **One active experiment per control URL.** Checked at create, at edit, and **again on
@@ -280,11 +346,14 @@ Application-level rules enforced in `experiment.service.ts`:
   URLs and accounts for PREFIX overlap.
 - **URLs are fixed once an experiment has started.** Visitors are already bucketed against the
   old configuration.
-- **Traffic is split by weight, across any number of variants.** `Experiment.controlWeight` and
-  each `ExperimentVariant.weight` are *relative* numbers normalised at draw time, kept separate
-  from `trafficAllocation` so neither can drift from the other. `lib/traffic.ts` composes the
-  two into percentages of total traffic for display, and `applyShare` is what the editor uses to
-  set one of those percentages exactly while keeping the set at 100.
+- **Traffic is split by weight, across up to five arms.** `Experiment.controlWeight` and each
+  `ExperimentVariant.weight` are the arms' shares of *included* traffic (the wizard keeps them
+  summing to 100 with `setWeight`/`evenSplit`; the SDK still normalises at draw time), kept
+  separate from `trafficAllocation` (the design's "coverage") so neither can drift.
+- **Ending records an outcome.** `winnerPosition` 0 = control won, n = variant n, null = no
+  clear winner; `keepWinner` (Split URL only) keeps redirecting everyone to the winning URL.
+- **A/B variants have `url = ""` and `changes`** `[{selector, prop: text|bg|image, value, el?}]`;
+  image values must be an https URL or a path.
 
 ### Ingestion never trusts client-supplied ownership
 
@@ -295,25 +364,38 @@ Application-level rules enforced in `experiment.service.ts`:
 - The **stored arm wins** over whatever the client claims
 - **URLs are normalised server-side** — a URL over the network is an assertion, not a fact
 - **Timestamps are clamped** (browser clocks are routinely hours off)
-- **A conversion requires a pre-existing assignment** and must be on the configured goal URL.
-  Other event types may *create* an assignment; a conversion may not — otherwise a forged
-  request could invent a visitor, choose their arm, and convert them.
+- **A conversion requires a pre-existing assignment.** Conversions are decided server-side from
+  `page` and `track` events against the visitor's existing assignments in running experiments
+  (URL goals, custom-event goals, page-visit goals; primary and secondary). Those events never
+  create a visitor or an assignment — otherwise a forged request could invent a visitor, choose
+  their arm, and convert them.
 
 ---
 
 ## 7. The SDK
 
-`packages/sdk` — vanilla TypeScript, **zero runtime dependencies**, one IIFE bundle.
-Currently **~4.7 kB gzipped against a 6 kB budget the build enforces** (it exits non-zero if
-exceeded). Installation is two script tags — an inline anti-flickering block and the tracking
-tag — pasted into `<head>`. The same pair works on every platform, which is what makes it
-framework-independent:
+`packages/sdk` — vanilla TypeScript, **zero runtime dependencies**, one IIFE bundle served at
+`/sdk/v2/sdk.js` (and `/sdk.js`). About **7.3 kB gzipped against a 7.5 kB budget the build
+enforces** (raised from 6 kB for A/B changes, targeting, `track()` and preview; see `build.mjs`).
+Installation is two script tags — an inline anti-flickering block and the tracking tag — pasted
+into `<head>`:
 
 ```html
 <script src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
 ```
 
-In `<head>`, no `async`/`defer`, so the redirect decision precedes first paint.
+In `<head>`, no `async`/`defer`, so the redirect decision precedes first paint. Protocol **v4**
+(`docs/SDK-DEPLOYMENT.md`); `/sdk/v1/` bundles are still answered in the v3 shape.
+
+What it does on each page: evaluate each experiment's page rule and audience (match type, device,
+new/returning, query/UTM/referrer conditions; countries are filtered server-side), draw coverage
+and an arm (both persisted), then redirect (Split URL) or apply element changes and reveal
+(A/B). Targeting decides *entry* only — an assigned visitor keeps their arm. A Split URL
+variant's own page records that arm's page view and visible time; the control page records only
+the assignment for visitors it redirects. Crawlers get nothing (no redirect, changes, assignment
+or events). `?routely_preview=<experimentId>:<position>` shows an arm and records nothing.
+`window.routely.track(key)` / `(window.routely = window.routely || []).push(['track', key])` send
+custom events.
 
 | Module | Responsibility |
 | --- | --- |
@@ -321,9 +403,12 @@ In `<head>`, no `async`/`defer`, so the redirect decision precedes first paint.
 | `env.ts` | Guarded storage/cookie/crypto access. **Never throws** |
 | `identity.ts` | Anonymous visitor id; layered persistence; cross-origin handoff |
 | `url.ts` | Normalisation, EXACT/PREFIX matching, handoff params |
-| `assignment.ts` | Random 50/50 draw, persisted so it never repeats |
+| `targeting.ts` | Page rules (exact/contains/starts/wildcard/regex), audience, devices, bot check |
+| `inclusion.ts` | Coverage draw, persisted |
+| `assignment.ts` | Weighted arm draw, persisted so it never repeats |
 | `redirect.ts` | The decision, and four independent loop guards |
-| `conversion.ts` | Goal matching and once-per-assignment claiming |
+| `changes.ts` | Applies A/B changes to selector lists, waiting briefly for elements |
+| `preview.ts` / `api.ts` | Preview parsing; the public `track`/`push` API and pre-load queue |
 | `engagement.ts` | Visible-time accumulator (`performance.now()`, delta reporting) |
 | `dedupe.ts` | Page-view guard against repeated SDK initialisation |
 | `cloak.ts` | Calls `window.__routelyReveal` — the overlay itself lives in the install snippet |
@@ -352,11 +437,13 @@ Each sufficient on its own for the case it covers:
 Plus a final check that the target is not the page already displayed. `location.replace()`, not
 `assign`, so Back does not bounce.
 
-### `lib/url.ts` is duplicated on purpose
+### Matching logic is duplicated on purpose
 
 `apps/web/src/lib/url.ts` and `packages/sdk/src/url.ts` implement the same normalisation. The
 SDK cannot import from the app, and a shared package would add a module graph to a bundle whose
 whole point is being one small file. **Both have mirrored test suites — change both together.**
+The same applies to page-rule matching: `lib/targeting.ts` `matches()` and
+`packages/sdk/src/targeting.ts`, pinned together by `lib/targeting-mirror.test.ts`.
 
 ### Time on page is approximate, and must be labelled so
 
@@ -365,13 +452,16 @@ watching counts; time after the last beacon is lost. It is meaningful **as a com
 two arms** (shared bias cancels), never as a session-duration figure. See
 `docs/SDK-DEPLOYMENT.md`.
 
-### No statistical significance claims
+### Statistics follow the design (decided by the user)
 
-The results UI says which arm is *currently* ahead and states plainly that it is **not proof**.
-A leader is suppressed below 30 assigned visitors per arm; lift is suppressed below 60 total.
-Computing a p-value is easy; choosing one correctly is not, and a test read whenever the
-numbers look good is wrong regardless of the statistics behind it. Do not add a significance
-claim without being asked.
+Results show the design's statistics, computed on real data in `lib/stats.ts` and
+`lib/verdict.ts` (ported from the prototype and parity-fuzzed against it): a two-proportion
+z-test per variant against control giving **chance to beat control**, a 95% interval on the
+lift and a p-value, judged against the project's **significance threshold** (90/95/99%, set in
+Settings → Project). The verdict ("Variant A is winning", "Too early to call" with an estimate of
+visitors and days still needed, "Control is winning", …) and the dashboard's confidence bars use
+the same functions. This replaced the earlier "currently ahead · not proof" rule at the user's
+explicit request. Keep the methodology note visible wherever intervals and p-values appear.
 
 ---
 
@@ -405,8 +495,10 @@ duplicate `DATABASE_URL` line, so the local one *looked* right while the second 
 which aimed a command that drops every table at production data. `db:deploy` is deliberately
 **not** guarded: that is how Vercel applies migrations during `vercel-build`.
 
-Tests: **264** — 129 in the SDK, 135 in the app. Both run under Vitest in a Node environment.
-(An earlier revision of this file said 129 total; that figure was already stale.)
+Tests: **433** — 155 in the SDK, 278 in the app. Both run under Vitest in a Node environment.
+`npm run db:seed` builds three projects with stable ids (`seed_kestrel` — 9 experiments of both
+types and every status, `seed_northwind` — 4, `seed_lumen` — fresh, not installed) owned by
+`dev@routely.local`; it takes about a minute.
 
 ---
 
@@ -496,6 +588,16 @@ claim race prints `Unique constraint failed on ... sheets_sync_runs_websiteId_da
 the idempotency mechanism working, not a bug; it is not suppressed because silencing it would
 silence real constraint errors too.
 
+**`npm run build` shares `.next` with `next dev`.** Restart the dev server after a build. If the
+dev server starts refreshing every page about once a second ("Subscription error,
+resubscribing" in the log), Turbopack's HMR is wedged — restart it; it is not an app bug.
+
+**Headless Chrome is a crawler to the SDK.** Its user agent matches the bot filter, so the SDK
+deliberately does nothing. Browser tests of the SDK must set a normal user agent.
+
+**Conversions within 5 seconds of an identical one are dropped** by ingestion's de-duplication
+window. A test that fires two conversions back to back will see one.
+
 **Do not `pkill -f "next dev"`.** The pattern matches the wrapper shell running the command and
 kills your own process. Use `pkill -f "[n]ext-server"`.
 
@@ -523,19 +625,30 @@ build were bad assertions rather than bad code — say so rather than quietly fi
 
 ## 11. Build status
 
-Working: Google sign-in · website CRUD · install snippet · experiment create/edit/publish/pause
-· the SDK (assignment, loop-safe redirect, page views, visible time, conversions) · public
-config and ingestion endpoints with rate limiting and bot filtering · results dashboard · date
-ranges · relative change · public share links · experiments list.
+Working, on the design prototype's UI throughout:
 
-· **Google Sheets export** — one Google grant per account, one spreadsheet per website, chosen
-through the Google Picker or created by Routely; non-sensitive `drive.file` scope only, so no Google
-verification review; encrypted refresh token; a single tab holding the last 30 days, rewritten within
-seconds of a visit or conversion and on a schedule.
+- **Projects** — switcher, create/edit with favicon detection, extra domains, timezone,
+  significance threshold, archive/restore/delete, Manage projects page.
+- **Experiments** — Split URL and A/B tests, up to five arms, the 7-step wizard (drafts, edit,
+  validation, real URL checks, QA + readiness, launch confirmation), visual editor with editable
+  CSS selectors, preview modal and real on-site preview links, targeting (page rules, audience,
+  devices, countries, query/UTM/referrer conditions), coverage, URL / custom-event / page-visit
+  goals with secondary goals and unique/all counting, pause/resume, end with winner (and
+  keep-redirecting-to-winner), duplicate, delete, live edits, activity log, share links.
+- **Results** — verdict, scorecards, time-series chart, comparison table with chance to beat
+  control, 95% intervals and p-values, per-goal performance, traffic distribution with a sample
+  ratio check, head-to-head; the public share page uses the same view.
+- **Dashboard**, **Metrics & goals** (metrics table, new metric, GTM setup with a real test
+  event), **Installation & tracking** (snippet, Manual/GTM, real per-domain verification),
+  **Google Sheets export**, **CDN panel** (seam), **Team** (seam).
+- **SDK** — v4: redirects, A/B changes, targeting, coverage, `track()`, preview, crawler skip,
+  page views, visible time; server-side goal matching.
 
 **Not built:** the production Docker Compose stack and Dockerfile (only `docker-compose.dev.yml`
-and reference Nginx configs exist) · statistical significance · click / custom-JS / form goals ·
-multi-variant tests · SPA route-change tracking · event retention policy.
+and reference Nginx configs exist) · team access control (members are stored only) · real CDN
+delivery stats · click / custom-JS / form goals beyond `track()` · SPA route-change tracking ·
+event retention policy · an iframe visual editor (the editor edits a mock canvas; selectors target
+the real page).
 
 Known limitations are listed at the end of each `docs/*.md`. The most significant:
 

@@ -108,17 +108,21 @@ bundle, Zod for validation, Prettier with the Tailwind class-sorting plugin.
 
 ## 3. Route structure
 
-### Dashboard (React Server Components; auth required except `/` and `/login`)
+### Dashboard (React Server Components; auth required except `/login` and `/share/[token]`)
 
-| Route | Group | Purpose |
-| --- | --- | --- |
-| `/` | — | ✓ Router: `/dashboard` when signed in, otherwise `/login` |
-| `/login` | `(auth)` | ✓ Google sign-in |
-| `/dashboard` | `(app)` | ✓ Website list + create-website entry point |
-| `/websites/new` | `(app)` | ✓ Create website |
-| `/websites/[websiteId]` | `(app)` | ✓ Website overview: install snippet + experiment list |
-| `/experiments/new` | `(app)` | ✓ Create experiment (accepts `?websiteId=`) |
-| `/experiments/[experimentId]` | `(app)` | ✓ Results: Control vs Variant comparison |
+The UI is the design prototype's (`RaihanSoft/routely-design`), scoped to a **project** (a
+`Website`): `/p/[projectId]/…`. The full route table is in `CLAUDE.md` §4. In short:
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Remembered project (`rl_project` cookie) → its dashboard; else first project; else `/projects` |
+| `/login` | Google sign-in |
+| `/projects` | Manage projects |
+| `/p/[projectId]` | Dashboard |
+| `/p/[projectId]/experiments[/new \| /[id] \| /[id]/edit]` | List, wizard, detail (results/setup/activity), draft editing |
+| `/p/[projectId]/metrics`, `/integrations`, `/settings/[tab]` | Metrics & goals (+GTM), Sheets + CDN, project/install/team settings |
+| `/share/[token]` | Public read-only results |
+| legacy `/get-started`, `/experiments…`, `/websites/[id]`, `/metrics…`, `/integrations` | Redirect into the current project |
 
 Route groups carry no URL segment; they exist so `(app)` can own the authorization boundary
 and the dashboard chrome while `(auth)` renders a centred, chrome-free layout.
@@ -126,7 +130,8 @@ and the dashboard chrome while `(auth)` renders a centred, chrome-free layout.
 Every route has a `loading.tsx` where it will fetch data, and the `(app)` group has its own
 `error.tsx` so a failure replaces only the page content and leaves the shell interactive.
 
-Mutations use **Server Actions** (Zod-validated, session-checked, `revalidatePath`).
+Mutations use **Server Actions** (Zod-validated, session-checked, `revalidatePath`) that take
+one object argument and return `ActionResult<T>`.
 Reads happen in Server Components through `src/server/services/*`.
 
 ### Public API (`/api/v1/*`, unauthenticated, site-key scoped, CORS `*`)
@@ -136,7 +141,7 @@ Reads happen in Server Components through `src/server/services/*`.
 | `/api/v1/config` | GET | Active experiments for `?siteId=<publicKey>`; `Cache-Control: public, s-maxage=60, stale-while-revalidate=300` |
 | `/api/v1/events` | POST | Event batch from the SDK; accepts `text/plain` so `navigator.sendBeacon` works |
 | `/api/v1/events` | OPTIONS | CORS preflight (only needed for the `fetch` fallback) |
-| `/sdk.js` | GET | Rewrite to the static bundle; `Cache-Control: public, max-age=300` (long-cache the versioned path `/sdk/v1/sdk.js`) |
+| `/sdk.js` | GET | Rewrite to the static bundle; `Cache-Control: public, max-age=300` (the current bundle is `/sdk/v2/sdk.js`; `/sdk/v1/` keeps serving old installs) |
 
 ### Auth
 

@@ -14,6 +14,8 @@ export interface ConversionInput {
   /** `null` is the control arm — see schema.prisma's header comment. */
   variantId: string | null;
   url: string;
+  /** `"url"` for the URL goal, otherwise the metric id. */
+  goalKey: string;
   occurredAt: Date;
 }
 
@@ -21,7 +23,7 @@ export interface ConversionInput {
  * Records a conversion, ignoring repeats.
  *
  * Idempotency is enforced by the database, not by a read-then-write check: the unique
- * constraint on `assignmentId` means a duplicate beacon, a reloaded thank-you page, or two
+ * constraint on `(assignmentId, goalKey)` means a duplicate beacon, a reloaded thank-you page, or two
  * concurrent requests all collapse to the first conversion. `skipDuplicates` turns the
  * resulting constraint violation into a no-op instead of an error the caller must interpret.
  *
@@ -39,31 +41,12 @@ export async function recordConversion(
   return result.count === 1;
 }
 
-export function findConversionByAssignment(
+export function findConversion(
   assignmentId: string,
+  goalKey: string,
   client: DbClient = db,
 ): Promise<Conversion | null> {
-  return client.conversion.findUnique({ where: { assignmentId } });
-}
-
-/**
- * Conversions per arm, keyed by variant id (`null` is control). Because the table holds at
- * most one row per assignment, this count is already de-duplicated and can be divided by the
- * assignment count to give a conversion rate.
- */
-export async function countConversionsByVariant(
-  experimentId: string,
-  range?: { from: Date; to: Date },
-  client: DbClient = db,
-): Promise<Map<string | null, number>> {
-  const rows = await client.conversion.groupBy({
-    by: ["variantId"],
-    where: {
-      experimentId,
-      ...(range ? { occurredAt: { gte: range.from, lte: range.to } } : {}),
-    },
-    _count: { _all: true },
+  return client.conversion.findUnique({
+    where: { assignmentId_goalKey: { assignmentId, goalKey } },
   });
-
-  return new Map(rows.map((row) => [row.variantId, row._count._all]));
 }

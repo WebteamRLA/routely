@@ -22,8 +22,12 @@ import { type KeyValueStore, getSessionStorage } from "./env";
 
 const KEY_PREFIX = "routely_pv_";
 
-/** Set once per bundle instance, per page load. */
-let reportedInThisInstance = false;
+/**
+ * Page views this bundle instance has already reported, per page load. Keyed like the session
+ * marker, because one page load now reports for each experiment running on it plus once for the
+ * site as a whole.
+ */
+const reportedInThisInstance = new Set<string>();
 
 /**
  * How long a marker suppresses a repeat.
@@ -47,16 +51,15 @@ export function claimPageView(
   store: KeyValueStore | null = getSessionStorage(),
   now: number = Date.now(),
 ): boolean {
-  if (reportedInThisInstance) return false;
-
   const key = pageViewKey(experimentId, url);
+  if (reportedInThisInstance.has(key)) return false;
 
   if (store) {
     try {
       const previous = Number(store.getItem(key));
       if (Number.isFinite(previous) && previous > 0 && now - previous < WINDOW_MS) {
         // Another copy of the SDK on this same page load already reported it.
-        reportedInThisInstance = true;
+        reportedInThisInstance.add(key);
         return false;
       }
       store.setItem(key, String(now));
@@ -65,11 +68,11 @@ export function claimPageView(
     }
   }
 
-  reportedInThisInstance = true;
+  reportedInThisInstance.add(key);
   return true;
 }
 
 /** Test seam: forget that a page view was reported. */
 export function resetPageViewGuard(): void {
-  reportedInThisInstance = false;
+  reportedInThisInstance.clear();
 }

@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { env } from "@/env";
-import { routes } from "@/lib/routes";
+import { LAST_PROJECT_COOKIE, routes } from "@/lib/routes";
 import { getSession } from "@/server/auth/session";
 import * as googleOAuth from "@/server/services/google-oauth.service";
 
@@ -28,10 +28,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   if (!googleOAuth.isGoogleOAuthConfigured()) {
-    return NextResponse.redirect(
-      new URL(`${routes.integrations}?error=not_configured`, request.url),
-      { status: 303 },
-    );
+    const projectId = (await cookies()).get(LAST_PROJECT_COOKIE)?.value;
+    const target = projectId
+      ? routes.project(projectId).integrations()
+      : routes.currentIntegrations;
+    return NextResponse.redirect(new URL(`${target}?error=not_configured`, request.url), {
+      status: 303,
+    });
   }
 
   const { state, nonce } = googleOAuth.mintState(session.user.id);

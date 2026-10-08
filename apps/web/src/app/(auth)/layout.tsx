@@ -1,25 +1,24 @@
-import { AuthShowcase } from "@/components/auth/auth-showcase";
-import { Brand } from "@/components/layout/brand";
-import { routes } from "@/lib/routes";
+import { BrandMark } from "@/components/layout/brand";
+import { LoginShowcase } from "@/components/login/login-showcase";
 
 /**
- * Shell for unauthenticated screens.
+ * Shell for unauthenticated screens, as the design draws the login overlay: a navy brand panel
+ * on the left (desktop only) and the form column on the right, each half the width.
  *
- * The design's split: a navy product panel on the left that answers "what is this?" for
- * someone arriving cold on an invite link or a bookmark, and the form column on the right.
- *
- * Below the `nav` breakpoint (900px) the panel is not rendered at all and a compact wordmark
- * takes its place above the form. That is deliberate rather than a fallback: on a phone the
- * panel would push the one action the page exists for below the fold.
+ * Below the `nav` breakpoint (900px) the panel is not rendered and a compact wordmark sits
+ * above the form instead, so the one action the page exists for stays above the fold.
  */
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background">
-      <AuthShowcase className="hidden nav:flex" />
+      <LoginShowcase className="hidden nav:flex" />
 
       <main className="flex min-w-0 flex-[1_1_50%] items-center justify-center px-5 py-10">
         <div className="flex w-full max-w-[400px] flex-col gap-[18px]">
-          <Brand href={routes.home} size="lg" className="text-lg nav:hidden" />
+          <div className="flex items-center gap-2.5 nav:hidden">
+            <BrandMark className="size-[22px]" />
+            <span className="font-heading text-lg font-bold">Routely</span>
+          </div>
           {children}
         </div>
       </main>

@@ -127,6 +127,36 @@ enum PrimaryMetric {
 
 /// Event taxonomy. Values are the literal strings the SDK sends on the wire, so the
 /// ingestion endpoint stores what it receives without a translation table.
+/// Split URL tests redirect between pages; A/B tests change elements on one page.
+enum ExperimentType {
+  SPLIT_URL
+  AB
+}
+
+/// How conversions are counted on results: once per assigned visitor (from `Conversion`, unique
+/// per assignment and goal) or every conversion event (from `Event` rows of type conversion).
+enum CountingMode {
+  UNIQUE
+  ALL
+}
+
+/// A metric is either a custom event fired with `routely.track(key)` or a visit to a page.
+enum MetricKind {
+  CUSTOM_EVENT
+  PAGE_VISIT
+}
+
+enum InstallMethod {
+  MANUAL
+  GTM
+}
+
+/// Project roles below Owner. The owner is `Website.userId` and is never a member row.
+enum MemberRole {
+  EDITOR
+  VIEWER
+}
+
 enum EventType {
   page_view
   assignment
@@ -161,8 +191,22 @@ model Website {
   /// can remove the snippet at any time and nothing tells us, so this records when we last
   /// looked and what we saw, which is all it can honestly claim.
   pixelVerifiedAt DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+
+  /// Project settings (the UI calls a website a "project").
+  /// IANA zone used for reporting days.
+  timezone              String        @default("UTC")
+  /// Significance threshold for verdicts, as a percentage: 90, 95 or 99.
+  significanceThreshold Int           @default(95)
+  /// Favicon detected server-side when the project is created or its domain changes.
+  iconUrl               String?
+  /// Archived projects are hidden from the switcher but keep all their data.
+  archivedAt            DateTime?
+  installMethod         InstallMethod @default(MANUAL)
+  /// CDN delivery panel — SERVICE SEAM; no CDN integration exists.
+  cdnPurgedAt           DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   experiments Experiment[]
@@ -171,6 +215,11 @@ model Website {
 
   /// At most one Google Sheets destination per website.
   sheetTarget WebsiteSheetTarget?
+  /// Additional domains beyond the primary `domain`; experiments may use any of them.
+  domains     WebsiteDomain[]
+  metrics     Metric[]
+  metricHits  MetricHit[]
+  members     ProjectMember[]
 
   // Dashboard lists a user's websites newest-first.
   @@index([userId, createdAt])
@@ -197,7 +246,8 @@ model Experiment {
   /// experiment created before goals were nameable has one and needs no backfill — the UI
   /// falls back to the experiment's own name.
   conversionName      String?
-  conversionUrl       String
+  /// Null when the primary goal is a metric rather than a URL.
+  conversionUrl       String?
   conversionMatchType UrlMatchType @default(EXACT)
 
   /// Control's share of the traffic entered into this experiment, relative to each variant's
@@ -206,6 +256,24 @@ model Experiment {
   /// all. A visitor's odds of landing on control are
   /// `controlWeight / (controlWeight + sum(variant weights))`.
   controlWeight Int @default(50)
+
+  type ExperimentType @default(SPLIT_URL)
+
+  /// Page and audience rules (`lib/targeting.ts` → `Targeting`). Null means the defaults: the
+  /// control URL matched exactly, every device, every location, no conditions.
+  targeting Json?
+
+  /// Primary goal. Null means the URL goal: reaching `conversionUrl`.
+  goalMetricId       String?
+  /// Reported on results but never decide the outcome.
+  secondaryMetricIds String[]     @default([])
+  countingMode       CountingMode @default(UNIQUE)
+
+  /// Set when the experiment is ended: 0 = control won, n = the variant at position n won,
+  /// null = ended with no clear winner.
+  winnerPosition Int?
+  /// Split URL only: after ending, keep redirecting all traffic to the winning variant.
+  keepWinner     Boolean @default(false)
 
   status ExperimentStatus @default(DRAFT)
 
@@ -229,8 +297,10 @@ model Experiment {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  website     Website             @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  website     Website              @relation(fields: [websiteId], references: [id], onDelete: Cascade)
   variants    ExperimentVariant[]
+  goalMetric  Metric?              @relation(fields: [goalMetricId], references: [id], onDelete: SetNull)
+  activities  ExperimentActivity[]
   assignments Assignment[]
   events      Event[]
   conversions Conversion[]
@@ -255,6 +325,9 @@ model ExperimentVariant {
   /// and the other variants' weights. See `Experiment.controlWeight`. `0` parks an arm without
   /// deleting it — it keeps its collected results but stops receiving new visitors.
   weight       Int    @default(50)
+  /// A/B only: element changes `{ selector, prop: "text" | "bg" | "image", value, el? }[]`.
+  /// Split URL variants keep `[]`; A/B variants keep `url` empty.
+  changes      Json   @default("[]")
 
   experiment  Experiment   @relation(fields: [experimentId], references: [id], onDelete: Cascade)
   assignments Assignment[]
@@ -335,6 +408,9 @@ model Event {
   url          String
   /// Foreground milliseconds. Set on `time_on_page` events only.
   durationMs   Int?
+  /// Conversion events only: which goal converted ("url" or a metric id). Counting mode ALL
+  /// reads these rows; UNIQUE reads `Conversion`.
+  goalKey      String?
   /// Client clock, clamped server-side to a sane window.
   occurredAt   DateTime
   createdAt    DateTime  @default(now())
@@ -367,6 +443,9 @@ model Conversion {
   variantId    String?
   /// URL that satisfied the goal.
   url          String
+  /// "url" for the URL goal, otherwise the metric id. A conversion is unique per assignment
+  /// AND goal, so a refresh still cannot inflate any goal's count.
+  goalKey      String   @default("url")
   occurredAt   DateTime
   createdAt    DateTime @default(now())
 
@@ -379,7 +458,7 @@ model Conversion {
   /// thank-you page, or a duplicate beacon, cannot inflate the conversion count. The MVP has
   /// a single goal per experiment, so assignment identity is the whole key; a multi-goal
   /// model would extend this to [assignmentId, goalId].
-  @@unique([assignmentId])
+  @@unique([assignmentId, goalKey])
   /// Conversion counts group by arm on this index alone.
   @@index([experimentId, variantId])
   @@index([experimentId, occurredAt])
@@ -462,7 +541,6 @@ model SheetsConnection {
   @@map("sheets_connections")
 }
 
-
 /// Where one website's results are published, and the state of the tab holding them.
 ///
 /// Per website, not per account: someone running several sites — an agency especially — wants each
@@ -520,4 +598,90 @@ model WebsiteSheetTarget {
   website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
 
   @@map("website_sheet_targets")
+}
+
+// ---------------------------------------------------------------------------
+// Projects: domains, metrics, team, activity
+// ---------------------------------------------------------------------------
+
+model WebsiteDomain {
+  id        String   @id @default(cuid())
+  websiteId String
+  domain    String
+  createdAt DateTime @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, domain])
+  @@map("website_domains")
+}
+
+/// A measurable action in a project: a custom event (`routely.track(key)`) or a page visit.
+/// `page_view` is the system metric every project has.
+model Metric {
+  id        String       @id @default(cuid())
+  websiteId String
+  name      String
+  kind      MetricKind
+  key       String
+  /// PAGE_VISIT only.
+  url       String?
+  matchType UrlMatchType @default(EXACT)
+  system    Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  website     Website      @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  hits        MetricHit[]
+  experiments Experiment[]
+
+  @@unique([websiteId, key])
+  @@map("metrics")
+}
+
+/// One received metric event, recorded whether or not the visitor is in an experiment, so the
+/// metrics table can show "last received" and 24h counts, and GTM setup can be tested.
+model MetricHit {
+  id         String   @id @default(cuid())
+  websiteId  String
+  metricId   String
+  url        String?
+  occurredAt DateTime @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  metric  Metric  @relation(fields: [metricId], references: [id], onDelete: Cascade)
+
+  @@index([metricId, occurredAt])
+  @@index([websiteId, occurredAt])
+  @@map("metric_hits")
+}
+
+/// Team membership — a SERVICE SEAM. Rows are stored and shown, but access control is still
+/// owner-only (`Website.userId`); members gain no access until authorization is extended.
+model ProjectMember {
+  id        String     @id @default(cuid())
+  websiteId String
+  email     String
+  name      String?
+  role      MemberRole @default(EDITOR)
+  createdAt DateTime   @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, email])
+  @@map("project_members")
+}
+
+/// Experiment activity timeline: created, launched, paused, resumed, ended, edited.
+model ExperimentActivity {
+  id           String   @id @default(cuid())
+  experimentId String
+  actorName    String?
+  text         String
+  createdAt    DateTime @default(now())
+
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+
+  @@index([experimentId, createdAt])
+  @@map("experiment_activities")
 }

@@ -2,14 +2,11 @@
  * UTC calendar days.
  *
  * The daily Sheets sync has to answer "which day is this row about?", and a day is not a
- * quantity of time — it is a label with a timezone behind it. Everything here is UTC, for three
+ * quantity of time — it is a label with a timezone behind it. Everything here is UTC, for two
  * reasons worth stating once rather than rediscovering:
  *
  * - `lib/format.ts` already pins every rendered date to `timeZone: "UTC"`, so the dashboard and
  *   the spreadsheet agree by construction.
- * - On Vercel the function runtime's local timezone *is* UTC, so the local-time bucketing in
- *   `overview.service.ts` already coincides with this in production. The only place the two
- *   definitions diverge is a developer's laptop.
  * - A per-customer timezone would need the aggregation boundary, the cron trigger hour and the
  *   spreadsheet's own `properties.timeZone` to agree with each other. That is a different
  *   feature; see `docs/INTEGRATIONS.md` for why it is not this one.

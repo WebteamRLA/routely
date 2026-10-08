@@ -54,5 +54,6 @@ export async function signInWithGoogle(formData: FormData): Promise<void> {
  * revoked server-side rather than merely being forgotten by the browser.
  */
 export async function signOutAction(): Promise<void> {
-  await signOut({ redirectTo: routes.login });
+  // `?signedOut=1` lets the login screen say "You’ve been signed out."
+  await signOut({ redirectTo: `${routes.login}?signedOut=1` });
 }

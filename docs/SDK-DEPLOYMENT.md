@@ -25,68 +25,124 @@ and hand-written HTML.
 | Language | Vanilla TypeScript, no framework, no runtime dependencies |
 | Output | One IIFE file, `dist/sdk.js`, plus a source map |
 | Target | ES2019 |
-| Size budget | **6 kB gzipped — the build fails if exceeded** |
-| Current size | ~4.6 kB raw · ~2.1 kB gzip · ~1.9 kB brotli |
+| Size budget | **7.5 kB gzipped — the build fails if exceeded** (6 kB before protocol v4) |
+| Current size | 19.15 kB raw · 7.22 kB gzip · 6.54 kB brotli |
+| Served at | `/sdk.js` → `/sdk/v2/sdk.js` (the build copies the same file to `/sdk/v1/`) |
 
-### What it does today
+**Why the budget moved.** Protocol v4 added A/B element changes (with a `MutationObserver`
+wait), page/audience/device/condition targeting, crawler skipping, preview links, winner
+redirects and the `track()` API with its pre-load queue — about 2 kB gzip of the 7.22. The
+budget was raised only to 7.5 kB, leaving ~280 B for fixes rather than features.
 
-1. Reads `data-site-id` from its own `<script>` tag.
+### What it does today (protocol v4)
+
+1. Reads `data-site-id` from its own `<script>` tag; installs `window.routely` (with
+   `track`) **synchronously**, then replays anything queued before it loaded.
 2. Resolves an anonymous visitor id, persisting it across visits and across the redirect.
-3. Fetches `/api/v1/config?siteId=…` and caches it for the server-supplied TTL.
-4. Matches the normalised current URL against each active experiment's control URL.
-5. Reads the visitor's stored assignment, or draws one 50/50 and persists it.
-6. Reports the assignment and page view to `/api/v1/events` with `sendBeacon`.
-7. Redirects variant visitors to the variant URL, or leaves control visitors in place.
-8. Measures approximate visible time on the page and reports it incrementally.
-9. Records a conversion when the page matches an experiment's goal URL **and** the visitor
-   already holds an assignment for it.
-10. Exposes the result on `window.routely` for debugging.
+3. Fetches `/api/v1/config?v=4&siteId=…` and caches it for the server-supplied TTL.
+4. Skips everything for a crawler user agent (compact copy of `server/http/bot-filter.ts`):
+   search engines always see the control, and nothing is reported.
+5. A completed Split URL test with *keep winner* is served `locked`: the visitor is sent to the
+   winner every visit, with no assignment and no events.
+6. For each running experiment whose **page rule** matches the current URL: if the visitor has
+   no stored arm, the entry gates apply — audience (new/returning: did a visitor id exist before
+   this load), device (UA, refined by viewport on touch screens), conditions on query / `utm_*`
+   / referrer read from the **raw** URL with ALL/ANY logic, then the persisted coverage draw. An
+   assigned visitor keeps their arm regardless of the gates.
+7. Redirect tests: unchanged decision and four loop guards (below). A/B tests: the arm's
+   changes are applied — `text` → `textContent`, `bg` → `background-color !important`, `image` →
+   `<img src>` (dropping `srcset`) or `background-image` — to the **first element matching the
+   selector list** (`querySelector`), re-applied by a `MutationObserver` as the page parses; the
+   page is revealed when every change has found its element, at `DOMContentLoaded`, or after
+   1.5 s. A selector that throws is a non-match.
+8. Reports, in **one beacon**: each experiment's `assignment` (once) and `page_view`, then a
+   site-level `page` event for every page view. A visitor being **redirected** sends only the
+   assignment from the control page — they never see it — and the **variant page** then records
+   that arm's `page_view` and visible time: a redirect test's variant URL is treated as part of
+   the experiment for a visitor who already holds (or was handed) that arm, even though the
+   page rule only describes the entry page.
+9. Measures approximate visible time and reports it per experiment.
+10. `routely.track(key)` sends a `track` event. The server records a `MetricHit` for a matching
+    custom-event metric and derives conversions (below).
+
+**Preview links** — `?routely_preview=<experimentId>:<position>` — fetch the config with
+`&preview=<id>` (served whatever the experiment's status, never cached), force that arm, apply
+it (or redirect, carrying the flag), and **store and send nothing**, `track()` included.
+
+### Wire contract (v4)
+
+```jsonc
+// GET /api/v1/config?v=4&siteId=rt_…[&preview=<experimentId>]
+{ "v": 4, "siteId": "rt_…", "ttl": 60, "experiments": [
+  { "id": "…", "type": "redirect" | "ab",
+    "targeting": { "match": "exact|contains|starts|wildcard|regex|EXACT|PREFIX", "pattern": "…",
+                   "audience": "all|new|returning", "devices": ["desktop","tablet","mobile"],
+                   "logic": "all|any", "conditions": [{ "field", "key", "op", "value" }] },
+    "coverage": 100,
+    "arms": [ { "position": 0, "variantId": null, "weight": 50, "url": "…" /* redirect */ },
+              { "position": 1, "variantId": "…", "weight": 50, "changes": [{ "selector", "prop": "text|bg|image", "value" }] /* ab */ } ],
+    "preview": true /* only on the experiment a preview link asked for */ },
+  { "id": "…", "type": "redirect", "locked": true, "targeting": { … }, "target": "https://…/winner" } ] }
+
+// POST /api/v1/events  (text/plain JSON, sendBeacon)
+{ "v": 4, "siteId": "rt_…", "visitorId": "…", "events": [
+  { "type": "assignment|page_view|time_on_page", "experimentId", "variantId", "url", "ts", "durationMs?" },
+  { "type": "page", "url", "ts" },
+  { "type": "track", "key", "url", "ts" } ] }
+```
+
+- Uppercase `EXACT`/`PREFIX` page rules are served for experiments with **no stored
+  targeting**, so they keep the normalised-URL semantics (query-sensitive EXACT, boundary PREFIX)
+  they were created with. Lowercase modes are the targeting step's (`lib/targeting.ts`
+  `matches`, mirrored in `packages/sdk/src/targeting.ts` and checked by
+  `lib/targeting-mirror.test.ts`).
+- **Location is resolved by the config endpoint**, from `x-vercel-ip-country`, else
+  `cf-ipcountry`. An experiment the visitor's country fails is omitted. **An unknown country
+  is included** (self-hosted without a geo header, local dev): failing closed would silently
+  switch geo-targeted tests off wherever geo is unavailable. A response that depends on the
+  country is sent `Cache-Control: private` with `Vary` on both headers.
+- **v3 compatibility.** Without `v=4` the endpoint answers in the v3 shape (running Split URL
+  tests only; targeting ignored; a metric goal is published as an empty URL that never
+  matches), and ingestion accepts v3 batches including their `conversion` events. That keeps
+  bundles cached from the immutable `/sdk/v1/` path working.
+- A v4 bundle never sends `conversion` — the v4 schema rejects it.
 
 ---
 
 ## Conversions
 
-A conversion is a visitor who was **in** an experiment reaching the page that experiment counts
-as success — a thank-you or order-confirmation page. Both conditions are required, and the
-second is what makes the number mean anything: someone who reaches `/thank-you` without ever
-having been bucketed did not convert *in this experiment*, and counting them would credit the
-test for traffic it never touched.
+A conversion is a visitor who was **in** an experiment meeting that experiment's goal. Both
+conditions are required: someone who reaches `/thank-you` without ever having been bucketed did
+not convert *in this experiment*.
 
-### Once per assignment, enforced three times
+Since v4 the browser does not claim conversions — the **server derives them**. For every `page`
+and `track` event it loads the visitor's **existing** assignments in running experiments of
+that website and, for each primary or secondary goal the event meets, records:
 
-| Layer | Catches |
+| Goal | Met by |
 | --- | --- |
-| In-instance guard | A second copy of the SDK on the same page load |
-| `localStorage` marker (never expires) | A refresh, a return visit tomorrow, a second tab |
-| **`conversions.assignmentId` unique constraint** | Everything else, including a forged request |
+| URL goal (`goalKey: "url"`) | a `page` event on `conversionUrl` (normalised; PREFIX needs a path boundary) |
+| Page-visit metric (`goalKey: <metricId>`) | a `page` event matching the metric's URL; the system `page_view` metric matches every page |
+| Custom-event metric (`goalKey: <metricId>`) | a `track` event with exactly that key |
 
-The database constraint is the only one that actually guarantees it — the client is precisely
-what cannot be trusted to have asked once. The marker lives in `localStorage` rather than
-`sessionStorage` because a conversion is once per assignment for the life of the experiment,
-not once per session.
+Each occurrence writes a `Conversion` row — **unique per `(assignmentId, goalKey)`**, so a
+refresh cannot inflate counting mode UNIQUE — and an `Event` of type `conversion` with the
+`goalKey`, which counting mode ALL counts (a repeat within 5 s on the same URL is dropped as a
+double-initialisation burst). The same events record a `MetricHit` per matching metric.
 
-### Server-side validation
+### Server-side guarantees
 
-Three checks, each closing a way the headline number could be moved by a crafted request:
-
-1. **The URL must match the experiment's configured goal.** Otherwise the URL is whatever the
-   client says it is, and a conversion could be booked from anywhere.
-2. **The assignment must already exist.** Every other event type may create one — that is the
-   point of an `assignment` event — but a conversion arrives later, by which time the
-   assignment has had a full page load to reach the server. Creating one here would let a
-   forged request invent a visitor, choose their arm, and convert them.
-3. **The stored arm wins.** A payload claiming the other side does not move the visitor.
+1. **The assignment must already exist.** A `page`/`track` event never creates a visitor or an
+   assignment; a forged request cannot invent a visitor, choose their arm and convert them.
+2. **Only running experiments of the reporting website** are considered.
+3. **The stored arm wins** — the conversion carries the assignment's arm, not anything sent.
+4. **URLs are normalised and timestamps clamped** exactly as for experiment events.
 
 ### Known limitation: cross-origin goals
 
-The assignment lives in `localStorage`, which is per-origin. A conversion page on a **different
-origin** from where the visitor was assigned will not see their assignment, and the conversion
-is not recorded. The redirect handoff carries identity from control to variant, but no such
-handoff exists for an arbitrary later navigation.
-
-In practice most setups keep control, variant and goal on one origin, where this does not
-arise. A test spanning `acme.com` and `shop.acme.com` will under-count conversions on the
-other origin.
+The visitor id lives in per-origin storage. A goal page on a **different origin** from where the
+visitor was assigned reports a different visitor id, so no assignment is found and no
+conversion recorded. The redirect handoff carries identity from control to variant only.
 
 ---
 
@@ -389,5 +445,11 @@ lifts itself at exactly 1250 ms.**
    `.br`/`.gz` artifacts alongside it later requires no config change.
 5. **No CDN in front of nginx.** Fine at this scale; a real CDN would sit in front of
    `cdn.example.com` and honour the same cache headers.
-6. **The SDK does nothing with the config yet** — it fetches and exposes it. Assignment and
-   redirecting are the next part.
+6. **A/B changes are applied during a bounded window.** The observer re-applies for 1.5 s, so
+   a single-page app that re-renders an element later (or navigates client-side) can revert a
+   change; SPA route-change tracking is not built.
+7. **A `page` event is sent on every page of an installed site**, not only experiment pages —
+   page-visit metrics and URL goals need it. It is one beacon per page load, deduplicated per
+   URL for 5 s against double initialisation.
+8. **Bot detection is user-agent only**, in the SDK as on the server: a crawler that lies about
+   itself is treated as a visitor.

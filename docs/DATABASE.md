@@ -7,7 +7,7 @@ commands you need day to day, local setup, and how migrations are applied in pro
 
 ## 1. Schema summary
 
-Eleven tables. Four belong to Auth.js, seven are the product.
+Four tables belong to Auth.js; the rest are the product, including the project-level tables added for the design rebuild (domains, metrics, metric hits, members, experiment activity) and the Sheets integration tables (see INTEGRATIONS.md).
 
 ### Ownership chain
 
@@ -31,13 +31,23 @@ deleting a website removes its experiments, visitors, assignments, events and co
 | `visitors` | One browser, per website, by the SDK's opaque id. | `(websiteId, anonymousId)` unique |
 | `assignments` | Binds a visitor to one arm of one experiment. | `(experimentId, visitorId)` unique |
 | `events` | Append-only activity log. | `type`, `variant`, `occurredAt` |
-| `conversions` | Completed goals, de-duplicated. | `assignmentId` unique |
+| `conversions` | Completed goals, de-duplicated per goal. | `(assignmentId, goalKey)` unique |
+| `website_domains` | A project's extra domains (the primary stays `websites.domain`). | `(websiteId, domain)` unique |
+| `metrics` | A project's measurable actions: custom events (`key`) and page visits (`url`). `page_view` is the system metric. | `(websiteId, key)` unique |
+| `metric_hits` | One row per received custom event or matching page visit, for "last received", 24h counts and the GTM test event. | `(metricId, occurredAt)` |
+| `project_members` | Team members — a **service seam**: stored and shown, grants no access. | `(websiteId, email)` unique |
+| `experiment_activities` | Activity timeline (created, launched, paused, resumed, ended, edited, duplicated). | `(experimentId, createdAt)` |
 
 ### Enums
 
 | Enum | Values |
 | --- | --- |
-| `ExperimentStatus` | `DRAFT`, `ACTIVE`, `PAUSED`, `ARCHIVED` |
+| `ExperimentStatus` | `DRAFT`, `ACTIVE`, `PAUSED`, `ARCHIVED` (shown as Completed / Winner) |
+| `ExperimentType` | `SPLIT_URL`, `AB` |
+| `CountingMode` | `UNIQUE`, `ALL` |
+| `MetricKind` | `CUSTOM_EVENT`, `PAGE_VISIT` |
+| `InstallMethod` | `MANUAL`, `GTM` |
+| `MemberRole` | `EDITOR`, `VIEWER` (the owner is `websites.userId`) |
 | `UrlMatchType` | `EXACT`, `PREFIX` |
 | `Variant` | `CONTROL`, `VARIANT` |
 | `EventType` | `page_view`, `assignment`, `time_on_page`, `conversion` |
@@ -55,7 +65,8 @@ drift from the rows it summarises:
 | Visitors per arm | `count(assignments)` grouped by `variant` |
 | Page views | `count(events)` where `type = 'page_view'` |
 | Visible time | `sum(events.durationMs)` where `type = 'time_on_page'` |
-| Conversions | `count(conversions)` grouped by `variant` |
+| Conversions (unique) | `count(conversions)` for one `goalKey`, grouped by `variant` |
+| Conversions (all) | `count(events)` where `type = 'conversion'` and `goalKey` matches |
 | Conversion rate | conversions ÷ assignments, per arm |
 
 Conversions live in their own table rather than as a filtered event scan precisely because
@@ -71,11 +82,11 @@ dashboard query is a grouped read of one table served by a covering index.
 | `websites.publicKey` | The public site identifier in the install snippet is globally unique. |
 | `visitors (websiteId, anonymousId)` | One row per browser per website; concurrent requests from the same browser converge instead of racing to insert. |
 | `assignments (experimentId, visitorId)` | **Assignment consistency** — a visitor can never hold both arms of an experiment. |
-| `conversions.assignmentId` | **Conversion idempotency** — a reloaded thank-you page or a duplicate beacon cannot inflate the count. |
+| `conversions (assignmentId, goalKey)` | **Conversion idempotency** — a reloaded thank-you page or a duplicate beacon cannot inflate any goal's count. `goalKey` is `"url"` for a URL goal or the metric id. |
 | `accounts (provider, providerAccountId)`, `sessions.sessionToken` | Required by Auth.js. |
 
-The MVP has one goal per experiment, so assignment identity is the whole conversion key. A
-multi-goal model would extend that constraint to `(assignmentId, goalId)`.
+Experiments have a primary goal and optional secondary goals, so the conversion key is
+`(assignmentId, goalKey)` — the extension this section anticipated when there was one goal.
 
 ### Indexes
 

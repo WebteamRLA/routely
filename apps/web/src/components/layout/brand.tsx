@@ -24,7 +24,7 @@ export function BrandMark({ className }: { className?: string }) {
  */
 export function Brand({
   className,
-  href = routes.experiments.list,
+  href = routes.home,
   size = "sm",
   tone = "dark",
 }: {

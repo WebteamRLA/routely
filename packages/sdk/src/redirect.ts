@@ -1,6 +1,19 @@
-import type { ExperimentConfig } from "./contract";
+import type { ArmConfig, LiveExperimentConfig } from "./contract";
 import { type KeyValueStore, getSessionStorage } from "./env";
-import { isSameUrl, readHandoff, urlMatches, withHandoff } from "./url";
+import { pageMatches } from "./targeting";
+import { isSameUrl, readHandoff, withHandoff } from "./url";
+
+type ExperimentConfig = LiveExperimentConfig;
+
+/** The arms a visitor can be redirected to: every arm but control, with a URL. */
+export function redirectArms(
+  experiment: ExperimentConfig,
+): (ArmConfig & { variantId: string; url: string })[] {
+  return experiment.arms.filter(
+    (arm): arm is ArmConfig & { variantId: string; url: string } =>
+      arm.variantId !== null && typeof arm.url === "string",
+  );
+}
 
 /**
  * Deciding whether — and where — to redirect.
@@ -56,15 +69,17 @@ export function recordRedirect(experimentId: string, store: KeyValueStore | null
 /**
  * Finds the active experiment that claims the current page.
  *
- * Only the **control** URL is matched. A variant is never a trigger, which is the first and
- * most important reason a variant page cannot start the cycle again.
+ * Only the experiment's **page rule** is matched — by default the control URL. A variant is
+ * never a trigger in its own right, which is the first reason a variant page cannot start the
+ * cycle again; a broad rule (`contains`, `PREFIX`) that also covers a variant is caught by the
+ * already-on-variant guard below.
  */
 export function findExperimentForUrl(
   href: string,
   experiments: ExperimentConfig[],
 ): ExperimentConfig | null {
   for (const experiment of experiments) {
-    if (urlMatches(href, experiment.control.url, experiment.control.match)) {
+    if (pageMatches(experiment.targeting, href)) {
       return experiment;
     }
   }
@@ -105,7 +120,9 @@ export function decide(
     return { action: "skip", experiment, reason: "excluded" };
   }
 
-  if (experiment.variants.some((variant) => isSameUrl(href, variant.url))) {
+  const variants = redirectArms(experiment);
+
+  if (variants.some((variant) => isSameUrl(href, variant.url))) {
     return { action: "skip", experiment, reason: "already-on-variant" };
   }
 
@@ -121,8 +138,7 @@ export function decide(
   }
 
   const variantId = variantFor(experiment);
-  const targetVariant =
-    variantId === null ? null : experiment.variants.find((v) => v.id === variantId);
+  const targetVariant = variantId === null ? null : variants.find((v) => v.variantId === variantId);
 
   // A non-null variantId that matches nothing in this experiment's own variant list would be
   // a corrupted or stale assignment (never possible from a correctly-behaving caller, since a
@@ -135,14 +151,14 @@ export function decide(
   const target = withHandoff(targetVariant.url, {
     visitorId: context.visitorId,
     experimentId: experiment.id,
-    variant: targetVariant.id,
+    variant: targetVariant.variantId,
   });
 
   if (isSameUrl(target, href)) {
     return { action: "skip", experiment, reason: "same-url" };
   }
 
-  return { action: "redirect", experiment, variantId: targetVariant.id, target };
+  return { action: "redirect", experiment, variantId: targetVariant.variantId, target };
 }
 
 /**

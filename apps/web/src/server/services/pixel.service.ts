@@ -108,7 +108,11 @@ async function readCapped(response: Response): Promise<string> {
  * that possible — the automatic mode would resolve the chain internally and only hand back the
  * final response, by which point an off-limits host has already been contacted.
  */
-async function fetchHtml(startUrl: URL, domain: string): Promise<{ html: string; finalUrl: URL }> {
+async function fetchHtml(
+  startUrl: URL,
+  domains: string[],
+): Promise<{ html: string; finalUrl: URL }> {
+  const domain = domains.join(", ");
   let url = startUrl;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
@@ -140,7 +144,7 @@ async function fetchHtml(startUrl: URL, domain: string): Promise<{ html: string;
       }
       // A redirect off the website's own domain is where a benign-looking URL would otherwise
       // become a request to anywhere at all.
-      if (!isSameSite(next.href, domain)) {
+      if (!domains.some((d) => isSameSite(next.href, d))) {
         throw validationFailed(
           `That URL redirects to ${next.hostname}, which is outside ${domain}.`,
         );
@@ -179,19 +183,21 @@ export async function verifyInstallation(
     "Check the URL you entered.",
   );
 
-  const website = await websiteRepo.findWebsiteForUser(websiteId, actorUserId);
+  const website = await websiteRepo.findProjectForUser(websiteId, actorUserId);
   if (!website) {
     throw notFound("That website does not exist.");
   }
 
-  if (!isSameSite(url, website.domain)) {
-    throw validationFailed(
-      `Enter a URL on ${website.domain} — that's the domain this website is set up for.`,
-      { url: [`Must be a URL on ${website.domain} or one of its subdomains.`] },
-    );
+  // The primary domain and every additional domain of the project.
+  const domains = [website.domain, ...website.domains.map((row) => row.domain)];
+  if (!domains.some((d) => isSameSite(url, d))) {
+    const list = domains.join(" or ");
+    throw validationFailed(`Enter a URL on ${list} — that's where this project is set up.`, {
+      url: [`Must be a URL on ${list} or one of their subdomains.`],
+    });
   }
 
-  const { html, finalUrl } = await fetchHtml(new URL(url), website.domain);
+  const { html, finalUrl } = await fetchHtml(new URL(url), domains);
 
   const snippetFound = html.includes(website.publicSiteId);
   // A page carrying some other site's id is the most common install mistake worth naming:

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { ExperimentConfig } from "../src/contract";
+import type { LegacyExperimentConfig as ExperimentConfig } from "../src/contract";
 import { createMemoryStore } from "../src/env";
 import { countRedirects, decide, findExperimentForUrl, recordRedirect } from "../src/redirect";
 import { readHandoff, stripHandoff, withHandoff } from "../src/url";
+import { v4 } from "./fixtures";
 
 const CONTROL = "https://acme.test/pricing";
 const VARIANT = "https://acme.test/pricing-v2";
@@ -23,19 +24,19 @@ const ctx = (sessionStore = createMemoryStore()) => ({ visitorId: "v-123", sessi
 
 describe("matching", () => {
   it("matches the control page", () => {
-    expect(findExperimentForUrl(CONTROL, [EXPERIMENT])?.id).toBe("exp_1");
+    expect(findExperimentForUrl(CONTROL, [v4(EXPERIMENT)])?.id).toBe("exp_1");
   });
 
   it("matches despite trailing slashes, fragments and campaign parameters", () => {
-    expect(findExperimentForUrl(`${CONTROL}/?utm_source=ads#plans`, [EXPERIMENT])).toBeTruthy();
+    expect(findExperimentForUrl(`${CONTROL}/?utm_source=ads#plans`, [v4(EXPERIMENT)])).toBeTruthy();
   });
 
   it("does not match an unrelated page", () => {
-    expect(findExperimentForUrl("https://acme.test/about", [EXPERIMENT])).toBeNull();
+    expect(findExperimentForUrl("https://acme.test/about", [v4(EXPERIMENT)])).toBeNull();
   });
 
   it("never matches on a variant URL", () => {
-    expect(findExperimentForUrl(VARIANT, [EXPERIMENT])).toBeNull();
+    expect(findExperimentForUrl(VARIANT, [v4(EXPERIMENT)])).toBeNull();
   });
 
   it("does not let a PREFIX rule capture a similarly-named page", () => {
@@ -43,25 +44,25 @@ describe("matching", () => {
       ...EXPERIMENT,
       control: { url: "https://acme.test/pricing", match: "PREFIX" },
     };
-    expect(findExperimentForUrl("https://acme.test/pricing-old", [prefix])).toBeNull();
-    expect(findExperimentForUrl("https://acme.test/pricing/plans", [prefix])).toBeTruthy();
+    expect(findExperimentForUrl("https://acme.test/pricing-old", [v4(prefix)])).toBeNull();
+    expect(findExperimentForUrl("https://acme.test/pricing/plans", [v4(prefix)])).toBeTruthy();
   });
 });
 
 describe("redirect loop prevention", () => {
   it("redirects a variant visitor away from the control page", () => {
-    const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx());
+    const decision = decide(CONTROL, [v4(EXPERIMENT)], always(VARIANT_ID), ctx());
     expect(decision?.action).toBe("redirect");
     expect(decision?.action === "redirect" && decision.target).toContain(VARIANT);
   });
 
   it("leaves a control visitor where they are", () => {
-    expect(decide(CONTROL, [EXPERIMENT], always(null), ctx())?.action).toBe("stay");
+    expect(decide(CONTROL, [v4(EXPERIMENT)], always(null), ctx())?.action).toBe("stay");
   });
 
   it("does nothing on the variant page itself", () => {
     // Guard 1: a variant is never a trigger.
-    expect(decide(VARIANT, [EXPERIMENT], always(VARIANT_ID), ctx())).toBeNull();
+    expect(decide(VARIANT, [v4(EXPERIMENT)], always(VARIANT_ID), ctx())).toBeNull();
   });
 
   it("does not redirect again when the variant sits under a PREFIX control", () => {
@@ -74,7 +75,12 @@ describe("redirect loop prevention", () => {
       variants: [{ id: VARIANT_ID, url: "https://acme.test/pricing/v2", weight: 50 }],
     };
 
-    const decision = decide("https://acme.test/pricing/v2", [nested], always(VARIANT_ID), ctx());
+    const decision = decide(
+      "https://acme.test/pricing/v2",
+      [v4(nested)],
+      always(VARIANT_ID),
+      ctx(),
+    );
     expect(decision?.action).toBe("skip");
     expect(decision?.action === "skip" && decision.reason).toBe("already-on-variant");
   });
@@ -100,9 +106,9 @@ describe("redirect loop prevention", () => {
       variant: VARIANT_ID,
     });
 
-    expect(decide(arrived, [EXPERIMENT], always(VARIANT_ID), ctx())).toBeNull();
+    expect(decide(arrived, [v4(EXPERIMENT)], always(VARIANT_ID), ctx())).toBeNull();
 
-    const decision = decide(arrivedNested, [nested], always(VARIANT_ID), ctx());
+    const decision = decide(arrivedNested, [v4(nested)], always(VARIANT_ID), ctx());
     expect(decision?.action).toBe("skip");
   });
 
@@ -111,7 +117,7 @@ describe("redirect loop prevention", () => {
     const session = createMemoryStore();
     recordRedirect("exp_1", session);
 
-    const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx(session));
+    const decision = decide(CONTROL, [v4(EXPERIMENT)], always(VARIANT_ID), ctx(session));
     expect(decision?.action).toBe("skip");
     expect(decision?.action === "skip" && decision.reason).toBe("already-redirected");
     expect(countRedirects("exp_1", session)).toBe(1);
@@ -124,12 +130,12 @@ describe("redirect loop prevention", () => {
       controlWeight: 50,
       variants: [{ id: VARIANT_ID, url: `${CONTROL}/`, weight: 50 }],
     };
-    const decision = decide(CONTROL, [degenerate], always(VARIANT_ID), ctx());
+    const decision = decide(CONTROL, [v4(degenerate)], always(VARIANT_ID), ctx());
     expect(decision?.action).not.toBe("redirect");
   });
 
   it("carries identity across the redirect and cleans it off afterwards", () => {
-    const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx());
+    const decision = decide(CONTROL, [v4(EXPERIMENT)], always(VARIANT_ID), ctx());
     const target = decision?.action === "redirect" ? decision.target : "";
 
     expect(readHandoff(target)).toEqual({
@@ -143,8 +149,8 @@ describe("redirect loop prevention", () => {
   it("treats a variant id absent from this experiment's own list as control", () => {
     // Defensive: a stale/corrupted assignment referencing a variant that no longer exists must
     // never redirect to an undefined target.
-    const decision = decide(CONTROL, [EXPERIMENT], always("not-a-real-variant"), ctx());
-    expect(decision).toEqual({ action: "stay", experiment: EXPERIMENT, variantId: null });
+    const decision = decide(CONTROL, [v4(EXPERIMENT)], always("not-a-real-variant"), ctx());
+    expect(decision).toEqual({ action: "stay", experiment: v4(EXPERIMENT), variantId: null });
   });
 });
 
@@ -166,7 +172,7 @@ describe("experiment status", () => {
       id: "exp_other",
       control: { url: "https://acme.test/other", match: "EXACT" },
     };
-    expect(decide(CONTROL, [other], always(VARIANT_ID), ctx())).toBeNull();
+    expect(decide(CONTROL, [v4(other)], always(VARIANT_ID), ctx())).toBeNull();
   });
 });
 
@@ -178,9 +184,9 @@ describe("traffic allocation", () => {
       return VARIANT_ID;
     };
 
-    const decision = decide(CONTROL, [EXPERIMENT], variantFor, ctx(), () => false);
+    const decision = decide(CONTROL, [v4(EXPERIMENT)], variantFor, ctx(), () => false);
 
-    expect(decision).toEqual({ action: "skip", experiment: EXPERIMENT, reason: "excluded" });
+    expect(decision).toEqual({ action: "skip", experiment: v4(EXPERIMENT), reason: "excluded" });
     // The whole point: an excluded visitor never reaches the point of being assigned an arm.
     expect(variantDrawn).toBe(false);
   });
@@ -188,18 +194,18 @@ describe("traffic allocation", () => {
   it("defaults to including everyone when no `includedFor` is given", () => {
     // Every existing call site (and every test above) omits the fifth argument — this is what
     // keeps them all behaving exactly as before.
-    expect(decide(CONTROL, [EXPERIMENT], always(null), ctx())?.action).toBe("stay");
+    expect(decide(CONTROL, [v4(EXPERIMENT)], always(null), ctx())?.action).toBe("stay");
   });
 
   it("is checked before the redirect-loop guards", () => {
     // An excluded visitor is skipped even on a page load that would otherwise redirect.
-    const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx(), () => false);
+    const decision = decide(CONTROL, [v4(EXPERIMENT)], always(VARIANT_ID), ctx(), () => false);
     expect(decision?.action).toBe("skip");
     expect(decision?.action === "skip" && decision.reason).toBe("excluded");
   });
 
   it("includes a visitor `includedFor` approves", () => {
-    const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx(), () => true);
+    const decision = decide(CONTROL, [v4(EXPERIMENT)], always(VARIANT_ID), ctx(), () => true);
     expect(decision?.action).toBe("redirect");
   });
 });

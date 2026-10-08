@@ -8,7 +8,10 @@ import { SDK_PROTOCOL_VERSION } from "./contract";
  * page load. A dropped event costs one row of analytics; a blocked page costs the customer a
  * visitor, so the trade is not close.
  *
- * `assignment`, `page_view`, `time_on_page` and `conversion` are all emitted.
+ * Experiment events (`assignment`, `page_view`, `time_on_page`) and the site-level `page` and
+ * `track` events are emitted. Conversions are not: the server derives them from `page` and
+ * `track` against assignments it already holds, which is also what keeps a conversion from
+ * being something the browser can simply claim.
  */
 
 /**
@@ -68,98 +71,22 @@ export function sendEvents(
 }
 
 /**
- * Reports the assignment and the page view together.
+ * The assignment and page-view events for one experiment on this page load.
  *
- * One request rather than two: they always occur at the same moment, and on the control page
- * the very next thing that happens may be a navigation away. Batching means a single beacon
- * has to survive the unload instead of two.
+ * Returned rather than sent: everything a page load has to report — each experiment's events
+ * plus the site-level `page` event — goes out as one batch, so a single beacon has to survive
+ * the unload that a redirect is about to cause.
  *
  * `includeAssignment` is false on a page load where the visitor was already bucketed, so the
  * assignment is reported once rather than on every page they visit.
  */
-export function sendPageEvents(
-  apiBase: string,
-  siteId: string,
-  visitorId: string,
-  context: { experimentId: string; variantId: TrackedEvent["variantId"]; url: string },
+export function pageEvents(
+  context: { experimentId: string; variantId: string | null; url: string },
   options: { includeAssignment: boolean; includePageView: boolean },
   now: number = Date.now(),
-): boolean {
+): TrackedEvent[] {
   const events: TrackedEvent[] = [];
-
-  if (options.includeAssignment) {
-    events.push({
-      experimentId: context.experimentId,
-      variantId: context.variantId,
-      type: "assignment",
-      url: context.url,
-      ts: now,
-    });
-  }
-
-  if (options.includePageView) {
-    events.push({
-      experimentId: context.experimentId,
-      variantId: context.variantId,
-      type: "page_view",
-      url: context.url,
-      ts: now,
-    });
-  }
-
-  return sendEvents(apiBase, siteId, visitorId, events);
-}
-
-/**
- * Reports a slice of visible time.
- *
- * Sent as a delta, not a running total: each call reports only what accumulated since the
- * last one, so the server can sum them without needing to know which was the final event, and
- * a dropped last beacon costs the tail rather than the whole measurement.
- */
-export function sendTimeOnPage(
-  apiBase: string,
-  siteId: string,
-  visitorId: string,
-  context: { experimentId: string; variantId: TrackedEvent["variantId"]; url: string },
-  durationMs: number,
-  now: number = Date.now(),
-): boolean {
-  if (!(durationMs > 0)) return false;
-
-  return sendEvents(apiBase, siteId, visitorId, [
-    {
-      experimentId: context.experimentId,
-      variantId: context.variantId,
-      type: "time_on_page",
-      url: context.url,
-      durationMs: Math.round(durationMs),
-      ts: now,
-    },
-  ]);
-}
-
-/**
- * Reports that a visitor reached an experiment's conversion goal.
- *
- * Sent once per assignment by the client, and enforced as once per assignment by the database
- * — the unique constraint on `assignmentId` means a repeat is a no-op rather than an error, so
- * a duplicate beacon cannot inflate the metric even if this is somehow called twice.
- */
-export function sendConversion(
-  apiBase: string,
-  siteId: string,
-  visitorId: string,
-  context: { experimentId: string; variantId: TrackedEvent["variantId"]; url: string },
-  now: number = Date.now(),
-): boolean {
-  return sendEvents(apiBase, siteId, visitorId, [
-    {
-      experimentId: context.experimentId,
-      variantId: context.variantId,
-      type: "conversion",
-      url: context.url,
-      ts: now,
-    },
-  ]);
+  if (options.includeAssignment) events.push({ ...context, type: "assignment", ts: now });
+  if (options.includePageView) events.push({ ...context, type: "page_view", ts: now });
+  return events;
 }

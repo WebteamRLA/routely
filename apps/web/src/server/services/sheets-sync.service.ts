@@ -170,29 +170,6 @@ function toDestinationSummary(
   };
 }
 
-/** A website's destination and the state of its tab, for the website's own page. */
-export async function getWebsiteSheetStatus(
-  actorUserId: string,
-  websiteId: string,
-): Promise<{
-  configured: boolean;
-  connected: boolean;
-  needsReconnect: boolean;
-  destination: SheetDestinationSummary | null;
-}> {
-  const [connection, target] = await Promise.all([
-    connectionRepo.findConnectionForUser(actorUserId),
-    targetRepo.findTargetForWebsite(websiteId, actorUserId),
-  ]);
-
-  return {
-    configured: missingConfiguration() === null,
-    connected: connection !== null,
-    needsReconnect: connection?.status === "NEEDS_RECONNECT",
-    destination: toDestinationSummary(target ?? undefined),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Connecting
 // ---------------------------------------------------------------------------

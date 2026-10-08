@@ -17,6 +17,8 @@ export interface EventRecordInput {
   type: EventType;
   url: string;
   durationMs?: number | null;
+  /** Conversion events only: `"url"` or the metric id. */
+  goalKey?: string | null;
   occurredAt: Date;
 }
 
@@ -106,19 +108,10 @@ export async function sumVisibleMsByVariant(
   return new Map(rows.map((row) => [row.variantId, row._sum.durationMs ?? 0]));
 }
 
-/** Most recent events for one experiment, for debugging an installation. */
-export function listRecentEvents(experimentId: string, limit = 50, client: DbClient = db) {
-  return client.event.findMany({
-    where: { experimentId },
-    orderBy: { occurredAt: "desc" },
-    take: limit,
-  });
-}
-
 /**
  * Whether the tracking snippet has ever reported an event for this website.
  *
- * Backs the "pixel detected" state on the Get started guide: rather than a separate
+ * Backs the install check's "receiving data" half: rather than a separate
  * installed/verified flag that could drift from reality, detection is derived from the one
  * thing that actually proves the snippet is running — an event arrived. Served by the
  * `[websiteId, createdAt]` index, so this is an index probe rather than a table scan.
@@ -133,15 +126,31 @@ export async function hasEvents(websiteId: string, client: DbClient = db): Promi
 }
 
 /**
- * Deletes events older than `cutoff` for one website. The retention sweep is not scheduled in
- * the MVP; this exists so the `[websiteId, createdAt]` index has the caller it was added for.
+ * True when this assignment recorded a conversion for the same goal on the same URL moments
+ * ago — the burst a second copy of the SDK on one page produces. Counting mode ALL counts these
+ * rows, so a duplicate would inflate it.
  */
-export function deleteEventsBefore(
-  websiteId: string,
-  cutoff: Date,
+export async function hasRecentConversionEvent(
+  input: { assignmentId: string; goalKey: string; url: string; since: Date; until: Date },
+  client: DbClient = db,
+): Promise<boolean> {
+  const existing = await client.event.findFirst({
+    where: {
+      assignmentId: input.assignmentId,
+      type: "conversion",
+      goalKey: input.goalKey,
+      url: input.url,
+      occurredAt: { gte: input.since, lte: input.until },
+    },
+    select: { id: true },
+  });
+  return existing !== null;
+}
+
+/** Records metric hits — one per metric a received `page` or `track` event matched. */
+export function createMetricHits(
+  hits: { websiteId: string; metricId: string; url: string | null; occurredAt: Date }[],
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
-  return client.event.deleteMany({
-    where: { websiteId, createdAt: { lt: cutoff } },
-  });
+  return client.metricHit.createMany({ data: hits });
 }

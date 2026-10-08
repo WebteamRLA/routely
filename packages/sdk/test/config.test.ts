@@ -5,17 +5,26 @@ import type { ConfigResponse } from "../src/contract";
 import { createMemoryStore } from "../src/env";
 
 const VALID: ConfigResponse = {
-  v: 3,
+  v: 4,
   siteId: "rt_abc",
   ttl: 60,
   experiments: [
     {
       id: "exp_1",
-      control: { url: "https://acme.test/pricing", match: "EXACT" },
-      controlWeight: 50,
-      variants: [{ id: "var_1", url: "https://acme.test/pricing-v2", weight: 50 }],
-      goal: { url: "https://acme.test/thanks", match: "EXACT" },
-      trafficAllocation: 100,
+      type: "redirect",
+      targeting: {
+        match: "EXACT",
+        pattern: "https://acme.test/pricing",
+        audience: "all",
+        devices: ["desktop", "tablet", "mobile"],
+        logic: "all",
+        conditions: [],
+      },
+      coverage: 100,
+      arms: [
+        { position: 0, variantId: null, weight: 50, url: "https://acme.test/pricing" },
+        { position: 1, variantId: "var_1", weight: 50, url: "https://acme.test/pricing-v2" },
+      ],
     },
   ],
 };
@@ -29,9 +38,9 @@ describe("isConfigResponse", () => {
     expect(isConfigResponse({ ...VALID, v: 1 })).toBe(false);
   });
 
-  it("rejects an experiment with no variants", () => {
+  it("rejects an experiment with no arms", () => {
     expect(
-      isConfigResponse({ ...VALID, experiments: [{ ...VALID.experiments[0], variants: [] }] }),
+      isConfigResponse({ ...VALID, experiments: [{ ...VALID.experiments[0], arms: [] }] }),
     ).toBe(false);
   });
 

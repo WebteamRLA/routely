@@ -1,6 +1,11 @@
 // Builds the browser tracking SDK into a single dependency-free IIFE bundle and copies it
 // into the Next.js app's public directory, from where it is served as /sdk.js.
 //
+// Published to /sdk/v2/ (protocol v4). /sdk/v1/ is served `immutable` for a year, so the new
+// bytes must not be relied on to reach anyone through that path — but a page that hard-coded
+// it must not 404 either, so the same file is copied there too. Whichever bundle a browser ends
+// up running, the API answers it: v3 bundles get the v3 config, v4 bundles ask for v4.
+//
 //   node build.mjs            production build, minified, size-checked
 //   node build.mjs --watch    rebuild and republish on change, unminified
 //
@@ -16,8 +21,9 @@ import * as esbuild from "esbuild";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outFile = resolve(root, "dist/sdk.js");
-const publicDir = resolve(root, "../../apps/web/public/sdk/v1");
+const publicDir = resolve(root, "../../apps/web/public/sdk/v2");
 const publicFile = resolve(publicDir, "sdk.js");
+const legacyDir = resolve(root, "../../apps/web/public/sdk/v1");
 
 /**
  * The origin baked into the bundle, which every installed snippet will call.
@@ -37,8 +43,14 @@ const watch = process.argv.includes("--watch");
  * This runs on every page of a customer's site, often on connections they do not control, so
  * the size is a product constraint rather than a nice-to-have. The build fails when it is
  * exceeded, which forces the trade-off to be made deliberately instead of drifting.
+ *
+ * History: 6 kB while the SDK only redirected. Raised to 7.5 kB with protocol v4, which added
+ * A/B element changes (with the MutationObserver wait), page/audience/device/condition
+ * targeting, crawler skipping, preview links, winner redirects and the `track()` API + queue —
+ * measured at 7.22 kB gzip (19.15 kB raw), so the new ceiling leaves ~280 B for fixes, not
+ * features.
  */
-const MAX_GZIP_BYTES = 6 * 1024;
+const MAX_GZIP_BYTES = 7.5 * 1024;
 
 /**
  * ES2019 is the floor.
@@ -95,6 +107,9 @@ async function publish(sizes) {
   await mkdir(publicDir, { recursive: true });
   await copyFile(outFile, publicFile);
   await copyFile(`${outFile}.map`, `${publicFile}.map`);
+  await mkdir(legacyDir, { recursive: true });
+  await copyFile(outFile, resolve(legacyDir, "sdk.js"));
+  await copyFile(`${outFile}.map`, resolve(legacyDir, "sdk.js.map"));
 
   // A build manifest, so a deployed bundle can be identified without guessing from its bytes.
   await writeFile(

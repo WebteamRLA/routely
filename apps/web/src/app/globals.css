@@ -189,6 +189,16 @@
   h3 {
     font-family: var(--font-heading);
   }
+  /* The design's links: brand blue, underline on hover. Components that render links as
+   * buttons or nav items set their own colour and `no-underline`. */
+  a {
+    color: var(--color-brand);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--color-brand-hover);
+    text-decoration: underline;
+  }
   input[type="range"] {
     accent-color: #2b59f0;
   }

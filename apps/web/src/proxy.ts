@@ -50,5 +50,15 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Only the protected areas. Auth.js routes, static assets and the public SDK bundle must
   // never be intercepted — redirecting the OAuth callback would break sign-in entirely.
-  matcher: ["/get-started/:path*", "/websites/:path*", "/experiments/:path*"],
+  // Mirrors PROTECTED_PREFIXES in lib/routes.ts (a matcher must be a static literal): the
+  // project area, Manage projects, and every legacy prefix that now redirects into them.
+  matcher: [
+    "/p/:path*",
+    "/projects/:path*",
+    "/get-started/:path*",
+    "/websites/:path*",
+    "/experiments/:path*",
+    "/metrics/:path*",
+    "/integrations/:path*",
+  ],
 };

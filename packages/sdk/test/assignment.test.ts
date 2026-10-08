@@ -7,8 +7,9 @@ import {
   resolveAssignment,
   writeAssignment,
 } from "../src/assignment";
-import type { ExperimentConfig } from "../src/contract";
+import type { LegacyExperimentConfig as ExperimentConfig } from "../src/contract";
 import { createMemoryStore } from "../src/env";
+import { v4 } from "./fixtures";
 
 const VARIANT_ID = "var_1";
 
@@ -103,7 +104,7 @@ describe("distribution", () => {
     for (let i = 0; i < trials; i += 1) {
       // Each iteration is a distinct new visitor: a fresh store means no prior assignment.
       const store = [createMemoryStore()];
-      if (resolveAssignment(EXPERIMENT, store).variantId !== null) variant += 1;
+      if (resolveAssignment(v4(EXPERIMENT), store).variantId !== null) variant += 1;
     }
 
     const share = variant / trials;
@@ -127,7 +128,7 @@ describe("distribution", () => {
 
     for (let i = 0; i < trials; i += 1) {
       const store = [createMemoryStore()];
-      const { variantId } = resolveAssignment(experiment, store);
+      const { variantId } = resolveAssignment(v4(experiment), store);
       counts[variantId === null ? "control" : (variantId as "var_1" | "var_2")] += 1;
     }
 
@@ -150,7 +151,7 @@ describe("distribution", () => {
 
     for (let i = 0; i < trials; i += 1) {
       const store = [createMemoryStore()];
-      if (resolveAssignment(experiment, store).variantId === null) control += 1;
+      if (resolveAssignment(v4(experiment), store).variantId === null) control += 1;
     }
 
     // 20/80 — σ ≈ 0.23 points over 30k draws, so ±2 points is far outside noise.
@@ -163,13 +164,13 @@ describe("distribution", () => {
 describe("assignment consistency", () => {
   it("does not re-randomise on a repeat visit", () => {
     const stores = [createMemoryStore()];
-    const first = resolveAssignment(EXPERIMENT, stores);
+    const first = resolveAssignment(v4(EXPERIMENT), stores);
 
     // Draws are forced to the *opposite* arm; a stored assignment must win regardless.
     const opposite = first.variantId !== null ? fixed(0.99) : fixed(0.01);
 
     for (let i = 0; i < 50; i += 1) {
-      const again = resolveAssignment(EXPERIMENT, stores, { random: opposite });
+      const again = resolveAssignment(v4(EXPERIMENT), stores, { random: opposite });
       expect(again.variantId).toBe(first.variantId);
       expect(again.isNew).toBe(false);
     }
@@ -177,8 +178,8 @@ describe("assignment consistency", () => {
 
   it("keeps separate experiments independent", () => {
     const stores = [createMemoryStore()];
-    resolveAssignment(EXPERIMENT, stores, { random: fixed(0.9) });
-    resolveAssignment({ ...EXPERIMENT, id: "exp_2" }, stores, { random: fixed(0.1) });
+    resolveAssignment(v4(EXPERIMENT), stores, { random: fixed(0.9) });
+    resolveAssignment(v4({ ...EXPERIMENT, id: "exp_2" }), stores, { random: fixed(0.1) });
 
     expect(readAssignment("exp_1", stores)?.variantId).toBe(VARIANT_ID);
     expect(readAssignment("exp_2", stores)?.variantId).toBeNull();
@@ -187,26 +188,30 @@ describe("assignment consistency", () => {
 
   it("applies a handed-over decision only when nothing is stored", () => {
     const fresh = [createMemoryStore()];
-    expect(resolveAssignment(EXPERIMENT, fresh, { forced: VARIANT_ID }).variantId).toBe(VARIANT_ID);
+    expect(resolveAssignment(v4(EXPERIMENT), fresh, { forced: VARIANT_ID }).variantId).toBe(
+      VARIANT_ID,
+    );
 
     // An existing assignment must not be overwritten by a value from a query string.
     const existing = [createMemoryStore()];
-    resolveAssignment(EXPERIMENT, existing, { random: fixed(0.01) }); // control
-    expect(resolveAssignment(EXPERIMENT, existing, { forced: VARIANT_ID }).variantId).toBeNull();
+    resolveAssignment(v4(EXPERIMENT), existing, { random: fixed(0.01) }); // control
+    expect(
+      resolveAssignment(v4(EXPERIMENT), existing, { forced: VARIANT_ID }).variantId,
+    ).toBeNull();
   });
 
   it("distinguishes `forced: null` (forced to control) from omitting `forced` entirely", () => {
     // `null` is itself meaningful now — unlike the old model, it can't share a sentinel with
     // "no forced value" the way falsy values could when control had no id of its own.
     const store = [createMemoryStore()];
-    expect(resolveAssignment(EXPERIMENT, store, { forced: null }).variantId).toBeNull();
+    expect(resolveAssignment(v4(EXPERIMENT), store, { forced: null }).variantId).toBeNull();
   });
 
   it("re-draws when the stored value is corrupted", () => {
     const store = createMemoryStore();
     store.setItem(assignmentKey(EXPERIMENT.id), "{not json");
 
-    const result = resolveAssignment(EXPERIMENT, [store], { random: fixed(0.9) });
+    const result = resolveAssignment(v4(EXPERIMENT), [store], { random: fixed(0.9) });
     expect(result.variantId).toBe(VARIANT_ID);
     expect(result.isNew).toBe(true);
   });
@@ -215,32 +220,34 @@ describe("assignment consistency", () => {
     const store = createMemoryStore();
     store.setItem(assignmentKey(EXPERIMENT.id), JSON.stringify({ variantId: 12345 }));
 
-    expect(resolveAssignment(EXPERIMENT, [store], { random: fixed(0.01) }).variantId).toBeNull();
+    expect(
+      resolveAssignment(v4(EXPERIMENT), [store], { random: fixed(0.01) }).variantId,
+    ).toBeNull();
   });
 
   it("survives a page refresh, which reads the same store again", () => {
     const store = createMemoryStore();
-    const first = resolveAssignment(EXPERIMENT, [store]);
+    const first = resolveAssignment(v4(EXPERIMENT), [store]);
 
     // A refresh: new arrays, same underlying storage.
     for (let i = 0; i < 5; i += 1) {
-      expect(resolveAssignment(EXPERIMENT, [store]).variantId).toBe(first.variantId);
+      expect(resolveAssignment(v4(EXPERIMENT), [store]).variantId).toBe(first.variantId);
     }
   });
 
   it("writes to every store so one being cleared does not re-bucket the visitor", () => {
     const local = createMemoryStore();
     const memory = createMemoryStore();
-    const first = resolveAssignment(EXPERIMENT, [local, memory]);
+    const first = resolveAssignment(v4(EXPERIMENT), [local, memory]);
 
     local.removeItem(assignmentKey(EXPERIMENT.id));
 
-    expect(resolveAssignment(EXPERIMENT, [local, memory]).variantId).toBe(first.variantId);
+    expect(resolveAssignment(v4(EXPERIMENT), [local, memory]).variantId).toBe(first.variantId);
   });
 
   it("marks an assignment as reported without changing the arm", () => {
     const stores = [createMemoryStore()];
-    const first = resolveAssignment(EXPERIMENT, stores);
+    const first = resolveAssignment(v4(EXPERIMENT), stores);
 
     writeAssignment(EXPERIMENT.id, { variantId: first.variantId, at: 0, sent: true }, stores);
 

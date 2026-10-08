@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 
+import type { CountingKey, ExperimentDraft } from "@/lib/domain";
 import { routes } from "@/lib/routes";
-import { type FormState, runAction } from "@/server/actions/types";
+import type { ExperimentResults, GoalPerformance, ResultsRange } from "@/lib/view-models";
+import { type ActionResult, runResult } from "@/server/actions/types";
 import { requireUser } from "@/server/auth/session";
+import * as analyticsService from "@/server/services/analytics.service";
 import * as experimentService from "@/server/services/experiment.service";
 
 /**
@@ -17,166 +19,168 @@ import * as experimentService from "@/server/services/experiment.service";
  * belonging to someone else resolves to "not found".
  */
 
-/**
- * Reads a field that may not have been submitted at all.
- *
- * A **disabled `<fieldset>` submits none of its controls**, and the edit form disables the URL
- * fields once an experiment has started — so on a running experiment `controlUrl`,
- * `conversionUrl` and every variant row are simply absent. `formData.get` returns `null` for
- * those, and passing `null` on to a partial update overwrites the stored value with nothing.
- * `undefined` is what "unchanged" looks like to `updateExperiment`, which merges the changes
- * over the stored record.
- *
- * That is why re-weighting a running experiment used to fail with "expected string, received
- * null" and "At least one variant is required", despite weights deliberately being outside the
- * URL lock.
- */
-function submittedText(formData: FormData, name: string): string | undefined {
-  const value = formData.get(name);
-  return typeof value === "string" ? value : undefined;
+// ===========================================================================================
+// Project-scoped actions (the new UI). RPC-style: call directly, get an `ActionResult`.
+// None of them redirect — the caller navigates with the returned id.
+// ===========================================================================================
+
+function revalidateProject(projectId: string): void {
+  // Layout-level: the dashboard, list, detail and wizard pages all live under /p/<id>.
+  revalidatePath(routes.project(projectId).dashboard, "layout");
+  revalidatePath(routes.projects);
 }
 
-/** Reads an optional text field, treating an empty submission as absent rather than as "". */
-function optionalText(formData: FormData, name: string): string | undefined {
-  const value = formData.get(name);
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed === "" ? undefined : trimmed;
-}
-
-/** Reads a field as a number for Zod to validate; NaN on a bad value surfaces as a field error
- * rather than silently falling back to a default. */
-function numberField(formData: FormData, name: string): number {
-  return Number(formData.get(name));
+/** Creates or updates a DRAFT. Lenient: an empty name is stored as "Untitled experiment". */
+export async function saveDraftAction(
+  draft: ExperimentDraft,
+): Promise<ActionResult<{ id: string }>> {
+  const user = await requireUser();
+  const result = await runResult(
+    () => experimentService.saveDraft(user.id, draft?.projectId, draft),
+    "Draft saved",
+  );
+  if (result.status === "success") revalidateProject(draft.projectId);
+  return result;
 }
 
 /**
- * Reads the variant rows: repeated `variantUrl` fields (one per row, native `FormData` support
- * for a repeated `name` — no JSON-encoding needed) paired by index with repeated `variantId`
- * and `variantWeight` fields. An empty `variantId` means a row with no stored id yet. Values
- * are left unnarrowed so Zod does the actual validation rather than this second-guessing it.
+ * Fully validates and launches (create or update the draft, then ACTIVE). On failure,
+ * `fieldErrors` keys are `step.field` (`basics.url`, `variants.v1`, `traffic.sum`,
+ * `targeting.pattern`, `goal.conv`, `goal.goal`, `goal.secondary`, `variants.arms`, …).
  */
-function readVariants(
-  formData: FormData,
-): { id?: string; url: FormDataEntryValue; weight: number }[] | undefined {
-  const urls = formData.getAll("variantUrl");
-  // No rows at all means the fieldset holding them was disabled, not that the customer removed
-  // every variant — which the schema would reject outright. See `submittedText`.
-  if (urls.length === 0) return undefined;
-
-  const ids = formData.getAll("variantId").map(String);
-  const weights = formData.getAll("variantWeight");
-
-  return urls.map((url, index) => ({
-    id: ids[index] || undefined,
-    url,
-    weight: Number(weights[index]),
-  }));
+export async function launchExperimentAction(
+  draft: ExperimentDraft,
+): Promise<ActionResult<{ id: string }>> {
+  const user = await requireUser();
+  const result = await runResult(
+    () => experimentService.launch(user.id, draft?.projectId, draft),
+    "Experiment launched",
+  );
+  if (result.status === "success") revalidateProject(draft.projectId);
+  return result;
 }
 
-export async function createExperimentAction(
-  _previous: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const user = await requireUser();
+type Target = { projectId: string; experimentId: string };
 
-  const result = await runAction(() =>
-    experimentService.createExperiment(user.id, {
-      websiteId: formData.get("websiteId"),
-      name: formData.get("name"),
-      description: optionalText(formData, "description"),
-      controlUrl: formData.get("controlUrl"),
-      controlMatchType: formData.get("controlMatchType"),
-      controlWeight: numberField(formData, "controlWeight"),
-      variants: readVariants(formData),
-      conversionUrl: formData.get("conversionUrl"),
-      conversionMatchType: formData.get("conversionMatchType"),
-      primaryMetric: formData.get("primaryMetric"),
-      trafficAllocation: numberField(formData, "trafficAllocation"),
+async function lifecycle(
+  input: Target,
+  operation: (userId: string, projectId: string, experimentId: string) => Promise<unknown>,
+  message: string,
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runResult(async () => {
+    await operation(user.id, input.projectId, input.experimentId);
+    return null;
+  }, message);
+  if (result.status === "success") revalidateProject(input.projectId);
+  return result;
+}
+
+export async function pauseExperimentAction(input: Target): Promise<ActionResult> {
+  return lifecycle(input, experimentService.pause, "Paused · visitors now see Control");
+}
+
+export async function resumeExperimentAction(input: Target): Promise<ActionResult> {
+  return lifecycle(input, experimentService.resume, "Experiment resumed");
+}
+
+/** Only drafts and completed experiments can be deleted. */
+export async function deleteProjectExperimentAction(input: Target): Promise<ActionResult> {
+  return lifecycle(input, experimentService.remove, "Experiment deleted");
+}
+
+/**
+ * Ends a running/paused experiment. `winnerPosition`: 0 = control, n = variant n, null = no
+ * winner. `keepWinner` only applies to a Split URL test with a variant winner.
+ */
+export async function endExperimentAction(
+  input: Target & { winnerPosition: number | null; keepWinner?: boolean },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runResult(async () => {
+    await experimentService.end(user.id, input);
+    return null;
+  }, "Experiment ended");
+  if (result.status === "success") revalidateProject(input.projectId);
+  return result;
+}
+
+/** Copies the setup into a new draft "Copy of …"; returns its id. */
+export async function duplicateExperimentAction(
+  input: Target,
+): Promise<ActionResult<{ id: string }>> {
+  const user = await requireUser();
+  const result = await runResult(
+    () => experimentService.duplicate(user.id, input.projectId, input.experimentId),
+    "Duplicated as a draft",
+  );
+  if (result.status === "success") revalidateProject(input.projectId);
+  return result;
+}
+
+/** Post-launch edits: name, hypothesis, weights (same arm count, sum 100), coverage,
+ * secondary goals, counting. Everything else is fixed after launch. */
+export async function editLiveExperimentAction(
+  input: Target & {
+    name?: string;
+    hypothesis?: string;
+    weights?: number[];
+    coverage?: number;
+    secondary?: string[];
+    counting?: CountingKey;
+  },
+): Promise<ActionResult> {
+  const user = await requireUser();
+  const result = await runResult(async () => {
+    await experimentService.editLive(user.id, input);
+    return null;
+  }, "Changes saved");
+  if (result.status === "success") revalidateProject(input.projectId);
+  return result;
+}
+
+/** Public results link: turn on (idempotent), issue a new one, or turn off. */
+export async function setSharingAction(
+  input: Target & { mode: "enable" | "rotate" | "disable" },
+): Promise<ActionResult<{ token: string | null; url: string | null }>> {
+  const user = await requireUser();
+  const messages = {
+    enable: "Share link created.",
+    rotate: "New link created. The previous one no longer works.",
+    disable: "Sharing turned off. The link no longer works.",
+  } as const;
+  const result = await runResult(
+    () => experimentService.setSharing(user.id, input.projectId, input.experimentId, input.mode),
+    messages[input.mode],
+  );
+  if (result.status === "success") revalidateProject(input.projectId);
+  return result;
+}
+
+/** Results for client-side switching of range / goal / counting without a navigation. */
+export async function getExperimentResultsAction(
+  input: Target & { range?: ResultsRange; goal?: string; counting?: CountingKey },
+): Promise<ActionResult<ExperimentResults>> {
+  const user = await requireUser();
+  return runResult(() =>
+    analyticsService.getExperimentResults(user.id, input.projectId, input.experimentId, {
+      ...(input.range ? { range: input.range } : {}),
+      ...(input.goal ? { goal: input.goal } : {}),
+      ...(input.counting ? { counting: input.counting } : {}),
     }),
   );
-
-  if (!result.ok) {
-    return result.state;
-  }
-
-  // Outside runAction: redirect() signals by throwing, and must reach Next.js uncaught.
-  revalidatePath(routes.websites.detail(result.data.websiteId));
-  redirect(routes.experiments.detail(result.data.id));
 }
 
-export async function updateExperimentAction(
-  _previous: FormState,
-  formData: FormData,
-): Promise<FormState> {
+export async function getGoalPerformanceAction(
+  input: Target & { range?: ResultsRange },
+): Promise<ActionResult<GoalPerformance[]>> {
   const user = await requireUser();
-  const experimentId = String(formData.get("experimentId") ?? "");
-
-  const result = await runAction(() =>
-    // Only what was actually submitted: anything absent stays as stored, which is what lets a
-    // running experiment be re-weighted while its URLs are locked.
-    experimentService.updateExperiment(user.id, experimentId, {
-      name: submittedText(formData, "name"),
-      description: optionalText(formData, "description"),
-      controlUrl: submittedText(formData, "controlUrl"),
-      controlMatchType: submittedText(formData, "controlMatchType"),
-      controlWeight: numberField(formData, "controlWeight"),
-      variants: readVariants(formData),
-      conversionUrl: submittedText(formData, "conversionUrl"),
-      conversionMatchType: submittedText(formData, "conversionMatchType"),
-      primaryMetric: submittedText(formData, "primaryMetric"),
-      trafficAllocation: numberField(formData, "trafficAllocation"),
-    }),
+  return runResult(() =>
+    analyticsService.getGoalPerformance(
+      user.id,
+      input.projectId,
+      input.experimentId,
+      input.range ?? "all",
+    ),
   );
-
-  if (!result.ok) {
-    return result.state;
-  }
-
-  revalidatePath(routes.experiments.detail(experimentId));
-  revalidatePath(routes.websites.detail(result.data.websiteId));
-
-  return { status: "success", message: "Experiment updated." };
-}
-
-export async function changeExperimentStatusAction(
-  _previous: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const user = await requireUser();
-  const experimentId = String(formData.get("experimentId") ?? "");
-
-  const result = await runAction(() =>
-    experimentService.changeStatus(user.id, {
-      experimentId,
-      status: formData.get("status"),
-    }),
-  );
-
-  if (!result.ok) {
-    return result.state;
-  }
-
-  revalidatePath(routes.experiments.detail(experimentId));
-  revalidatePath(routes.websites.detail(result.data.websiteId));
-
-  return { status: "success" };
-}
-
-export async function deleteExperimentAction(
-  _previous: FormState,
-  formData: FormData,
-): Promise<FormState> {
-  const user = await requireUser();
-  const experimentId = String(formData.get("experimentId") ?? "");
-  const websiteId = String(formData.get("websiteId") ?? "");
-
-  const result = await runAction(() => experimentService.deleteExperiment(user.id, experimentId));
-
-  if (!result.ok) {
-    return result.state;
-  }
-
-  revalidatePath(routes.websites.detail(websiteId));
-  redirect(websiteId ? routes.websites.detail(websiteId) : routes.experiments.list);
 }

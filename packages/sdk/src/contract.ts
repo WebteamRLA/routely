@@ -10,65 +10,111 @@
 /**
  * Incremented when the config/event payload shape changes incompatibly.
  *
- * v2: `variantUrl`/`variantSplit` (exactly one variant, a stored split) replaced by `variants`
- * (one or more redirect targets) and an implicit equal split derived from their count. The
- * `VariantKey` literal `"CONTROL" | "VARIANT"` became `variantId: string | null` — `null` is
- * control, a variant's id is itself now a meaningful identifier rather than a fixed label.
+ * v2: `variantUrl`/`variantSplit` replaced by `variants` (one or more redirect targets).
  *
- * v3: the implicit equal split became explicit per-arm weights — `controlWeight` plus a
- * `weight` on every variant. A v2 bundle reading a v3 config would split evenly and silently
- * ignore a configured distribution, which is exactly the kind of quiet wrongness the version
- * check exists to prevent.
+ * v3: explicit per-arm weights — `controlWeight` plus a `weight` on every variant.
+ *
+ * v4: two experiment types (`redirect` | `ab`), arms as one positioned list (control is
+ * position 0), page/audience targeting and coverage, completed experiments that keep
+ * redirecting to their winner (`locked`), and two site-level event types — `page` (every page
+ * view, whether or not an experiment runs there) and `track` (a custom event). Conversions are
+ * no longer reported by the browser: the server derives them from `page` and `track` events
+ * against the visitor's existing assignments, so a goal can be a URL, a page-visit metric or a
+ * custom event without the browser knowing which.
+ *
+ * The server still answers v3 bundles — a bundle fetched from the immutable `/sdk/v1/` path
+ * can sit in a browser cache for a year — see `LEGACY_PROTOCOL_VERSION`.
  */
-export const SDK_PROTOCOL_VERSION = 3;
+export const SDK_PROTOCOL_VERSION = 4;
 
-/** How a configured URL is compared against the visitor's current URL. */
+/** The previous protocol, still served to bundles that do not ask for v4. */
+export const LEGACY_PROTOCOL_VERSION = 3;
+
+/** How a configured URL is compared against the visitor's current URL (legacy rules). */
 export type UrlMatchType = "EXACT" | "PREFIX";
 
 /**
- * Kinds of event the SDK reports back to the ingestion endpoint.
+ * A page rule's match mode.
  *
- * These strings are also the values of the `EventType` enum in the Prisma schema, so an
- * ingested value is stored verbatim with no translation table between wire and column.
+ * The lowercase modes are the targeting step's (`lib/targeting.ts` `matches`). The uppercase
+ * ones are the pre-targeting rules — an experiment with no stored targeting keeps exactly the
+ * normalised-URL semantics it was created with, including PREFIX's path boundary.
  */
-export type EventType = "page_view" | "assignment" | "time_on_page" | "conversion";
+export type PageMatchMode = "exact" | "contains" | "starts" | "wildcard" | "regex" | UrlMatchType;
 
-/** Query parameters used to hand a visitor's identity across an origin boundary. */
-export const HANDOFF_PARAMS = {
-  visitorId: "_rt_vid",
-  experimentId: "_rt_e",
-  /** The variant id the visitor was sent to. Never present for control — control never
-   * redirects, so it never needs to hand its arm across an origin boundary. */
-  variant: "_rt_v",
-} as const;
+export type DeviceKind = "desktop" | "tablet" | "mobile";
 
-/** One redirect target within an experiment. */
-export interface ExperimentVariantConfig {
-  id: string;
-  url: string;
-  /** This arm's share of the included traffic, relative to `controlWeight` and the other
-   * variants' weights. `0` parks the arm — it receives no new visitors. */
+export interface ConditionConfig {
+  field: "query" | "utm_source" | "utm_medium" | "utm_campaign" | "referrer";
+  /** Parameter name, for `field: "query"`. */
+  key: string;
+  op: "equals" | "not" | "contains" | "exists";
+  value: string;
+}
+
+/**
+ * Who and where an experiment runs, as evaluated in the browser.
+ *
+ * Location is not here: countries are resolved by the config endpoint from the request's geo
+ * headers, which the browser cannot know — an experiment the visitor's country fails is simply
+ * left out of the response.
+ */
+export interface TargetingConfig {
+  match: PageMatchMode;
+  pattern: string;
+  audience: "all" | "new" | "returning";
+  devices: DeviceKind[];
+  logic: "all" | "any";
+  conditions: ConditionConfig[];
+}
+
+/** One element change on an A/B arm. */
+export interface ChangeConfig {
+  selector: string;
+  prop: "text" | "bg" | "image";
+  value: string;
+}
+
+/** One arm. Position 0 is control (`variantId: null`). */
+export interface ArmConfig {
+  position: number;
+  variantId: string | null;
+  /** Relative share of included traffic. `0` parks the arm. */
   weight: number;
+  /** Redirect tests: where this arm's visitors are sent (control's is its own page). */
+  url?: string;
+  /** A/B tests: what to change on the page. Empty for control. */
+  changes?: ChangeConfig[];
 }
 
-/** A single active experiment as published to the browser. */
-export interface ExperimentConfig {
+/** A running experiment. */
+export interface LiveExperimentConfig {
   id: string;
-  control: { url: string; match: UrlMatchType };
-  /** Control's share of the included traffic, relative to each variant's `weight`. */
-  controlWeight: number;
-  /** One or more redirect targets. */
-  variants: ExperimentVariantConfig[];
-  goal: { url: string; match: UrlMatchType };
-  /**
-   * Percentage of visitors on the control page entered into this experiment at all, 1–100.
-   * Checked before the arm is drawn: a visitor excluded here is never assigned one. Kept
-   * separate from the weights, which only decide *which* arm an included visitor lands on.
-   */
-  trafficAllocation: number;
+  type: "redirect" | "ab";
+  locked?: false;
+  targeting: TargetingConfig;
+  /** Percentage of targeted visitors entered at all, 1–100. */
+  coverage: number;
+  arms: ArmConfig[];
+  /** Set only on an experiment served for `?routely_preview=`; never assigned or tracked. */
+  preview?: boolean;
 }
 
-/** Response of `GET /api/v1/config?siteId=…`. */
+/**
+ * A completed Split URL test that keeps sending its traffic to the winner. The SDK redirects
+ * to `target` without assigning or reporting anything — the experiment is over.
+ */
+export interface LockedExperimentConfig {
+  id: string;
+  type: "redirect";
+  locked: true;
+  targeting: TargetingConfig;
+  target: string;
+}
+
+export type ExperimentConfig = LiveExperimentConfig | LockedExperimentConfig;
+
+/** Response of `GET /api/v1/config?siteId=…&v=4`. */
 export interface ConfigResponse {
   v: typeof SDK_PROTOCOL_VERSION;
   siteId: string;
@@ -77,12 +123,34 @@ export interface ConfigResponse {
   ttl: number;
 }
 
-/** A single event in an ingestion batch. */
-export interface TrackedEvent {
+/**
+ * Kinds of event the SDK reports.
+ *
+ * The first four are experiment-scoped and are also the values of the `EventType` enum in the
+ * Prisma schema, stored verbatim. `page` and `track` are site-level: they are matched against
+ * the project's metrics and the visitor's goals by the server, and are not stored as `Event`
+ * rows themselves. A v4 bundle never sends `conversion`.
+ */
+export type ExperimentEventType = "page_view" | "assignment" | "time_on_page" | "conversion";
+export type EventType = ExperimentEventType | "page" | "track";
+
+/** Query parameters used to hand a visitor's identity across an origin boundary. */
+export const HANDOFF_PARAMS = {
+  visitorId: "_rt_vid",
+  experimentId: "_rt_e",
+  /** The variant id the visitor was sent to. Never present for control. */
+  variant: "_rt_v",
+} as const;
+
+/** `?routely_preview=<experimentId>:<position>` forces an arm, applies it, and reports nothing. */
+export const PREVIEW_PARAM = "routely_preview";
+
+/** An experiment-scoped event. */
+export interface ExperimentEvent {
+  type: ExperimentEventType;
   experimentId: string;
   /** The variant the visitor is in, or `null` for control. */
   variantId: string | null;
-  type: EventType;
   url: string;
   /** Accumulated foreground time in milliseconds. Only present on `time_on_page`. */
   durationMs?: number;
@@ -90,10 +158,47 @@ export interface TrackedEvent {
   ts: number;
 }
 
+/** A page view on any page of the site. */
+export interface PageEvent {
+  type: "page";
+  url: string;
+  ts: number;
+}
+
+/** A custom event: `routely.track(key)`. */
+export interface TrackEvent {
+  type: "track";
+  key: string;
+  url: string;
+  ts: number;
+}
+
+export type TrackedEvent = ExperimentEvent | PageEvent | TrackEvent;
+
 /** Body of `POST /api/v1/events`. */
 export interface EventBatch {
   v: typeof SDK_PROTOCOL_VERSION;
   siteId: string;
   visitorId: string;
   events: TrackedEvent[];
+}
+
+// ---------------------------------------------------------------------------
+// Protocol v3 — still served and accepted for bundles cached before v4 shipped.
+// ---------------------------------------------------------------------------
+
+export interface LegacyExperimentConfig {
+  id: string;
+  control: { url: string; match: UrlMatchType };
+  controlWeight: number;
+  variants: { id: string; url: string; weight: number }[];
+  goal: { url: string; match: UrlMatchType };
+  trafficAllocation: number;
+}
+
+export interface LegacyConfigResponse {
+  v: typeof LEGACY_PROTOCOL_VERSION;
+  siteId: string;
+  experiments: LegacyExperimentConfig[];
+  ttl: number;
 }

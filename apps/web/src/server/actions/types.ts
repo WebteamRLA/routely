@@ -29,3 +29,31 @@ export async function runAction<T>(
     };
   }
 }
+
+/**
+ * Result of the RPC-style Server Actions the new UI calls directly (not through a `<form>`).
+ * FormState-compatible — `status`, `message` and `fieldErrors` mean the same — plus `data` on
+ * success, so a component can use it with `useActionState` or `await` it in a transition.
+ *
+ * Field-error keys are the input names; for experiment drafts they are `step.field`
+ * (`basics.url`, `variants.v1`, `goal.conv`, …).
+ */
+export type ActionResult<T = null> =
+  | { status: "success"; data: T; message?: string }
+  | { status: "error"; message: string; fieldErrors?: Record<string, string[]> };
+
+/** Runs a service call and wraps its outcome as an `ActionResult`. */
+export async function runResult<T>(
+  operation: () => Promise<T>,
+  message?: string,
+): Promise<ActionResult<T>> {
+  const result = await runAction(operation);
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.state.message ?? "Something went wrong. Please try again.",
+      ...(result.state.fieldErrors ? { fieldErrors: result.state.fieldErrors } : {}),
+    };
+  }
+  return { status: "success", data: result.data, ...(message ? { message } : {}) };
+}
