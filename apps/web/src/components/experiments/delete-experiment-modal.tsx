@@ -25,6 +25,7 @@ export function DeleteExperimentModal({
       confirmLabel={pending ? "Deleting…" : "Delete"}
       onConfirm={onConfirm}
       tone="danger"
+      titleWeight={600}
       pending={pending}
     />
   );

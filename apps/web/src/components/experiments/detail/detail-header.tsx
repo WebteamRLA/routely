@@ -60,7 +60,7 @@ export function DetailHeader({
         <div className="min-w-0 flex-[1_1_420px]">
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill status={displayStatus} />
-            <span className="rounded-md border border-input px-[7px] py-0.5 text-xs font-bold text-ink-2">
+            <span className="rounded-md border border-input px-[7px] py-0.5 text-[12px] font-bold text-ink-2">
               {TYPE_LABEL[type]}
             </span>
             <span className="text-[12.5px] text-ink-3">{timing}</span>

@@ -8,17 +8,23 @@ import type { ArmDraft, Change, EditorElement } from "@/lib/domain";
 import {
   CTA_COLORS,
   DEFAULT_SELECTORS,
+  LIVE_TIMEOUT_MS,
   PAGE,
   changeCount,
   changeLabel,
+  editorHint,
+  liveFrameUrl,
+  liveHost,
   pageVals,
   removeChange,
   resetElement,
   selectorFor,
   setElementSelector,
   upsertChange,
+  type EditorSource,
+  type LiveState,
 } from "@/lib/editor";
-import { ArmSwatch, BrowserBar, FieldError, Segmented } from "@/components/rl";
+import { ArmSwatch, BrowserBar, FieldError, Segmented, Spinner } from "@/components/rl";
 import { cn } from "@/lib/utils";
 
 import { MockHero, MockSiteHeader, siteBrand } from "./mock-page";
@@ -57,11 +63,14 @@ type Mode = "edit" | "preview";
 type Device = "desktop" | "mobile";
 
 /**
- * The visual editor (DESIGN.md 3.4, L1865–1922): full-screen, arm tabs, Edit/Preview,
- * Desktop/Mobile, the mock page with element outlines, and the editing panel.
+ * The visual editor (design v2, markup L1834–1922): full-screen, arm tabs, a source toggle
+ * (Live page | Edit elements), Edit/Preview (snapshot only), Desktop/Mobile, and the panel.
  *
- * The canvas is a representative page, not the customer's live page; each change also carries
- * the CSS selector the SDK applies it to on the real site, editable per element here.
+ * "Live page" frames the real page URL so the customer can check it. It is a view only: nothing
+ * is injected into the frame, and a page that refuses to be embedded is only detected by the
+ * load timeout (a blocked frame still fires `load` in some browsers, showing their own error
+ * page). "Edit elements" is the representative snapshot where changes are made; each change
+ * carries the CSS selector the SDK applies it to on the real site, editable per element here.
  */
 export function VisualEditor({
   open,
@@ -76,6 +85,10 @@ export function VisualEditor({
   const [sel, setSel] = useState<EditorElement | null>(null);
   const [mode, setMode] = useState<Mode>(initialArm === 0 ? "preview" : "edit");
   const [device, setDevice] = useState<Device>("desktop");
+  const [source, setSource] = useState<EditorSource>("live");
+  const [live, setLive] = useState<LiveState>("loading");
+  /** Bumped to remount the live frame (retry, re-entering the live view). */
+  const [frameKey, setFrameKey] = useState(0);
   const [prevOpen, setPrevOpen] = useState(open);
   /** Selector typed for an element that has no change yet, per arm. */
   const [pending, setPending] = useState<Record<string, string>>({});
@@ -89,13 +102,21 @@ export function VisualEditor({
       setSel(null);
       setMode(initialArm === 0 ? "preview" : "edit");
       setDevice("desktop");
+      setSource("live");
+      setLive("loading");
+      setFrameKey((k) => k + 1);
     }
   }
+
+  const frameUrl = liveFrameUrl(url);
+  const liveState: LiveState = frameUrl ? live : "error";
+  const host = liveHost(url);
 
   const ei = Math.min(arm, Math.max(arms.length - 1, 0));
   const current = arms[ei];
   const isCtrl = ei === 0;
   const preview = mode === "preview" || isCtrl;
+  const isLive = source === "live";
   const changes = current?.changes ?? [];
 
   const close = () => {
@@ -104,6 +125,13 @@ export function VisualEditor({
       toast(`${current.name} saved · ${changeCount(changes.length)}`);
     }
   };
+
+  // A frame that never fires `load` (unreachable host, mixed content) is reported as an error.
+  useEffect(() => {
+    if (!open || source !== "live" || !frameUrl || live !== "loading") return;
+    const t = window.setTimeout(() => setLive("error"), LIVE_TIMEOUT_MS);
+    return () => window.clearTimeout(t);
+  }, [open, source, frameUrl, live, frameKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -122,7 +150,7 @@ export function VisualEditor({
   if (!open || typeof document === "undefined" || !current) return null;
 
   const vals = pageVals(changes);
-  const P = sel && !preview ? PAGE[sel] : null;
+  const P = sel && !preview && !isLive ? PAGE[sel] : null;
   const pendingKey = (el: EditorElement) => `${ei}:${el}`;
   const selectorOf = (el: EditorElement) =>
     changes.some((c) => c.el === el)
@@ -146,11 +174,33 @@ export function VisualEditor({
     setMode(i === 0 ? "preview" : "edit");
   };
 
-  const hint = isCtrl
-    ? "Control is the original page and can’t be edited. Switch to a variant above."
-    : preview
-      ? `Preview: this is exactly what visitors in ${current.name} will see.`
-      : "Click any outlined element to edit it. Orange outlines are already changed.";
+  /** Back to the live view: a fresh frame, so its state is that frame's. */
+  const showLive = () => {
+    if (isLive) return;
+    setSource("live");
+    setSel(null);
+    setLive("loading");
+    setFrameKey((k) => k + 1);
+  };
+  const showSnapshot = () => {
+    if (!isLive) return;
+    setSource("snap");
+    setSel(null);
+    setMode(isCtrl ? "preview" : "edit");
+  };
+  const retryLive = () => {
+    setLive("loading");
+    setFrameKey((k) => k + 1);
+  };
+
+  const hint = editorHint({
+    source,
+    live: liveState,
+    host,
+    armName: current.name,
+    isControl: isCtrl,
+    preview,
+  });
 
   const sid = P ? sel! : null;
   const selector = sid ? selectorOf(sid) : "";
@@ -198,19 +248,32 @@ export function VisualEditor({
         <div className="flex-1" />
         <Segmented
           variant="dark"
-          ariaLabel="Mode"
+          ariaLabel="Canvas"
           className="w-auto"
-          disabled={isCtrl}
           options={[
-            { value: "edit", label: "Edit" },
-            { value: "preview", label: "Preview" },
+            { value: "live", label: "Live page" },
+            { value: "snap", label: "Edit elements" },
           ]}
-          value={preview ? "preview" : "edit"}
-          onChange={(k) => {
-            setMode(k);
-            setSel(null);
-          }}
+          value={source}
+          onChange={(k) => (k === "live" ? showLive() : showSnapshot())}
         />
+        {!isLive ? (
+          <Segmented
+            variant="dark"
+            ariaLabel="Mode"
+            className="w-auto"
+            disabled={isCtrl}
+            options={[
+              { value: "edit", label: "Edit" },
+              { value: "preview", label: "Preview" },
+            ]}
+            value={preview ? "preview" : "edit"}
+            onChange={(k) => {
+              setMode(k);
+              setSel(null);
+            }}
+          />
+        ) : null}
         <Segmented
           variant="dark"
           ariaLabel="Device"
@@ -244,22 +307,97 @@ export function VisualEditor({
             )}
           >
             <BrowserBar url={url || "https://example.com/product"} />
-            <MockSiteHeader brand={siteBrand(projectName)} />
-            <MockHero
-              vals={vals}
-              pageUrl={url}
-              layout="editor"
-              mobile={device === "mobile"}
-              interactive={
-                preview
-                  ? undefined
-                  : {
-                      selected: sel,
-                      changed: (el) => changes.some((c) => c.el === el),
-                      onSelect: (el) => setSel(el),
-                    }
-              }
-            />
+            {isLive ? (
+              <div
+                className="relative bg-white"
+                style={{ height: device === "mobile" ? 700 : "min(70vh, 720px)" }}
+              >
+                {frameUrl && liveState !== "error" ? (
+                  <iframe
+                    key={`${frameKey}:${frameUrl}`}
+                    src={frameUrl}
+                    title="Live page preview"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
+                    onLoad={() => setLive((s) => (s === "loading" ? "ok" : s))}
+                    className="block size-full border-0"
+                  />
+                ) : null}
+                {liveState === "loading" ? (
+                  <div
+                    role="status"
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white"
+                  >
+                    <Spinner
+                      size={28}
+                      thickness={3}
+                      className="animate-[rl-spin_0.8s_linear_infinite]"
+                    />
+                    <div className="font-bold">Loading {host}…</div>
+                    <div className="text-[12.5px] text-ink-3">
+                      Fetching the live page for the editor.
+                    </div>
+                  </div>
+                ) : null}
+                {liveState === "error" ? (
+                  <div
+                    role="alert"
+                    className="absolute inset-0 flex flex-col items-center justify-center gap-2.5 bg-white p-6 text-center"
+                  >
+                    <span
+                      aria-hidden
+                      className="flex size-9 items-center justify-center rounded-full bg-danger-bg font-black text-danger-text"
+                    >
+                      !
+                    </span>
+                    <div className="font-heading text-base font-bold">
+                      {frameUrl ? `Couldn’t load ${host}` : "No page URL yet"}
+                    </div>
+                    <div className="max-w-[440px] text-[13px] leading-normal text-ink-3">
+                      {frameUrl
+                        ? "The page didn’t respond in time or blocks being embedded (X-Frame-Options / CSP). Check the URL and retry, or edit the page snapshot instead."
+                        : "Enter a full page URL (https://…) in Setup, then open the editor again."}
+                    </div>
+                    <div className="mt-1 flex flex-wrap justify-center gap-2">
+                      {frameUrl ? (
+                        <button
+                          type="button"
+                          onClick={retryLive}
+                          className="h-9 cursor-pointer rounded-md border border-input bg-white px-3.5 font-bold text-foreground hover:bg-muted"
+                        >
+                          Retry
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={showSnapshot}
+                        className="h-9 cursor-pointer rounded-md border-0 bg-brand px-3.5 font-extrabold text-white hover:bg-brand-hover"
+                      >
+                        Edit snapshot instead
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <>
+                <MockSiteHeader brand={siteBrand(projectName)} />
+                <MockHero
+                  vals={vals}
+                  pageUrl={url}
+                  layout="editor"
+                  mobile={device === "mobile"}
+                  interactive={
+                    preview
+                      ? undefined
+                      : {
+                          selected: sel,
+                          changed: (el) => changes.some((c) => c.el === el),
+                          onSelect: (el) => setSel(el),
+                        }
+                  }
+                />
+              </>
+            )}
           </div>
         </div>
 
@@ -272,13 +410,38 @@ export function VisualEditor({
             </span>
           </div>
 
+          {isLive ? (
+            <div className="flex flex-col gap-2.5 border-b border-divider bg-[#FAFBFF] p-[18px]">
+              <div className="text-[13.5px] leading-[1.55] text-ink-2">
+                Live view of <b>{host}</b>. Use it to check the real page; switch to{" "}
+                <b>Edit elements</b> to change text, buttons and images for this variant.
+              </div>
+              <button
+                type="button"
+                onClick={showSnapshot}
+                className="h-[34px] cursor-pointer self-start rounded-md border-0 bg-brand px-3.5 text-[13px] font-extrabold text-white hover:bg-brand-hover"
+              >
+                Edit elements →
+              </button>
+              {frameUrl ? (
+                <a
+                  href={frameUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="self-start text-[12.5px] font-bold"
+                >
+                  Open page in a new tab ↗
+                </a>
+              ) : null}
+            </div>
+          ) : null}
           {isCtrl ? (
             <div className="p-[18px] text-[13.5px] leading-[1.55] text-ink-2">
               You’re viewing Control: the live page exactly as it is today. Routely never changes
               it. Select a variant tab to make edits.
             </div>
           ) : null}
-          {!isCtrl && !preview && !P ? (
+          {!isCtrl && !preview && !isLive && !P ? (
             <div className="p-[18px] text-[13.5px] leading-[1.55] text-ink-2">
               Select an element on the page to change its text, image or button style. Supported:
               headings, paragraphs, buttons, images.
@@ -419,6 +582,7 @@ export function VisualEditor({
                     type="button"
                     onClick={() => {
                       if (c.el) {
+                        setSource("snap");
                         setMode("edit");
                         setSel(c.el);
                       }

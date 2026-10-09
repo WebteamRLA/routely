@@ -1,21 +1,29 @@
 "use client";
 
-import { FieldError, Section, TextArea, TextInput } from "@/components/rl";
+import { FieldError, Section, TextInput } from "@/components/rl";
 
 import type { StepProps, UrlCheckEntry } from "./types";
 import { StepHeading, UrlCheckLine } from "./ui";
+import { AbVariantRows, SplitVariantRows } from "./step-variants";
 
-/** Step 2 — Setup (design L841–864): name, control/page URL with a real check on blur, hypothesis. */
-export function StepSetup({
-  draft,
-  update,
-  err,
-  urlCheck,
-  onCheckUrl,
-}: StepProps & {
+export interface SetupProps extends StepProps {
   urlCheck: (url: string) => UrlCheckEntry | undefined;
   onCheckUrl: (url: string) => void;
-}) {
+  onRemoveArm: (i: number) => void;
+  /** Opens the visual editor on an arm (0 = control, in preview). */
+  onOpenEditor: (arm: number) => void;
+  /** Whether the project's tracking snippet is verified — the visual editor needs it. */
+  installed: boolean;
+}
+
+/**
+ * Step 2 — Setup (design v2, L434–500): name and the control/page URL with a real check on blur,
+ * then the variants in the same card — Split URL per-arm URL rows, or A/B rows with each
+ * variant's changes and the visual editor. Design v2 merged the old Variants step in here and
+ * dropped the hypothesis field.
+ */
+export function StepSetup(props: SetupProps) {
+  const { draft, update, err, urlCheck, onCheckUrl } = props;
   const R = draft.type === "redirect";
   const errName = err("basics", "name");
   const errUrl = err("basics", "url");
@@ -60,24 +68,7 @@ export function StepSetup({
           <FieldError>{errUrl}</FieldError>
           {!errUrl ? <UrlCheckLine entry={urlCheck(draft.url)} url={draft.url} /> : null}
         </label>
-        <label className="flex flex-col gap-1.5">
-          <span className="text-[13px] font-extrabold">
-            Hypothesis <span className="font-medium text-ink-3">· optional</span>
-          </span>
-          <TextArea
-            name="hypothesis"
-            rows={3}
-            value={draft.hypothesis}
-            placeholder="If we … then … because …"
-            onChange={(e) => {
-              const v = e.target.value;
-              update((d) => ({ ...d, hypothesis: v }));
-            }}
-          />
-          <span className="text-[12.5px] text-ink-3">
-            Shown on the results page so everyone remembers why this test exists.
-          </span>
-        </label>
+        {R ? <SplitVariantRows {...props} /> : <AbVariantRows {...props} />}
       </Section>
     </>
   );

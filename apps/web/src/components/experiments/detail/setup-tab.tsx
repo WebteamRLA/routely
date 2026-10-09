@@ -11,8 +11,8 @@ import { pathOf } from "@/lib/domain-normalize";
 import { changeCount, changeLabel } from "@/lib/editor";
 import { targetSummary } from "@/lib/targeting";
 import { totalWeight } from "@/lib/traffic";
-import { draftFromExperiment, validateDraft } from "@/lib/validate-draft";
-import type { ExperimentDetail, MetricRow } from "@/lib/view-models";
+import { draftFromExperiment, groupsOf, validateDraft } from "@/lib/validate-draft";
+import type { ExperimentDetail } from "@/lib/view-models";
 import { editLiveExperimentAction } from "@/server/actions/experiment.actions";
 
 import { type LiveEdit, editError, liveEditChanges, liveEditFrom } from "./live-edit";
@@ -22,16 +22,22 @@ function Label({ children }: { children: ReactNode }) {
   return <div className="text-xs font-extrabold tracking-[0.06em] text-ink-3">{children}</div>;
 }
 
-/** Draft-only "Setup progress" checklist: Setup, Variants, Traffic, Targeting, Goals. */
+/**
+ * Draft-only "Setup progress" checklist, one card per wizard step: Setup (which holds the
+ * variants since design v2), Traffic, Targeting, Goals. The prototype also lists "Review &
+ * launch", which has no fields and so always read "Complete"; it is left out.
+ */
 function SetupProgress({ detail }: { detail: ExperimentDetail }) {
   const errors = validateDraft(draftFromExperiment(detail.draftSource));
-  const steps = WIZARD_STEPS.slice(1, 6);
+  const steps = WIZARD_STEPS.filter(([k]) => k !== "type" && k !== "review");
   return (
     <Section className="flex flex-col gap-2.5 p-[18px]">
       <CardTitle>Setup progress</CardTitle>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2.5">
         {steps.map(([key, label]) => {
-          const first = Object.values(errors[key] ?? {})[0];
+          const first = groupsOf(key)
+            .flatMap((g) => Object.values(errors[g] ?? {}))
+            .at(0);
           return (
             <div key={key} className="flex gap-2.5 rounded-lg border border-divider p-2.5">
               <span
@@ -59,26 +65,23 @@ function SetupProgress({ detail }: { detail: ExperimentDetail }) {
 
 /**
  * The Setup tab (prototype L1544–1565): a summary of how the test is configured. Running and
- * paused experiments can edit name, hypothesis, split, coverage, secondary goals and counting
- * inline (service `editLive`); URLs, changes, targeting and the primary goal stay fixed.
+ * paused experiments can edit name, hypothesis, split, coverage and counting inline (service
+ * `editLive`); URLs, changes, targeting and the goal stay fixed.
  */
 export function SetupTab({
   projectId,
   detail,
-  metrics,
   children,
 }: {
   projectId: string;
   detail: ExperimentDetail;
-  /** Project metrics for the secondary-goal chips; only needed when the test is editable. */
-  metrics: MetricRow[] | null;
   children?: ReactNode;
 }) {
   const router = useRouter();
   const [edit, setEdit] = useState<LiveEdit | null>(null);
   const [errors, setErrors] = useState<Record<string, string[]> | undefined>();
   const [pending, startTransition] = useTransition();
-  const editable = (detail.status === "running" || detail.status === "paused") && !!metrics;
+  const editable = detail.status === "running" || detail.status === "paused";
   const update = (fn: (e: LiveEdit) => LiveEdit) => {
     setEdit((e) => (e ? fn(e) : e));
     setErrors(undefined); // a server error describes the values that were sent, not these
@@ -139,8 +142,8 @@ export function SetupTab({
   const err = (...keys: string[]) => editError(errors, ...keys);
   const fixedNote =
     detail.type === "redirect"
-      ? "URLs are fixed once an experiment has started — visitors are already bucketed. Targeting and the primary goal are fixed too."
-      : "Changes are fixed once an experiment has started — visitors are already bucketed. The page URL, targeting and the primary goal are fixed too.";
+      ? "URLs are fixed once an experiment has started — visitors are already bucketed. Targeting and the goal are fixed too."
+      : "Changes are fixed once an experiment has started — visitors are already bucketed. The page URL, targeting and the goal are fixed too.";
 
   return (
     <div className="flex flex-col gap-[18px]">
@@ -151,8 +154,7 @@ export function SetupTab({
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2.5">
             <span className="text-[13px] text-ink-3">
-              Name, traffic split, coverage, secondary goals and counting can change while the test
-              runs.
+              Name, traffic split, coverage and counting can change while the test runs.
             </span>
             <Button variant="outline" size="sm" onClick={() => setEdit(liveEditFrom(detail))}>
               Edit setup
@@ -226,18 +228,11 @@ export function SetupTab({
             <div className="mt-1 text-[13.5px] font-bold break-words">
               {goal ? `${goal.name} · ${goal.eventKey}` : "Not set"}
             </div>
-            {edit && metrics ? (
-              <GoalFields
-                edit={edit}
-                update={update}
-                metrics={metrics}
-                primaryMetricId={goal?.metricId ?? null}
-                error={err("goal.secondary", "secondary", "counting")}
-              />
+            {edit ? (
+              <GoalFields edit={edit} update={update} error={err("counting")} />
             ) : (
               <div className="text-[12.5px] text-ink-3">
-                {detail.counting === "unique" ? "Once per visitor" : "Every conversion"} ·
-                Secondary: {detail.secondaryGoals.map((g) => g.name).join(", ") || "None"}
+                {detail.counting === "unique" ? "Once per visitor" : "Every conversion"}
               </div>
             )}
           </div>

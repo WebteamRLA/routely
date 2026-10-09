@@ -10,6 +10,7 @@
  */
 
 import type { Change, ChangeProp, EditorElement } from "./domain";
+import { URL_RE, hostOf } from "./domain-normalize";
 
 export interface PageElement {
   label: string;
@@ -153,4 +154,57 @@ export function setElementSelector(
 /** "3 changes" / "1 change". */
 export function changeCount(n: number): string {
   return n + " change" + (n === 1 ? "" : "s");
+}
+
+/*
+ * The live view (design v2): the editor's "Live page" source frames the real page so the
+ * customer can check it, while edits still happen on the snapshot ("Edit elements"). A frame
+ * reports `load` but never whether the page inside refused to be embedded — so, as in the
+ * design, a load event counts as loaded and only a timeout counts as a failure.
+ */
+
+/** What the canvas shows: the framed live page, or the editable snapshot. */
+export type EditorSource = "live" | "snap";
+
+/** The live frame's state. */
+export type LiveState = "loading" | "ok" | "error";
+
+/** How long the live page may take to load before the editor shows the error state. */
+export const LIVE_TIMEOUT_MS = 9000;
+
+/**
+ * The address the live view may frame: the page URL, trimmed, when it is a full http(s) URL
+ * (the wizard's own URL rule); `null` otherwise, which the editor shows as "No page URL yet".
+ * Only http(s) ever reaches the frame's `src`.
+ */
+export function liveFrameUrl(url: string | null | undefined): string | null {
+  const u = (url ?? "").trim();
+  return URL_RE.test(u) ? u : null;
+}
+
+/** The page's host for the live view's copy, or "your page". */
+export function liveHost(url: string | null | undefined): string {
+  return hostOf((url ?? "").trim()) || "your page";
+}
+
+/** The line above the canvas (the design's `E.hint`). */
+export function editorHint(o: {
+  source: EditorSource;
+  /** The live frame's state; `error` whenever there is no frameable URL. */
+  live: LiveState;
+  host: string;
+  armName: string;
+  isControl: boolean;
+  preview: boolean;
+}): string {
+  if (o.source === "live") {
+    if (o.live === "ok") {
+      return `Live page loaded from ${o.host}. Switch to Edit elements to change it for ${o.armName}.`;
+    }
+    return o.live === "error" ? "The live page couldn’t be shown." : "Loading the live page…";
+  }
+  if (o.isControl)
+    return "Control is the original page and can’t be edited. Switch to a variant above.";
+  if (o.preview) return `Preview: this is exactly what visitors in ${o.armName} will see.`;
+  return "Click any outlined element to edit it. Orange outlines are already changed.";
 }

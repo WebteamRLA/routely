@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { Shimmer } from "@/components/rl";
 import { Button } from "@/components/ui/button";
 
-/** Loading: the KPI tiles, the Experiments filter and table, and the two analytics cards. */
+/** Loading (v2 `dLoading`): four 118px tiles and a 320px block, 8px radius. */
 export function DashboardSkeleton() {
   return (
     <>
@@ -14,15 +14,7 @@ export function DashboardSkeleton() {
           <Shimmer key={i} className="h-[118px]" />
         ))}
       </div>
-      <div className="flex flex-col gap-3">
-        <Shimmer className="h-6 w-40" />
-        <Shimmer className="h-9 w-[320px] max-w-full" />
-        <Shimmer className="h-[260px] rounded-xl" />
-      </div>
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,420px),1fr))] gap-4">
-        <Shimmer className="h-[360px] rounded-xl" />
-        <Shimmer className="h-[360px] rounded-xl" />
-      </div>
+      <Shimmer className="h-[320px]" />
     </>
   );
 }

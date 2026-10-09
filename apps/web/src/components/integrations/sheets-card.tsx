@@ -56,7 +56,7 @@ export function SheetsCard({
           </p>
         </div>
         {connection && !grantBroken ? (
-          <span className="rounded-[20px] bg-[#E6F5EE] px-2.5 py-1 text-xs font-extrabold text-success-text">
+          <span className="rounded-[20px] bg-[#E6F5EE] px-2.5 py-1 text-[12px] font-extrabold text-success-text">
             Connected
           </span>
         ) : null}
@@ -197,7 +197,7 @@ function ErrorBox({
 function InfoTile({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0 rounded-lg border border-divider p-3">
-      <div className="text-xs font-bold text-ink-3">{label}</div>
+      <div className="text-[12px] font-bold text-ink-3">{label}</div>
       <div className="mt-0.5 text-[13.5px] font-extrabold break-words">{children}</div>
     </div>
   );
@@ -243,7 +243,7 @@ function ConnectButton({
           variant={tone === "dark" ? "dark" : "destructive-outline"}
           className={cn(
             "font-extrabold",
-            tone === "danger" && "h-[34px] border-danger-text px-3 text-danger-text",
+            tone === "danger" ? "h-[34px] border-danger-text px-3 text-danger-text" : "px-4",
           )}
         >
           {label}
@@ -364,9 +364,9 @@ function PickDestination({
       {!picker ? (
         <p className="text-[12.5px] text-ink-3">
           Choosing an existing spreadsheet needs{" "}
-          <code className="font-mono text-xs">NEXT_PUBLIC_GOOGLE_API_KEY</code> and{" "}
-          <code className="font-mono text-xs">NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER</code>. Creating a
-          new one works without them.
+          <code className="font-mono text-[12px]">NEXT_PUBLIC_GOOGLE_API_KEY</code> and{" "}
+          <code className="font-mono text-[12px]">NEXT_PUBLIC_GOOGLE_PROJECT_NUMBER</code>. Creating
+          a new one works without them.
         </p>
       ) : null}
     </div>
@@ -483,6 +483,7 @@ function ConnectedActions({
         body="Routely stops updating this project’s spreadsheet. The spreadsheet and the rows already in it stay where they are."
         confirmLabel={stopping ? "Stopping…" : "Stop syncing"}
         tone="dark"
+        titleWeight={600}
         onConfirm={stop}
         pending={stopping}
       />
@@ -532,6 +533,7 @@ function DisconnectButton() {
         title="Disconnect Google Sheets?"
         body="Syncs stop for every project in your account. Rows already written to your spreadsheets stay where they are."
         confirmLabel={pending ? "Disconnecting…" : "Disconnect"}
+        titleWeight={600}
         onConfirm={confirm}
         pending={pending}
       />

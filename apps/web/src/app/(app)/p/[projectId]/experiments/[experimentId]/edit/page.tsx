@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { loadWizardContext, parseStep } from "@/components/wizard/data";
 import { WizardEntry } from "@/components/wizard/wizard-entry";
+import { WIZARD_STEPS } from "@/lib/domain";
 import { routes } from "@/lib/routes";
 import { draftFromExperiment } from "@/lib/validate-draft";
 import { requireUser } from "@/server/auth/session";
@@ -15,8 +16,8 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 /**
  * Edit wizard — drafts only. A launched experiment's setup is fixed, so anything else goes to
- * its detail page. Every step is reachable (the design's `editDraft`, maxStep 6); it opens on
- * `?step=` or Setup.
+ * its detail page. Every step is reachable (the design's `editDraft`, maxStep = the last step);
+ * it opens on `?step=` or Setup.
  */
 export default async function EditExperimentPage({
   params,
@@ -44,7 +45,12 @@ export default async function EditExperimentPage({
   return (
     <WizardEntry
       {...ctx}
-      start={{ mode: "edit", draft: draftFromExperiment(detail.draftSource), step, maxStep: 6 }}
+      start={{
+        mode: "edit",
+        draft: draftFromExperiment(detail.draftSource),
+        step,
+        maxStep: WIZARD_STEPS.length - 1,
+      }}
     />
   );
 }

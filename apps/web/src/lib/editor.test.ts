@@ -6,6 +6,9 @@ import {
   PAGE,
   changeCount,
   changeLabel,
+  editorHint,
+  liveFrameUrl,
+  liveHost,
   pageVals,
   removeChange,
   resetElement,
@@ -79,5 +82,49 @@ describe("change editing", () => {
     expect(c).toHaveLength(2);
     expect(changeCount(1)).toBe("1 change");
     expect(changeCount(3)).toBe("3 changes");
+  });
+});
+
+describe("live view", () => {
+  it("frames only a full http(s) URL, trimmed", () => {
+    expect(liveFrameUrl(" https://example.com/pricing ")).toBe("https://example.com/pricing");
+    expect(liveFrameUrl("http://shop.acme.co:8080/a?b=1")).toBe("http://shop.acme.co:8080/a?b=1");
+    expect(liveFrameUrl("")).toBeNull();
+    expect(liveFrameUrl(null)).toBeNull();
+    expect(liveFrameUrl("example.com")).toBeNull();
+    expect(liveFrameUrl("javascript:alert(1)")).toBeNull();
+    expect(liveFrameUrl("data:text/html,<b>x</b>")).toBeNull();
+    expect(liveFrameUrl("https://localhost/")).toBeNull();
+  });
+
+  it("names the host, or 'your page'", () => {
+    expect(liveHost("https://www.example.com:8443/x")).toBe("www.example.com:8443");
+    expect(liveHost("")).toBe("your page");
+    expect(liveHost("not a url")).toBe("your page");
+  });
+
+  it("words the hint as the design does", () => {
+    const base = {
+      host: "example.com",
+      armName: "Variant A",
+      isControl: false,
+      preview: false,
+    } as const;
+    expect(editorHint({ ...base, source: "live", live: "loading" })).toBe("Loading the live page…");
+    expect(editorHint({ ...base, source: "live", live: "ok" })).toBe(
+      "Live page loaded from example.com. Switch to Edit elements to change it for Variant A.",
+    );
+    expect(editorHint({ ...base, source: "live", live: "error" })).toBe(
+      "The live page couldn’t be shown.",
+    );
+    expect(editorHint({ ...base, source: "snap", live: "ok" })).toBe(
+      "Click any outlined element to edit it. Orange outlines are already changed.",
+    );
+    expect(editorHint({ ...base, source: "snap", live: "ok", preview: true })).toBe(
+      "Preview: this is exactly what visitors in Variant A will see.",
+    );
+    expect(
+      editorHint({ ...base, source: "snap", live: "ok", isControl: true, preview: true }),
+    ).toBe("Control is the original page and can’t be edited. Switch to a variant above.");
   });
 });

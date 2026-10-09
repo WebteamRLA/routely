@@ -138,19 +138,6 @@ export async function removeDomainAction(input: {
   return result;
 }
 
-export async function setInstallMethodAction(input: {
-  projectId: string;
-  method: InstallMethodKey;
-}): Promise<ActionResult> {
-  const user = await requireUser();
-  const result = await runResult(async () => {
-    await websiteService.setInstallMethod(user.id, input.projectId, input.method);
-    return null;
-  });
-  if (result.status === "success") revalidateProject(input.projectId);
-  return result;
-}
-
 // -------------------------------------------------------------------------------------------
 // Team — SERVICE SEAM. Member rows are stored and shown but grant NO access.
 // -------------------------------------------------------------------------------------------

@@ -1,95 +1,145 @@
 /**
- * The dashboard's view model: KPI strip, the Experiments table (with each row's needs-action
- * reason), the conversions breakdown and the 30-day visitor series — computed from real data
- * with `lib/stats` and `lib/verdict`, so the dashboard and the results page agree about the
- * same numbers.
+ * The dashboard ("Overview") view model, after the design's v2 `isDash` view: the header's
+ * tracking pill and summary line, the Experiments table (each row's needs-action reason and
+ * button), the conversions and visitors cards, the activity feed, the integrations list and the
+ * rows the Export button writes — computed from real data with `lib/stats` and `lib/verdict`, so
+ * the dashboard and the results page agree about the same numbers.
  *
- * Pure: no server imports. The page builds it and hands plain rows to the components.
+ * Pure: no server imports. The page builds it and hands plain strings to the client components.
  */
 import type { DisplayStatusKey, Threshold } from "@/lib/domain";
-import { fAgo, fN, fP, fS, minutesSince } from "@/lib/format";
+import { fAgo, fDate, fN, fP, fS, minutesSince } from "@/lib/format";
 import { routes } from "@/lib/routes";
-import { computeStats, type ExperimentStats } from "@/lib/stats";
-import { TYPE_LABEL, verdict, type Verdict } from "@/lib/verdict";
-import type { DailyPoint, DashboardData, ExperimentListItem } from "@/lib/view-models";
+import { computeStats, type ArmStat, type ExperimentStats } from "@/lib/stats";
+import { STATUS, TYPE_LABEL, verdict, type Verdict } from "@/lib/verdict";
+import type { DashboardData, ExperimentListItem } from "@/lib/view-models";
 
-export interface KpiView {
-  label: string;
-  value: string;
-  delta: string;
-  deltaColor: string;
-  sub: string;
-  href: string;
-}
+import type { ExportRow } from "./export-csv";
 
-/** Which tab of the Experiments section a row appears under. */
-export type ExperimentTab = "all" | "running" | "action";
+/** The Experiments section's tabs. */
+export type DashTab = "all" | "running" | "needs";
+
+/** A row's button: a link, or "Install" (opens the install modal). */
+export type RowAction = { label: string; href: string } | { label: string; install: true };
 
 /** One row of the dashboard's Experiments table. */
-export interface ExperimentRow {
+export interface OverviewRow {
   id: string;
   name: string;
-  /** Letter tile: initial and a colour stable for this experiment. */
+  /** Letter tile: A/B blue, Split URL coral. */
   initial: string;
-  tileColor: string;
-  status: DisplayStatusKey;
-  /** "Running · day 42", "Paused · 3h ago", "Draft · updated 2h ago". */
-  statusLine: string;
+  avBg: string;
+  avColor: string;
   typeLabel: string;
-  /** Why this experiment needs a decision, or null. */
-  needsAction: string | null;
-  /** Tone of the needs-action reason. */
-  actionTone: "good" | "warn" | "bad" | "neutral";
-  visitors: string;
-  variantsLabel: string;
-  /** Share of the listed experiments' assigned visitors, 0–1. */
-  share: number;
-  shareLabel: string;
-  conversionRate: string;
-  /** Verdict in a few words, or "no result yet". */
-  resultLabel: string;
-  resultColor: string;
-  /** The row button: "Review", "Continue" or "View". */
-  actionLabel: string;
-  actionHref: string;
-  href: string;
+  status: DisplayStatusKey;
+  statusLabel: string;
+  glyph: string;
+  glyphColor: string;
+  /** "day 18", "launched today", "2d ago", "edited 2h ago", "ended Oct 3". */
+  when: string;
   running: boolean;
+  /** Why this experiment needs a decision; false rows show "—" / "On track". */
+  needsAction: boolean;
+  na: string;
+  naSub: string;
+  naColor: string;
+  visitors: string;
+  variants: string;
+  /** Share of running + paused experiments' visitors, e.g. "76%". */
+  share: string;
+  /** Best variant's conversion rate, its lift vs control (or "no result yet"). */
+  cr: string;
+  crSub: string;
+  crSubColor: string;
+  liftShort: string;
+  action: RowAction;
+  /** Navy button when the row needs action, white outlined otherwise. */
+  primary: boolean;
+  href: string;
 }
 
-/** A running experiment's slice of the "Conversions by running experiment" chart. */
-export interface ConversionSlice {
+export interface ConversionBar {
   id: string;
   name: string;
-  color: string;
-  conversions: number;
+  conversions: string;
+  cr: string;
+  /** Bar width, e.g. "64%". */
+  width: string;
+  href: string;
 }
 
-export interface VisitorPoint {
-  /** Project-local day, YYYY-MM-DD. */
-  day: string;
-  visitors: number;
+export interface VisitorBar {
+  /** Bar height, e.g. "42%". */
+  height: string;
+  /** Day of month on every other bar, else "". */
+  label: string;
+  tip: string;
+  today: boolean;
+}
+
+export interface FeedItem {
+  id: string;
+  who: string;
+  initials: string;
+  avBg: string;
+  text: string;
+  experiment: string;
+  when: string;
+  href: string;
+}
+
+export interface IntegrationItem {
+  key: "snippet" | "gtm" | "sheets" | "cdn";
+  mark: string;
+  name: string;
+  desc: string;
+  bg: string;
+  fg: string;
+  status: { text: string; color: string } | null;
+  /** Null: opens the install modal. */
+  href: string | null;
 }
 
 export interface DashboardView {
-  title: string;
+  tracking: { live: boolean; label: string; sub: string };
+  /** "Last 14 days · 2 ready to call". */
   sub: string;
-  strip: KpiView[];
-  rows: ExperimentRow[];
-  counts: Record<ExperimentTab, number>;
-  conversions: ConversionSlice[];
-  visitors: VisitorPoint[];
+  counts: Record<DashTab, number>;
+  /** Every experiment, needs-action first, then running · paused · draft · completed. */
+  rows: OverviewRow[];
+  conversions: { total: string; sub: string; bars: ConversionBar[] };
+  visitors: {
+    total: string;
+    delta: string;
+    deltaColor: string;
+    avg: string;
+    bars: VisitorBar[];
+    has: boolean;
+  };
+  feed: FeedItem[];
+  integrations: IntegrationItem[];
+  exportRows: ExportRow[];
 }
 
-/** Tile colours: the arm palette plus navy, so tiles stay on brand. */
-const TILE_COLORS = ["#2B59F0", "#F0603F", "#11A08F", "#B7860B", "#0A1633", "#7C879C"];
-function tileColor(id: string): string {
-  let h = 0;
-  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return TILE_COLORS[h % TILE_COLORS.length]!;
+export interface DashboardContext {
+  projectId: string;
+  /** Primary domain. */
+  domain: string;
+  /** Snippet seen on a page, or tracking data has arrived (`ProjectSummary.installed`). */
+  installed: boolean;
+  threshold: Threshold;
+  /** Draft id → number of wizard steps with validation errors. */
+  draftIncomplete: Record<string, number>;
+  /** The signed-in user as activity rows record them (name, else email) — shown as "You". */
+  actorName: string;
+  now?: Date;
 }
 
 const GOOD = "#0F7A52";
 const BAD = "#B4361F";
+const MUTED = "#5B6579";
+/** Activity avatar colours (prototype `AV`). */
+const AV = ["#0A1633", "#2B59F0", "#F0603F", "#11A08F", "#B7860B"];
 
 /** Stats over an experiment's all-time per-arm totals (arms in position order). */
 export function statsOf(e: ExperimentListItem): ExperimentStats {
@@ -102,190 +152,290 @@ export function statsOf(e: ExperimentListItem): ExperimentStats {
   );
 }
 
-const sum = (points: DailyPoint[]) =>
-  points.reduce((t, p) => ({ v: t.v + p.v, c: t.c + p.c }), { v: 0, c: 0 });
-const change = (a: number, b: number) => (b ? (a - b) / b : 0);
-const arrow = (x: number) => `${x >= 0 ? "▲" : "▼"} ${Math.abs(x * 100).toFixed(1)}%`;
-const deltaColor = (x: number) => (x >= 0 ? GOOD : BAD);
+/** The variant with the highest conversion rate (prototype `b`), or null with no variants. */
+function bestVariant(st: ExperimentStats): ArmStat | null {
+  return st.arms
+    .slice(1)
+    .reduce<ArmStat | null>((best, a) => (!best || a.cr > best.cr ? a : best), null);
+}
 
-export function buildDashboard(
-  projectId: string,
-  data: DashboardData,
-  threshold: Threshold,
-  /** Draft id → number of wizard steps with validation errors. */
-  draftIncomplete: Record<string, number>,
-  now: Date = new Date(),
-): DashboardView {
-  const p = routes.project(projectId);
+/** Two-letter initials: "Marcus Lee" → "ML", "dev@routely.local" → "DR". */
+export function initialsOf(name: string): string {
+  return (
+    name
+      .split(/[\s@._-]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]!.toUpperCase())
+      .join("") || "?"
+  );
+}
+
+/** Project-local `YYYY-MM-DD` for an instant. */
+function dayKey(value: string | Date, timeZone: string): string {
+  return new Date(value).toLocaleDateString("en-CA", { timeZone });
+}
+
+interface Need {
+  na: string;
+  naSub: string;
+  color: string;
+  fix?: RowAction;
+}
+
+export function buildDashboard(data: DashboardData, ctx: DashboardContext): DashboardView {
+  const now = ctx.now ?? new Date();
+  const tz = data.timezone;
+  const p = routes.project(ctx.projectId);
+  const domain = ctx.domain || "your site";
+  const silent = new Map(data.silentMetrics.map((m) => [m.id, m]));
+
   const all = data.experiments.map((e) => {
     const st = statsOf(e);
-    return { e, st, vd: verdict(e.status, e.winnerPosition, st, threshold) as Verdict };
+    return { e, st, vd: verdict(e.status, e.winnerPosition, st, ctx.threshold) as Verdict };
   });
   const ready = all.filter((x) => x.e.status === "running" && x.vd.ready).length;
 
-  // Deltas: last 7 days vs the 7 before, inside the 14-day window (as the prototype).
-  const last7 = sum(data.daily.slice(-7));
-  const prev7 = sum(data.daily.slice(-14, -7));
-  const dv = change(last7.v, prev7.v);
-  const dcr = change(last7.v ? last7.c / last7.v : 0, prev7.v ? prev7.c / prev7.v : 0);
-  const wins = all.filter(
-    (x) => x.e.status !== "draft" && x.vd.kind === "win" && x.vd.leader && x.vd.leader.i > 0,
-  );
-  const avgLift = wins.length
-    ? wins.reduce((t, x) => t + (x.vd.leader?.lift ?? 0), 0) / wins.length
-    : 0;
-  const { v: tv, c: tc } = data.last14;
+  // Why a row needs a decision — the prototype's `need()`, in its order.
+  const need = ({ e, st, vd }: (typeof all)[number]): Need | null => {
+    if (e.status === "draft") {
+      const n = ctx.draftIncomplete[e.id] ?? 0;
+      return n
+        ? { na: "Setup incomplete", naSub: `${n} step${n > 1 ? "s" : ""} left`, color: "#4B5568" }
+        : { na: "Ready to launch", naSub: "Run QA and launch", color: "#1F3FB0" };
+    }
+    if (e.status === "paused")
+      return { na: "Paused", naSub: "Visitors see Control", color: "#94600A" };
+    if (e.status !== "running") return null;
+    if (!ctx.installed)
+      return {
+        na: "Tracking not installed",
+        naSub: "No data can be collected",
+        color: BAD,
+        fix: { label: "Install", install: true },
+      };
+    const metric = e.goal?.metricId ? silent.get(e.goal.metricId) : undefined;
+    if (metric)
+      return {
+        na: "Goal never fired",
+        naSub: `${metric.key} not received`,
+        color: BAD,
+        fix: { label: "Fix goal", href: p.metrics("gtm", { metric: metric.id }) },
+      };
+    if (!st.v) return { na: "No traffic", naSub: "Check targeting", color: "#94600A" };
+    if (vd.ready)
+      return {
+        na: "Ready to call",
+        naSub: vd.kind === "control" ? "Control is ahead" : "Winner found",
+        color: GOOD,
+      };
+    return null;
+  };
 
-  const strip: KpiView[] = [
-    {
-      label: "Running now",
-      value: String(data.runningCount),
-      delta: "",
-      deltaColor: "#0F1B35",
-      sub: `${ready} ready to call`,
-      href: p.experiments({ status: "running" }),
-    },
-    {
-      label: "Visitors · 14d",
-      value: fN(tv),
-      delta: arrow(dv),
-      deltaColor: deltaColor(dv),
-      sub: "vs last week",
-      href: p.experiments({ sort: "visitors" }),
-    },
-    {
-      label: "Conv. rate · 14d",
-      value: tv ? fP(tc / tv, 2) : "—",
-      delta: arrow(dcr),
-      deltaColor: deltaColor(dcr),
-      sub: "vs last week",
-      href: p.experiments({ sort: "cr" }),
-    },
-    {
-      label: "Winners",
-      value: String(wins.length),
-      delta: wins.length ? fS(avgLift) : "",
-      deltaColor: GOOD,
-      sub: wins.length ? "average lift" : "none significant yet",
-      href: p.experiments({ status: "completed" }),
-    },
-  ];
-
-  // The table lists everything not yet finished: running, then paused, then drafts.
-  const order: Record<string, number> = { running: 0, paused: 1, draft: 2 };
-  const listed = all
-    .filter((x) => x.e.status !== "completed")
+  const rank: Record<string, number> = { running: 0, paused: 1, draft: 2, completed: 3 };
+  const enriched = all
+    .map((x) => ({ ...x, n: need(x) }))
     .sort(
       (a, b) =>
-        order[a.e.status]! - order[b.e.status]! ||
-        b.e.visitors - a.e.visitors ||
+        Number(!!b.n) - Number(!!a.n) ||
+        rank[a.e.status]! - rank[b.e.status]! ||
         b.e.updatedAt.localeCompare(a.e.updatedAt),
     );
-  const listedVisitors = listed.reduce((t, x) => t + x.st.v, 0);
-  const silent = new Set(data.silentMetrics.map((m) => m.id));
+  const liveVisitors = all
+    .filter((x) => x.e.status === "running" || x.e.status === "paused")
+    .reduce((t, x) => t + x.st.v, 0);
 
-  const rows: ExperimentRow[] = listed.map(({ e, st, vd }) => {
+  const rows: OverviewRow[] = enriched.map(({ e, st, n }) => {
     const has = st.v > 0;
-    const best = st.arms
-      .slice(1)
-      .reduce<(typeof st.arms)[number] | null>((m, a) => (!m || a.cr > m.cr ? a : m), null);
-    const variants = e.arms.length - 1;
+    const best = bestVariant(st);
+    const S = STATUS[e.displayStatus];
     const ago = fAgo(minutesSince(e.updatedAt, now)).toLowerCase();
-
-    let needsAction: string | null = null;
-    let actionTone: ExperimentRow["actionTone"] = "neutral";
-    let actionLabel = "View";
-    let actionHref = p.experiment(e.id);
-    if (e.status === "running" && vd.ready) {
-      needsAction = vd.kind === "control" ? "Control is winning" : "Ready to call";
-      actionTone = "good";
-      actionLabel = "Review";
-    } else if (e.status === "running" && e.goal?.metricId && silent.has(e.goal.metricId)) {
-      needsAction = "Goal never received";
-      actionTone = "bad";
-      actionLabel = "Check tracking";
-      actionHref = p.metrics("gtm", { metric: e.goal.metricId });
-    } else if (e.status === "running" && !has) {
-      needsAction = "No traffic";
-      actionTone = "warn";
-      actionLabel = "Review";
-    } else if (e.status === "paused") {
-      needsAction = "Paused";
-      actionTone = "warn";
-      actionLabel = "Review";
-    } else if (e.status === "draft") {
-      const n = draftIncomplete[e.id] ?? 0;
-      needsAction = n ? `${n} setup step${n > 1 ? "s" : ""} left` : "Ready to launch";
-      actionTone = n ? "neutral" : "good";
-      actionLabel = "Continue";
-      actionHref = p.editExperiment(e.id);
-    }
-
-    const statusLine =
+    const when =
       e.status === "running"
-        ? `Running · ${e.daysRunning ? `day ${e.daysRunning}` : "launched today"}`
+        ? e.daysRunning
+          ? `day ${e.daysRunning}`
+          : "launched today"
         : e.status === "paused"
-          ? `Paused · ${ago}`
-          : `Draft · updated ${ago}`;
-
+          ? ago
+          : e.status === "draft"
+            ? `edited ${ago}`
+            : `ended ${fDate(e.stoppedAt ?? e.updatedAt, tz)}`;
+    const isAB = e.type === "ab";
+    const nv = e.arms.length - 1;
+    const href = e.status === "draft" ? p.editExperiment(e.id) : p.experiment(e.id);
+    const action: RowAction = n?.fix
+      ? n.fix
+      : {
+          label:
+            e.status === "draft" ? "Continue" : e.status === "completed" ? "Results" : "Review",
+          href,
+        };
+    const live = e.status === "running" || e.status === "paused";
     return {
       id: e.id,
       name: e.name,
       initial: e.name.trim().charAt(0).toUpperCase() || "?",
-      tileColor: tileColor(e.id),
-      status: e.displayStatus,
-      statusLine,
+      avBg: isAB ? "#E8EEFE" : "#FDEBE6",
+      avColor: isAB ? "#1F3FB0" : "#B4361F",
       typeLabel: TYPE_LABEL[e.type],
-      needsAction,
-      actionTone,
-      visitors: fN(st.v),
-      variantsLabel: `${variants} variant${variants === 1 ? "" : "s"}`,
-      share: listedVisitors ? st.v / listedVisitors : 0,
-      shareLabel: fP(listedVisitors ? st.v / listedVisitors : 0, 0),
-      conversionRate: has ? fP(st.c / st.v, 2) : "—",
-      resultLabel:
-        e.status === "draft"
-          ? "not launched"
-          : !has
-            ? "no result yet"
-            : vd.kind === "early" && best && best.prob != null
-              ? `${vd.short} · ${Math.round(best.prob * 100)}%`
-              : vd.short,
-      resultColor: !has
-        ? "#5B6579"
-        : vd.tone === "good"
-          ? GOOD
-          : vd.tone === "bad"
-            ? BAD
-            : "#4B5568",
-      actionLabel,
-      actionHref,
-      href: p.experiment(e.id),
+      status: e.displayStatus,
+      statusLabel: S.label,
+      glyph: S.glyph,
+      glyphColor: S.gc,
+      when,
       running: e.status === "running",
+      needsAction: !!n,
+      na: n ? n.na : "—",
+      naSub: n ? n.naSub : "On track",
+      naColor: n ? n.color : "#8A93A6",
+      visitors: has ? fN(st.v) : "0",
+      variants: `${nv} variant${nv === 1 ? "" : "s"}`,
+      share: liveVisitors && live ? `${Math.round((st.v / liveVisitors) * 100)}%` : "0%",
+      cr: has && best ? fP(best.cr, 2) : "—",
+      crSub: has && best ? `${fS(best.lift)} vs control` : "no result yet",
+      crSubColor: has && best ? (best.lift >= 0 ? GOOD : BAD) : MUTED,
+      liftShort: has && best ? fS(best.lift) : "",
+      action,
+      primary: !!n,
+      href,
     };
   });
 
-  const conversions: ConversionSlice[] = all
-    .filter((x) => x.e.status === "running")
-    .map((x) => ({ id: x.e.id, name: x.e.name, color: tileColor(x.e.id), conversions: x.st.c }))
-    .sort((a, b) => b.conversions - a.conversions);
+  // Conversions by running experiment: all-time primary-goal conversions, top five.
+  const runs = all
+    .filter((x) => x.e.status === "running" && x.st.v > 0)
+    .sort((a, b) => b.st.c - a.st.c);
+  const maxC = Math.max(1, ...runs.map((x) => x.st.c));
+  const sumC = runs.reduce((t, x) => t + x.st.c, 0);
+  const sumV = runs.reduce((t, x) => t + x.st.v, 0);
 
-  const nAction = rows.filter((r) => r.needsAction).length;
+  // Visitors over time: 14 project-local days; delta = last 7 vs the 7 before.
+  const v7 = data.daily.slice(-7).reduce((t, d) => t + d.v, 0);
+  const pv7 = data.daily.slice(-14, -7).reduce((t, d) => t + d.v, 0);
+  const dv = pv7 ? (v7 - pv7) / pv7 : 0;
+  const maxV = Math.max(1, ...data.daily.map((d) => d.v));
+  const sumDaily = data.daily.reduce((t, d) => t + d.v, 0);
+  const last = data.days.length - 1;
+
+  // Team activity.
+  const byId = new Map(data.experiments.map((e) => [e.id, e]));
+  const today = dayKey(now, tz);
+  const feed: FeedItem[] = data.activity.flatMap((a) => {
+    const e = byId.get(a.experimentId);
+    if (!e) return [];
+    const who = !a.actorName ? "Routely" : a.actorName === ctx.actorName ? "You" : a.actorName;
+    const ini = who === "You" ? initialsOf(ctx.actorName) : initialsOf(who);
+    return [
+      {
+        id: a.id,
+        who,
+        initials: ini,
+        avBg: AV[(ini.charCodeAt(0) + (ini.charCodeAt(1) || 0)) % AV.length]!,
+        text: a.text.replace(/^./, (c) => c.toLowerCase()),
+        experiment: e.name,
+        when: dayKey(a.createdAt, tz) === today ? "Today" : fDate(a.createdAt, tz),
+        href: e.status === "draft" ? p.editExperiment(e.id) : p.experiment(e.id),
+      },
+    ];
+  });
+
   return {
-    title: nAction
-      ? `${nAction}${nAction === 1 ? " experiment needs" : " experiments need"} attention.`
-      : "Everything is running to plan.",
-    sub: ready
-      ? `${ready} ready to call, the rest are still collecting data.`
-      : "No experiment is ready to call yet.",
-    strip,
-    rows,
+    tracking: ctx.installed
+      ? { live: true, label: "Tracking live", sub: domain }
+      : { live: false, label: "Script not seen", sub: `Install on ${domain}` },
+    sub: `Last 14 days · ${ready ? `${ready} ready to call` : "no experiment ready to call yet"}`,
     counts: {
-      all: rows.length,
-      running: rows.filter((r) => r.running).length,
-      action: nAction,
+      all: data.experiments.length,
+      running: all.filter((x) => x.e.status === "running").length,
+      needs: enriched.filter((x) => x.n).length,
     },
-    conversions,
-    visitors: data.days.map((day, i) => ({ day, visitors: data.daily[i]?.v ?? 0 })),
+    rows,
+    conversions: {
+      total: fN(sumC),
+      sub: runs.length
+        ? `${fP(sumV ? sumC / sumV : 0, 2)} conversion rate across ${runs.length} running experiment${runs.length > 1 ? "s" : ""}`
+        : "No running experiment has data yet",
+      bars: runs.slice(0, 5).map((x) => ({
+        id: x.e.id,
+        name: x.e.name,
+        conversions: fN(x.st.c),
+        cr: fP(x.st.c / x.st.v, 2),
+        width: `${Math.max(2, Math.round((x.st.c / maxC) * 100))}%`,
+        href: p.experiment(x.e.id),
+      })),
+    },
+    visitors: {
+      total: fN(data.uniqueVisitors),
+      delta: pv7 ? `${dv >= 0 ? "▲" : "▼"} ${Math.abs(dv * 100).toFixed(1)}%` : "",
+      deltaColor: dv >= 0 ? GOOD : BAD,
+      avg: fN(Math.round(sumDaily / Math.max(1, data.days.length))),
+      bars: data.days.map((day, i) => ({
+        height: `${Math.max(2, Math.round(((data.daily[i]?.v ?? 0) / maxV) * 100))}%`,
+        label: i % 2 === 1 ? String(Number(day.slice(8))) : "",
+        tip: `${fDate(`${day}T12:00:00Z`)} · ${fN(data.daily[i]?.v ?? 0)} visitors · ${fN(data.daily[i]?.c ?? 0)} conversions`,
+        today: i === last,
+      })),
+      has: sumDaily > 0,
+    },
+    feed,
+    integrations: [
+      {
+        key: "snippet",
+        mark: "RT",
+        name: "Routely snippet",
+        desc: ctx.installed ? `Installed on ${domain}` : "Install once per website",
+        bg: "#0A1633",
+        fg: "#FFFFFF",
+        status: ctx.installed
+          ? { text: "Live", color: GOOD }
+          : { text: "Not installed", color: BAD },
+        href: null,
+      },
+      {
+        key: "gtm",
+        mark: "GTM",
+        name: "Google Tag Manager",
+        desc: "Send conversion events from GTM",
+        bg: "#E8EEFE",
+        fg: "#1F3FB0",
+        status: null,
+        href: p.metrics("gtm"),
+      },
+      {
+        key: "sheets",
+        mark: "GS",
+        name: "Google Sheets",
+        desc: "Daily results export for reporting",
+        bg: "#EAF7F1",
+        fg: "#0B6B47",
+        status: data.sheetsConnected ? { text: "Connected", color: GOOD } : null,
+        href: p.integrations(),
+      },
+      {
+        // The CDN panel is a labelled service seam with placeholder figures, so no status here.
+        key: "cdn",
+        mark: "CDN",
+        name: "CDN delivery",
+        desc: "Edge caching for scripts & variants",
+        bg: "#FDF5E6",
+        fg: "#8A5A06",
+        status: null,
+        href: p.integrations("cdn"),
+      },
+    ],
+    exportRows: enriched.map(({ e, st, n }) => {
+      const best = bestVariant(st);
+      return {
+        name: e.name,
+        type: TYPE_LABEL[e.type],
+        status: STATUS[e.displayStatus].label,
+        visitors: st.v,
+        conversions: st.c,
+        conversionRate: st.v ? st.c / st.v : null,
+        bestVariantRate: st.v && best ? best.cr : null,
+        lift: st.v && best ? best.lift : null,
+        needsAction: n ? `${n.na} — ${n.naSub}` : "",
+      };
+    }),
   };
 }

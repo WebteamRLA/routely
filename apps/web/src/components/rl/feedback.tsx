@@ -129,7 +129,7 @@ export function Bullets({ items, className }: { items: ReactNode[]; className?: 
   return (
     <ul className={cn("m-0 flex list-none flex-col gap-2 p-0", className)}>
       {items.map((t, i) => (
-        <li key={i} className="flex gap-2.5 text-[13px] leading-normal text-ink-2">
+        <li key={i} className="flex gap-2.5 text-[13px] text-ink-2">
           <Diamond size={5} className="mt-[7px]" />
           <span>{t}</span>
         </li>
@@ -217,11 +217,11 @@ export function ErrorCard({
       )}
     >
       {eyebrow ? (
-        <div className="text-xs font-extrabold tracking-[0.08em] text-danger-text uppercase">
+        <div className="text-[12px] font-extrabold tracking-[0.08em] text-danger-text uppercase">
           {eyebrow}
         </div>
       ) : null}
-      <div className="font-heading text-lg font-semibold">{title}</div>
+      <div className="font-heading text-[18px] font-semibold">{title}</div>
       {body ? <div className="max-w-[560px] text-ink-3">{body}</div> : null}
       {action ? <div className="mt-1.5">{action}</div> : null}
     </div>
@@ -251,8 +251,8 @@ export function EmptyCard({
         <span className="h-[46px] w-[34px] rounded-md bg-brand" />
         <span className="h-[46px] w-[34px] rounded-md bg-coral" />
       </div>
-      <div className="mt-1.5 font-heading text-xl font-semibold">{title}</div>
-      {body ? <div className="max-w-[440px] leading-relaxed text-ink-3">{body}</div> : null}
+      <div className="mt-1.5 font-heading text-[20px] font-semibold">{title}</div>
+      {body ? <div className="max-w-[440px] leading-[1.55] text-ink-3">{body}</div> : null}
       {actions ? <div className="mt-2 flex flex-wrap justify-center gap-2.5">{actions}</div> : null}
     </div>
   );

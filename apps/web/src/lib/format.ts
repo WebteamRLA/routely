@@ -59,7 +59,9 @@ export function fP(x: number, dp = 1): string {
  * The minus is a true minus sign (U+2212), not a hyphen, as in the design.
  */
 export function fS(x: number, dp = 1): string {
-  return `${x >= 0 ? "+" : "−"}${Math.abs(x * 100).toFixed(dp)}%`;
+  const abs = Math.abs(x * 100).toFixed(dp);
+  // A loss that rounds to zero reads "+0.0%", never "−0.0%".
+  return `${x >= 0 || Number(abs) === 0 ? "+" : "−"}${abs}%`;
 }
 
 /** Minutes elapsed as "Just now" / "12m ago" / "3h ago" / "4d ago". */

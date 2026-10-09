@@ -14,11 +14,13 @@ import {
   WIZARD_STEPS,
   armName,
   defaultTargeting,
+  stepOfGroup,
   type ArmDraft,
   type DraftErrors,
   type ExperimentDraft,
   type ExperimentDraftSource,
   type ExperimentKind,
+  type WizardStep,
   type WizardStepKey,
 } from "./domain";
 import { targetingErrors, normalizeTargeting } from "./targeting";
@@ -29,12 +31,15 @@ import { evenSplit, totalWeight } from "./traffic";
 // ---------------------------------------------------------------------------
 
 /**
- * Every field error in the draft, grouped by wizard step then field key. Keys:
- * `basics.name|url`, `variants.v<i>`, `traffic.sum`, `targeting.pattern|devices|geo|k<i>|c<i>`,
- * `goal.conv|goal`. An empty object means the draft is launchable as far as the form knows.
+ * Every field error in the draft, grouped by field group then field key. Keys:
+ * `basics.name|url`, `variants.v<i>` (shown on the Setup step), `traffic.sum`,
+ * `targeting.pattern|devices|geo|k<i>|c<i>`, `goal.conv`. An empty object means the draft is
+ * launchable as far as the form knows.
  *
- * Goal rule: in `url` mode the conversion URL is required, must be a full URL, and may not be
- * the entry URL or a variant URL; in `event` mode a metric id must be chosen.
+ * Goal rule (design v2): every experiment, of either type, is judged on a conversion URL. It is
+ * required, must be a full URL, may not be the entry URL and, for a Split URL test, may not be a
+ * variant URL. A legacy draft whose goal is a metric (`event` mode) therefore needs one too — it
+ * can be saved as it is, but not launched.
  */
 export function validateDraft(d: ExperimentDraft): DraftErrors {
   const e: DraftErrors = {};
@@ -83,47 +88,72 @@ export function validateDraft(d: ExperimentDraft): DraftErrors {
   const te = targetingErrors(d.targeting);
   for (const [k, msg] of Object.entries(te)) add("targeting", k, msg);
 
-  if (d.goalMode === "url") {
-    const cu = (d.convUrl || "").trim();
-    if (!cu) add("goal", "conv", "Enter the conversion URL: the page that counts as a conversion.");
-    else if (!URL_RE.test(cu))
-      add("goal", "conv", "Use a full URL, e.g. https://example.com/thank-you");
-    else if (stripU(cu) === stripU(d.url)) {
-      add("goal", "conv", "The conversion URL can’t be the same as the entry URL.");
-    } else if (d.arms.slice(1).some((a) => stripU(a.url) === stripU(cu))) {
-      add("goal", "conv", "The conversion URL can’t be one of the variant URLs.");
-    }
-  } else if (!d.goal) {
-    add("goal", "goal", "Choose the primary goal this experiment is judged on.");
+  // Only a URL goal counts: a legacy metric goal reads as "no conversion URL yet".
+  const cu = d.goalMode === "url" ? (d.convUrl || "").trim() : "";
+  if (!cu) add("goal", "conv", "Enter the conversion URL: the page that counts as a conversion.");
+  else if (!URL_RE.test(cu))
+    add("goal", "conv", "Use a full URL, e.g. https://example.com/thank-you");
+  else if (stripU(cu) === stripU(d.url)) {
+    add("goal", "conv", "The conversion URL can’t be the same as the entry URL.");
+  } else if (d.type === "redirect" && d.arms.slice(1).some((a) => stripU(a.url) === stripU(cu))) {
+    add("goal", "conv", "The conversion URL can’t be one of the variant URLs.");
   }
 
   return e;
 }
 
-/** Index of a step in `WIZARD_STEPS` (0 = type … 6 = review). */
+/** Every field group, in the order the wizard shows them. */
+export const ERROR_GROUPS: readonly WizardStepKey[] = [
+  "basics",
+  "variants",
+  "traffic",
+  "targeting",
+  "goal",
+];
+
+/** The field groups a step shows: Setup shows the basics and the variants. */
+export function groupsOf(step: WizardStep): WizardStepKey[] {
+  return step === "basics" ? ["basics", "variants"] : [step];
+}
+
+/** Index in `WIZARD_STEPS` of the step that shows a group (0 = type … 5 = review). */
 export function stepIndex(key: WizardStepKey): number {
-  return WIZARD_STEPS.findIndex(([k]) => k === key);
+  const step = stepOfGroup(key);
+  return WIZARD_STEPS.findIndex(([k]) => k === step);
 }
 
-/** Display label of a step ("Setup", "Goals", …). */
+/** Display label of the step that shows a group ("Setup", "Goals", …). */
 export function stepLabel(key: WizardStepKey): string {
-  return WIZARD_STEPS.find(([k]) => k === key)?.[1] ?? key;
+  const step = stepOfGroup(key);
+  return WIZARD_STEPS.find(([k]) => k === step)?.[1] ?? step;
 }
 
-/** Whether there are errors at all, or on one step. */
-export function hasErrors(errors: DraftErrors, step?: WizardStepKey): boolean {
-  if (step) return Object.keys(errors[step] ?? {}).length > 0;
-  return WIZARD_STEPS.some(([k]) => Object.keys(errors[k] ?? {}).length > 0);
+/** Whether there are errors at all, or in one field group. */
+export function hasErrors(errors: DraftErrors, group?: WizardStepKey): boolean {
+  if (group) return Object.keys(errors[group] ?? {}).length > 0;
+  return ERROR_GROUPS.some((k) => Object.keys(errors[k] ?? {}).length > 0);
+}
+
+/** Whether any field group shown on a step has errors. */
+export function stepHasErrors(errors: DraftErrors, step: WizardStep): boolean {
+  return groupsOf(step).some((k) => hasErrors(errors, k));
 }
 
 /** The earliest step with an error, or null. */
-export function firstErrorStep(errors: DraftErrors): WizardStepKey | null {
-  return WIZARD_STEPS.find(([k]) => Object.keys(errors[k] ?? {}).length > 0)?.[0] ?? null;
+export function firstErrorStep(errors: DraftErrors): WizardStep | null {
+  const k = ERROR_GROUPS.find((g) => hasErrors(errors, g));
+  return k ? stepOfGroup(k) : null;
+}
+
+/** The steps that still have errors, in order — "N steps left" on a draft. */
+export function incompleteSteps(errors: DraftErrors): WizardStep[] {
+  return WIZARD_STEPS.map(([k]) => k).filter((k) => k !== "review" && stepHasErrors(errors, k));
 }
 
 export interface DraftErrorItem {
+  /** The field group (`variants` errors are shown on Setup). */
   step: WizardStepKey;
-  /** Step label, e.g. "Setup". */
+  /** Label of the step that shows it, e.g. "Setup". */
   stepLabel: string;
   stepIndex: number;
   key: string;
@@ -133,11 +163,11 @@ export interface DraftErrorItem {
 /** Errors flattened in step order — the review screen's "issues to fix" list. */
 export function errorList(errors: DraftErrors): DraftErrorItem[] {
   const out: DraftErrorItem[] = [];
-  WIZARD_STEPS.forEach(([k, label], i) => {
+  for (const k of ERROR_GROUPS) {
     for (const [key, msg] of Object.entries(errors[k] ?? {})) {
-      out.push({ step: k, stepLabel: label, stepIndex: i, key, msg });
+      out.push({ step: k, stepLabel: stepLabel(k), stepIndex: stepIndex(k), key, msg });
     }
-  });
+  }
   return out;
 }
 
@@ -145,7 +175,7 @@ export function errorList(errors: DraftErrors): DraftErrorItem[] {
 // Factories and transitions
 // ---------------------------------------------------------------------------
 
-/** A blank draft as the prototype starts one: Control + Variant A at 50/50. */
+/** A blank draft as the prototype starts one: Control + Variant A at 50/50, a URL goal. */
 export function newDraft(projectId: string, type: ExperimentKind): ExperimentDraft {
   return {
     id: null,
@@ -160,7 +190,7 @@ export function newDraft(projectId: string, type: ExperimentKind): ExperimentDra
     ],
     coverage: 100,
     targeting: defaultTargeting(),
-    goalMode: type === "redirect" ? "url" : "event",
+    goalMode: "url",
     goal: "",
     convUrl: "",
     convMatch: "exact",
@@ -170,12 +200,11 @@ export function newDraft(projectId: string, type: ExperimentKind): ExperimentDra
 }
 
 /**
- * Switches the experiment type, as the Type step's cards do: A/B always uses an event goal;
- * Split URL falls back to a URL goal when no metric is chosen.
+ * Switches the experiment type, as the Type step's cards do. Both types use the same URL goal
+ * since design v2, so the goal is left as it is.
  */
 export function setDraftType(d: ExperimentDraft, type: ExperimentKind): ExperimentDraft {
-  if (type === "ab") return { ...d, type, goalMode: "event" };
-  return { ...d, type, goalMode: d.goal ? d.goalMode : "url" };
+  return d.type === type ? d : { ...d, type };
 }
 
 /** Adds an arm (up to `MAX_ARMS`) and re-splits traffic evenly. Unchanged when full. */
@@ -234,7 +263,8 @@ export function draftFromExperiment(src: ExperimentDraftSource): ExperimentDraft
     weight: Number.isFinite(a.weight) ? a.weight : 0,
     changes: isAb && i > 0 ? (a.changes ?? []).map((c) => ({ ...c })) : [],
   }));
-  const goalMode = src.goalMetricId ? "event" : !isAb || src.conversionUrl ? "url" : "event";
+  // A metric goal is legacy (kept as stored); everything else is a URL goal, set or not.
+  const goalMode = src.goalMetricId ? "event" : "url";
   return {
     id: src.id,
     projectId: src.projectId,

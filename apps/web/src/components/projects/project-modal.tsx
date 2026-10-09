@@ -145,11 +145,11 @@ function ProjectModalBody({
         <div className="text-[11.5px] font-extrabold tracking-[0.12em] text-coral">
           {editing ? "EDIT PROJECT" : "NEW PROJECT"}
         </div>
-        <div className="mt-1 font-heading text-xl font-bold tracking-[-0.01em]">
+        <div className="mt-1 font-heading text-[20px] font-bold tracking-[-0.01em]">
           {editing ? "Project details" : "Add a website"}
         </div>
       </div>
-      <div className="text-[13.5px] leading-normal text-ink-2">
+      <div className="text-[13.5px] leading-[1.5] text-ink-2">
         {editing
           ? "Renaming doesn’t affect running experiments. Changing the website moves the primary domain; install the Routely snippet on the new domain before launching."
           : "Each project is one website with its own experiments, results, metrics and settings. You can switch between projects at any time."}

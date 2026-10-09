@@ -137,7 +137,11 @@ export const COUNTRIES: { code: string; name: string }[] = [
 // Goals and metrics
 // ---------------------------------------------------------------------------
 
-/** `url` = reaching a conversion URL (Split URL default); `event` = a project metric. */
+/**
+ * `url` = reaching a conversion URL; `event` = a project metric. The wizard creates URL goals
+ * only (design v2: every experiment, of either type, is judged on a conversion page). `event`
+ * remains for experiments and drafts made before that — they still load, display and run.
+ */
 export type GoalMode = "url" | "event";
 export type CountingKey = "unique" | "all";
 export type MetricKindKey = "event" | "page";
@@ -175,26 +179,41 @@ export interface ExperimentDraft {
   coverage: number;
   targeting: Targeting;
   goalMode: GoalMode;
-  /** Metric id when `goalMode` is `event`. */
+  /** Metric id when `goalMode` is `event` (legacy drafts only; the wizard no longer sets one). */
   goal: string;
   convUrl: string;
+  /** New drafts are always `exact` (design v2 removed the match select); legacy may be `starts`. */
   convMatch: "exact" | "starts";
+  /** Legacy: the wizard no longer offers secondary goals and saves none. */
   secondary: string[];
   counting: CountingKey;
 }
 
+/** The wizard's steps, in order. Design v2 merged the Variants step into Setup. */
 export const WIZARD_STEPS = [
   ["type", "Type"],
   ["basics", "Setup"],
-  ["variants", "Variants"],
   ["traffic", "Traffic"],
   ["targeting", "Targeting"],
   ["goal", "Goals"],
   ["review", "Review & launch"],
 ] as const;
-export type WizardStepKey = (typeof WIZARD_STEPS)[number][0];
+/** One step of the wizard. */
+export type WizardStep = (typeof WIZARD_STEPS)[number][0];
 
-/** Field errors keyed by step, then by field — the shape `validate()` returns. */
+/**
+ * A group of draft fields, as validation keys its errors (and the server keys its field errors,
+ * `variants.v1`): one per step, plus `variants` — the arms, edited on the Setup step since v2
+ * merged the Variants step into it.
+ */
+export type WizardStepKey = WizardStep | "variants";
+
+/** The step that shows a group's fields: `variants` is on Setup. */
+export function stepOfGroup(key: WizardStepKey): WizardStep {
+  return key === "variants" ? "basics" : key;
+}
+
+/** Field errors keyed by group, then by field — the shape `validate()` returns. */
 export type DraftErrors = Partial<Record<WizardStepKey, Record<string, string>>>;
 
 // ---------------------------------------------------------------------------

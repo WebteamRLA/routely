@@ -60,10 +60,13 @@ export function ProjectIconPreview({
           <div className="truncate text-[13.5px] font-extrabold">
             {name.trim() || "Untitled project"}
           </div>
-          <div className="truncate font-mono text-xs text-ink-3">
+          <div className="truncate font-mono text-[12px] text-ink-3">
             {okDomain ? dm : "no website yet"}
           </div>
-          <div className="mt-[3px] flex items-center gap-1.5 text-xs font-bold" style={{ color }}>
+          <div
+            className="mt-[3px] flex items-center gap-1.5 text-[12px] font-bold"
+            style={{ color }}
+          >
             <span className="size-1.5 shrink-0 rounded-full" style={{ background: color }} />
             {state === "loading" ? `Looking for a site icon on ${dm}…` : text}
           </div>

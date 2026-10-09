@@ -85,7 +85,10 @@ export function UnderlineTabs({
   );
 }
 
-/** Settings tabs: vertical list on desktop, horizontal scroller below 900px. */
+/**
+ * Settings tabs: 38px rows, 2px apart; the active one is a white bordered pill in 800, the rest
+ * grey 600. Vertical list on desktop, horizontal scroller below 900px.
+ */
 export function SideTabs({
   tabs,
   active,
@@ -96,7 +99,9 @@ export function SideTabs({
   className?: string;
 }) {
   return (
-    <nav className={cn("flex gap-1 overflow-x-auto nav:flex-col nav:overflow-visible", className)}>
+    <nav
+      className={cn("flex gap-0.5 overflow-x-auto nav:flex-col nav:overflow-visible", className)}
+    >
       {tabs.map((t) => {
         const on = t.key === active;
         return (
@@ -108,7 +113,7 @@ export function SideTabs({
               "flex h-[38px] shrink-0 items-center rounded-md border px-3 text-[13.5px] whitespace-nowrap text-foreground no-underline hover:text-foreground hover:no-underline",
               on
                 ? "border-border bg-card font-extrabold"
-                : "border-transparent font-semibold hover:bg-card/60",
+                : "border-transparent font-semibold text-ink-3 hover:bg-card/60 hover:text-foreground",
             )}
           >
             {t.label}

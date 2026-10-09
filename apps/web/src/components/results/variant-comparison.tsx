@@ -170,12 +170,12 @@ export function VariantComparison({
           })}
         </div>
       </div>
-      <div className="px-[18px] py-2.5 text-[12px] leading-normal text-ink-3">
+      <div className="px-[18px] py-2.5 text-[12px] text-ink-3">
         Visible time is approximate: it measures how long the page was visible, not attention, and
         is comparable between arms only.
       </div>
       {showStats ? (
-        <div className="bg-subtle px-[18px] py-3 text-[12.5px] leading-normal text-ink-3">
+        <div className="bg-subtle px-[18px] py-3 text-[12.5px] leading-[1.5] text-ink-3">
           Confidence = probability the variant beats Control (two-sided z-test on conversion rate).
           Interval = 95% range for the true relative lift. Significance threshold {thr}%, set in
           Settings → Project. Interval axis: {fS(cLo, 0)} to {fS(cHi, 0)}, vertical line = no

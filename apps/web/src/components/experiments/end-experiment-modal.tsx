@@ -92,7 +92,7 @@ export function EndExperimentModal({
 
   return (
     <Modal open={open} onClose={onClose} label="End experiment" locked={pending}>
-      <ModalTitle title="End experiment">
+      <ModalTitle title="End experiment" weight={600}>
         <span className="text-[13.5px]">
           “{name}” will stop splitting traffic. Results are kept. Choose the outcome to record:
         </span>

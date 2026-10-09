@@ -97,7 +97,7 @@ export function RowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="size-[30px] cursor-pointer rounded-md border border-transparent bg-transparent text-base font-extrabold text-ink-2 outline-none hover:bg-divider focus-visible:ring-3 focus-visible:ring-primary/30"
+        className="size-[30px] cursor-pointer rounded-md border border-transparent bg-transparent text-[16px] font-extrabold text-ink-2 outline-none hover:bg-divider focus-visible:ring-3 focus-visible:ring-primary/30"
       >
         ⋯
       </button>

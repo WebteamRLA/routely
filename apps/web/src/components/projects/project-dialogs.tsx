@@ -98,7 +98,7 @@ function DeleteBody({
           onKeyDown={(e) => {
             if (e.key === "Enter" && ok && !pending) onConfirm();
           }}
-          className="h-10 rounded-md border border-input px-3 text-sm outline-none focus:border-danger focus:ring-3 focus:ring-[rgba(209,59,59,0.12)]"
+          className="h-10 rounded-md border border-input px-3 text-[14px] outline-none focus:border-danger focus:ring-3 focus:ring-[rgba(209,59,59,0.12)]"
         />
       </label>
       <ModalActions>

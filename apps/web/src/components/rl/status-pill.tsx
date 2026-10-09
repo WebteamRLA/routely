@@ -59,7 +59,7 @@ export function StatusPill({
   return (
     <span
       className={cn(
-        "inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-sm border px-2 text-xs font-bold whitespace-nowrap",
+        "inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-sm border px-2 text-[12px] font-bold whitespace-nowrap",
         className,
       )}
       style={{ background: s.bg, color: s.color, borderColor: s.border }}

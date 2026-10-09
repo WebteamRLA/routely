@@ -14,7 +14,6 @@ import { HeadToHead } from "./head-to-head";
 import {
   armBadge,
   chartModel,
-  goalOptionLabel,
   rangeText,
   resultsStats,
   type ChartMetric,
@@ -110,10 +109,15 @@ export function ResultsView({
     );
   }
 
-  const goalOptions = meta.goals.map((g, i) => ({
-    value: g.key,
-    label: goalOptionLabel(g, i === 0),
-  }));
+  // v2 lists only the primary goal. An experiment created before secondary goals were retired
+  // can still be switched to one from the Goal performance table; the select then shows it too,
+  // so it never names a goal other than the one being reported.
+  const primaryGoal = meta.goals[0];
+  const goalOptions = (
+    goal && primaryGoal && goal.key !== primaryGoal.key
+      ? [primaryGoal, goal]
+      : meta.goals.slice(0, 1)
+  ).map((g) => ({ value: g.key, label: g.name }));
 
   return (
     <div

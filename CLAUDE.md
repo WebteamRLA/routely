@@ -25,14 +25,15 @@ visitor ─► /pricing ┤                                                  ─
 ```
 
 A customer creates a **project** (the database calls it a `Website`), installs one tracking
-snippet on it, then creates **experiments** through a 7-step wizard (Type → Setup → Variants →
-Traffic → Targeting → Goals → Review & launch). The SDK decides each visitor's arm, redirects or
+snippet on it, then creates **experiments** through a 6-step wizard (Type → Setup → Traffic →
+Targeting → Goals → Review & launch; Setup holds the variants). The SDK decides each visitor's arm, redirects or
 applies changes, and reports page views, visible time and goal events back; conversions are
 decided server-side.
 
 The UI is a faithful implementation of the HTML design prototype
-(`github.com/RaihanSoft/routely-design`, `index.html`). The prototype is the source of truth for
-layout, copy and interactions; see §5 "The UI follows the design prototype".
+(`github.com/RaihanSoft/routely-design`, `index.html`), currently its **v2** (commit `ecc3144`). The
+prototype is the source of truth for layout, copy and interactions; see §5 "The UI follows the
+design prototype" — including how to read the bundled file.
 
 Modelled on [Mida](https://mida.so). The user (`rakibul@blinto.co`) built this over a series
 of numbered "Parts", each with its own spec.
@@ -82,15 +83,16 @@ routely/
 │       │   ├── rl/           design primitives (status pill, traffic bar, modal, tabs, …)
 │       │   ├── layout/       shell: sidebar, project switcher, nav, profile menu, drawer, leave guard
 │       │   ├── projects/     project modal (favicon probe), manage-projects rows/dialogs
-│       │   ├── dashboard/    KPI strip, experiments table, conversions + visitors cards, empty state
+│       │   ├── dashboard/    Overview: experiments table, conversions + visitors cards, activity +
+│       │   │                 integrations rail, CSV export, empty state
 │       │   ├── experiments/  list/ and detail/ (header, setup, activity, share), end/delete modals
 │       │   ├── results/      verdict hero, scorecards, chart, comparison + CI, goals, traffic, h2h
-│       │   ├── wizard/       the 7-step create/edit wizard, launch + leave modals
+│       │   ├── wizard/       the 6-step create/edit wizard, launch + leave modals
 │       │   ├── editor/       visual editor, mock page, preview modal, preview links
 │       │   ├── tracking/     install panel + modal, getInstallInfo
 │       │   ├── metrics/      metrics & events table, new-metric modal, GTM panel
 │       │   ├── integrations/ Google Sheets card (+ Picker), CDN panel
-│       │   ├── settings/     project settings, domains, team (seam)
+│       │   ├── settings/     settings shell (7 side tabs), project settings, domains, team (seam)
 │       │   └── login/        Google button, login showcase
 │       ├── server/           server-only; never imported by a client component
 │       │   ├── db.ts         the single PrismaClient (+ PrismaPg adapter)
@@ -135,14 +137,19 @@ owned → not found). The last project visited is remembered in the `rl_project`
 | `/` | → remembered project's dashboard, else the first active project, else `/projects` |
 | `/login` | Google sign-in in the design's two-column layout (`?signedOut=1` shows the notice) |
 | `/projects` | Manage projects: search, switch, edit, archive/restore, delete, create |
-| `/p/[projectId]` | Dashboard: KPI strip, Experiments table (All · Running · Needs action), conversions by running experiment, visitors over time (30 days), empty state |
+| `/p/[projectId]` | Dashboard ("Overview"): tracking pill (opens the install modal), Experiments table (All · Running · Needs action), conversions by running experiment, unique visitors over the last 14 project-local days, Team activity + Recommended integrations (a right rail at ≥1360px), client-side CSV export, empty state |
 | `/p/[projectId]/experiments` | List: status tabs, search, type filter, sort (all in the URL) |
-| `/p/[projectId]/experiments/new` | Wizard (`?type=ab\|redirect`, `?step=`) |
+| `/p/[projectId]/experiments/new` | Wizard (`?type=ab\|redirect`, `?step=type\|basics\|traffic\|targeting\|goal\|review`; the old `variants` opens Setup) |
 | `/p/[projectId]/experiments/[id]` | Detail: `?tab=results\|setup\|activity`, `?range=`, `?goal=` |
 | `/p/[projectId]/experiments/[id]/edit` | Wizard on a draft (non-drafts redirect to detail) |
 | `/p/[projectId]/metrics` | Metrics & goals: `?tab=metrics\|gtm` |
 | `/p/[projectId]/integrations` | `?tab=sheets\|cdn`; renders the Google OAuth flash |
 | `/p/[projectId]/settings/[tab]` | `project` · `install` · `team` |
+
+The last three render as **one** design "Settings" page with seven side tabs (Project, Installation
+& tracking, Metrics & events, Google Tag Manager, Google Sheets, CDN delivery, Team) through
+`components/settings/settings-shell.tsx`; each tab links to its own route above, so the sidebar's
+"Metrics & goals" / "Integrations" / "Settings" entries stay highlighted correctly.
 | `/share/[token]` | **Public**, read-only results. No session. `noindex` |
 | `/get-started`, `/experiments…`, `/websites/[id]`, `/metrics…`, `/integrations` | Legacy — redirect into the current project |
 | `/api/auth/[...nextauth]` | Auth.js handlers, Node runtime |
@@ -172,7 +179,24 @@ does the real thing (URL checks, install verification, GTM test event, launch) o
 clearly labelled **service seam**; it never shows invented numbers (fake latencies, fake
 traffic estimates). Deliberate departures: Google-only sign-in (locked stack), image changes take
 a real image URL, A/B changes carry an editable CSS selector, GTM code uses
-`routely.push(['track', key])` so it works before the SDK loads.
+`routely.push(['track', key])` so it works before the SDK loads, the dashboard's CDN row shows no
+"Healthy" status (the CDN is a seam), the dashboard's amber row edge marks only rows that need
+action (the prototype's markup hard-codes it on every row; its script computes it per row), and
+prototype rendering bugs (text spilling into the next grid column, a dead 7th stepper column)
+are not copied.
+
+**Reading the prototype.** `index.html` is a bundler export: the readable source is inside it.
+`<script type="__bundler/manifest">` holds base64 (gzip when `compressed`) assets and
+`<script type="__bundler/template">` a JSON string with the markup (`{{ }}` holes, `<sc-if>`,
+`<sc-for>`, `style-hover=`) followed by one `text/x-dc` logic class whose `V`/`W`/`D`/`E` values
+feed it. Decode both with a few lines of Python. To screenshot a prototype state, load the file
+in headless Chrome, walk a DOM node's React fiber up to the component whose `stateNode.logic` is
+set, and call `logic.setState({authed: true, ...})` / `logic.go(...)` / `logic.startCreate(...)`.
+
+**Line height.** The prototype's body sets none, so text inherits the browser's `normal`;
+`globals.css` matches that (`body { line-height: normal }`), and components that the design
+gives a looser line height say so explicitly (`leading-[1.5]`). Prefer arbitrary font sizes
+(`text-[13.5px]`) over Tailwind's named ones (`text-sm`), which carry their own line height.
 
 ### Project = Website
 
@@ -354,6 +378,16 @@ Application-level rules enforced in `experiment.service.ts`:
   clear winner; `keepWinner` (Split URL only) keeps redirecting everyone to the winning URL.
 - **A/B variants have `url = ""` and `changes`** `[{selector, prop: text|bg|image, value, el?}]`;
   image values must be an https URL or a path.
+- **Every new experiment is judged on a conversion URL** (design v2), for both types: the wizard
+  offers no goal-type choice, no match type (exact) and no secondary goals, and launch requires a
+  same-site conversion URL. Metric (custom-event / page-visit) goals and secondary goals are
+  **legacy**: rows that have them keep them, the server still matches them and results show them
+  in the Goal performance table, but no UI creates them any more. Live edit never sends
+  `secondary`; an omitted `secondary` means "unchanged" in `experiment.service`.
+- **The wizard's targeting step offers only Device rules** (v2 hides the page rule and the other
+  "Narrow by" conditions). The page rule follows the control URL on every exit from Setup; a
+  legacy draft whose rule was customised still shows it so it can be fixed. The SDK and
+  `lib/targeting` still support every rule type.
 
 ### Ingestion never trusts client-supplied ownership
 
@@ -366,7 +400,7 @@ Application-level rules enforced in `experiment.service.ts`:
 - **Timestamps are clamped** (browser clocks are routinely hours off)
 - **A conversion requires a pre-existing assignment.** Conversions are decided server-side from
   `page` and `track` events against the visitor's existing assignments in running experiments
-  (URL goals, custom-event goals, page-visit goals; primary and secondary). Those events never
+  (URL goals, plus legacy custom-event / page-visit and secondary goals). Those events never
   create a visitor or an assignment — otherwise a forged request could invent a visitor, choose
   their arm, and convert them.
 
@@ -495,7 +529,7 @@ duplicate `DATABASE_URL` line, so the local one *looked* right while the second 
 which aimed a command that drops every table at production data. `db:deploy` is deliberately
 **not** guarded: that is how Vercel applies migrations during `vercel-build`.
 
-Tests: **433** — 155 in the SDK, 278 in the app. Both run under Vitest in a Node environment.
+Tests: **463** — 155 in the SDK, 308 in the app. Both run under Vitest in a Node environment.
 `npm run db:seed` builds three projects with stable ids (`seed_kestrel` — 9 experiments of both
 types and every status, `seed_northwind` — 4, `seed_lumen` — fresh, not installed) owned by
 `dev@routely.local`; it takes about a minute.
@@ -588,9 +622,37 @@ claim race prints `Unique constraint failed on ... sheets_sync_runs_websiteId_da
 the idempotency mechanism working, not a bug; it is not suppressed because silencing it would
 silence real constraint errors too.
 
-**`npm run build` shares `.next` with `next dev`.** Restart the dev server after a build. If the
-dev server starts refreshing every page about once a second ("Subscription error,
-resubscribing" in the log), Turbopack's HMR is wedged — restart it; it is not an app bug.
+**`npm run build` and `next dev` now use separate output.** Next 16 writes dev output to
+`.next/dev`, so a build no longer breaks a running dev server (checked on 16.3.3 — if a dev
+server ever misbehaves after a build, restart it anyway). If the dev server starts refreshing
+every page about once a second ("Subscription error, resubscribing" in the log), Turbopack's HMR
+is wedged — restart it; it is not an app bug.
+
+**`window.history.replaceState` must be passed `null` state.** Next patches it to keep its router
+in sync, but skips that for a state object carrying its own `__NA` marker — which is what
+`window.history.state` is. Pass the current state and the address bar looks right until the next
+Server Action, when the router puts its stale URL back (the wizard's `?step=` did exactly this).
+
+**`cn()` drops a line height that comes before a font size.** tailwind-merge treats a later
+`text-[size]` as overriding an earlier `leading-*`. Put `leading-*` after the size class.
+
+**The local database can lag the migrations.** If a page fails with an unknown column or
+argument, run `npm run db:status`; apply with `npm run db:migrate` (or `db:deploy`), then
+`prisma generate` and restart `next dev`. `npm run db:up` needs Docker running — on this machine
+that is Docker Desktop (`systemctl --user start docker-desktop`, context `desktop-linux`).
+
+**Install verification can be tested end to end locally.** In development the pixel check skips
+the private-address guard, so a project on `lvh.me` (which resolves to 127.0.0.1) verifies against
+anything listening on port 80 that serves the snippet. Docker Desktop cannot mount `/tmp`; copy
+files into a container with `docker cp`.
+
+**The editor's live page is view-only, and "loaded" only means the frame's load event fired.**
+A page that refuses framing (X-Frame-Options / CSP `frame-ancestors`) still fires it in Chrome,
+so it is reported as loaded and shows the browser's blocked page; only a page that never answers
+reaches the 9-second error. Nothing is injected into the frame. It is a real page load: with the
+snippet installed there, the person editing is counted as a visitor and a running Split URL test
+can redirect the frame. If a Content-Security-Policy is ever added to the app, it must allow
+framing http(s) pages.
 
 **Headless Chrome is a crawler to the SDK.** Its user agent matches the bot filter, so the SDK
 deliberately does nothing. Browser tests of the SDK must set a normal user agent.
@@ -625,21 +687,25 @@ build were bad assertions rather than bad code — say so rather than quietly fi
 
 ## 11. Build status
 
-Working, on the design prototype's UI throughout:
+Working, on the design prototype's (v2) UI throughout:
 
 - **Projects** — switcher, create/edit with favicon detection, extra domains, timezone,
   significance threshold, archive/restore/delete, Manage projects page.
-- **Experiments** — Split URL and A/B tests, up to five arms, the 7-step wizard (drafts, edit,
+- **Experiments** — Split URL and A/B tests, up to five arms, the 6-step wizard (drafts, edit,
   validation, real URL checks, QA + readiness, launch confirmation), visual editor with editable
-  CSS selectors, preview modal and real on-site preview links, targeting (page rules, audience,
-  devices, countries, query/UTM/referrer conditions), coverage, URL / custom-event / page-visit
-  goals with secondary goals and unique/all counting, pause/resume, end with winner (and
-  keep-redirecting-to-winner), duplicate, delete, live edits, activity log, share links.
+  CSS selectors and a view-only live page, gated behind a verified install for A/B variants,
+  preview modal and real on-site preview links, device targeting in the wizard (the SDK still
+  evaluates page rules, audience, countries and query/UTM/referrer conditions on legacy rows),
+  coverage, conversion-URL goals with unique/all counting (metric and secondary goals are legacy,
+  see §6), pause/resume, end with winner (and keep-redirecting-to-winner), duplicate, delete, live
+  edits, activity log, share links.
 - **Results** — verdict, scorecards, time-series chart, comparison table with chance to beat
   control, 95% intervals and p-values, per-goal performance, traffic distribution with a sample
   ratio check, head-to-head; the public share page uses the same view.
-- **Dashboard**, **Metrics & goals** (metrics table, new metric, GTM setup with a real test
-  event), **Installation & tracking** (snippet, Manual/GTM, real per-domain verification),
+- **Dashboard** ("Overview", with a client-side CSV export), **Metrics & goals** (metrics table,
+  new metric, GTM setup with a real test event), **Installation & tracking** (snippet, Copy, real
+  verification of every project domain with failures summarised in one line; no GTM install
+  method, as in v2; `InstallModal` has an editor-gate mode via `editorHost` / `onVerified`),
   **Google Sheets export**, **CDN panel** (seam), **Team** (seam).
 - **SDK** — v4: redirects, A/B changes, targeting, coverage, `track()`, preview, crawler skip,
   page views, visible time; server-side goal matching.
@@ -647,8 +713,9 @@ Working, on the design prototype's UI throughout:
 **Not built:** the production Docker Compose stack and Dockerfile (only `docker-compose.dev.yml`
 and reference Nginx configs exist) · team access control (members are stored only) · real CDN
 delivery stats · click / custom-JS / form goals beyond `track()` · SPA route-change tracking ·
-event retention policy · an iframe visual editor (the editor edits a mock canvas; selectors target
-the real page).
+event retention policy · editing inside the live page (the editor's live view is view-only; edits
+happen on a mock canvas and selectors target the real page) · an updated `docs/guide/testing-guide.html`
+(it predates the design rebuild).
 
 Known limitations are listed at the end of each `docs/*.md`. The most significant:
 

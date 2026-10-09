@@ -66,15 +66,15 @@ export default async function LoginPage({
       ) : null}
 
       {!configured ? (
-        <div className="rounded-md border border-warning-border bg-warning-bg px-3 py-2.5 text-[13px] leading-normal text-warning-text">
+        <div className="rounded-md border border-warning-border bg-warning-bg px-3 py-2.5 text-[13px] text-warning-text">
           <div className="font-extrabold">Google sign-in is not configured</div>
           <div className="mt-0.5">
-            Set <code className="font-mono text-xs">AUTH_SECRET</code>,{" "}
-            <code className="font-mono text-xs">GOOGLE_CLIENT_ID</code> and{" "}
-            <code className="font-mono text-xs">GOOGLE_CLIENT_SECRET</code> in{" "}
-            <code className="font-mono text-xs">apps/web/.env</code>. To browse the dashboard
-            without them, set <code className="font-mono text-xs">AUTH_DEV_BYPASS=true</code> — that
-            flag is refused in production.
+            Set <code className="font-mono text-[12px]">AUTH_SECRET</code>,{" "}
+            <code className="font-mono text-[12px]">GOOGLE_CLIENT_ID</code> and{" "}
+            <code className="font-mono text-[12px]">GOOGLE_CLIENT_SECRET</code> in{" "}
+            <code className="font-mono text-[12px]">apps/web/.env</code>. To browse the dashboard
+            without them, set <code className="font-mono text-[12px]">AUTH_DEV_BYPASS=true</code> —
+            that flag is refused in production.
           </div>
         </div>
       ) : null}
@@ -84,7 +84,7 @@ export default async function LoginPage({
         <GoogleSignInButton disabled={!configured} />
       </form>
 
-      <div className="border-t border-border pt-3.5 text-[12.5px] leading-normal text-pretty text-ink-3">
+      <div className="border-t border-border pt-3.5 text-[12.5px] leading-[1.5] text-pretty text-ink-3">
         Sign in with your Google work account. New to Routely? Signing in creates your account — we
         read only your name, email address and profile picture.
       </div>

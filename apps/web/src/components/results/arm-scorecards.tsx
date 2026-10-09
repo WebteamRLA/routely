@@ -28,21 +28,21 @@ export function ArmScorecards({ arms, badges }: { arms: ArmStat[]; badges: (ArmB
               <div className="font-heading text-[30px] leading-[1.1] font-bold tracking-[-0.02em]">
                 {fP(a.cr, 2)}
               </div>
-              <div className="mt-0.5 text-xs text-ink-3">conversion rate</div>
+              <div className="mt-0.5 text-[12px] text-ink-3">conversion rate</div>
             </div>
             <div className="flex gap-5 text-[13px]">
               <div>
-                <div className="text-xs text-ink-3">Visitors</div>
+                <div className="text-[12px] text-ink-3">Visitors</div>
                 <div className="font-extrabold">{fN(a.v)}</div>
               </div>
               <div>
-                <div className="text-xs text-ink-3">Conversions</div>
+                <div className="text-[12px] text-ink-3">Conversions</div>
                 <div className="font-extrabold">{fN(a.c)}</div>
               </div>
             </div>
             <div className="flex flex-wrap items-baseline justify-between gap-2.5 border-t border-divider pt-2.5">
               <span
-                className="font-heading text-lg font-bold"
+                className="font-heading text-[18px] font-bold"
                 style={{ color: a.i ? liftColor(a.lift) : "#5B6579" }}
               >
                 {a.i ? fS(a.lift) : "Baseline"}

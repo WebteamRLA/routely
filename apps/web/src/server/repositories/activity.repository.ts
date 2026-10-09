@@ -24,3 +24,21 @@ export function listActivities(
     take: limit,
   });
 }
+
+/**
+ * The newest activity rows across every experiment of one website, for the dashboard's feed.
+ * Ownership reaches through the experiment to its website, as elsewhere: a website the actor does
+ * not own yields nothing.
+ */
+export function listRecentForWebsite(
+  websiteId: string,
+  userId: string,
+  limit = 6,
+  client: DbClient = db,
+): Promise<ExperimentActivity[]> {
+  return client.experimentActivity.findMany({
+    where: { experiment: { websiteId, website: { userId } } },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit,
+  });
+}

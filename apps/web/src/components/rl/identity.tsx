@@ -85,7 +85,7 @@ export function Avatar({
   return (
     <span
       className={cn(
-        "grid shrink-0 place-items-center rounded-full text-xs font-extrabold text-white",
+        "grid shrink-0 place-items-center rounded-full text-[12px] font-extrabold text-white",
         tone === "navy" ? "bg-navy" : "bg-coral",
       )}
       style={{ width: size, height: size }}
@@ -136,7 +136,7 @@ export function ArmTile({
     <span
       className={cn(
         "grid shrink-0 place-items-center rounded-md font-extrabold text-white",
-        position === 0 ? "text-xs" : "text-[13px]",
+        position === 0 ? "text-[12px]" : "text-[13px]",
       )}
       style={{ width: size, height: size, background: armColor(position) }}
     >

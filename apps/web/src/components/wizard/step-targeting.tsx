@@ -21,6 +21,7 @@ import {
   type TargetCondition,
   type Targeting,
 } from "@/lib/domain";
+import { stripU } from "@/lib/domain-normalize";
 import { MATCH_OPTIONS, countryName, matches, targetSummary } from "@/lib/targeting";
 import { cn } from "@/lib/utils";
 
@@ -60,7 +61,21 @@ export function visibleRules(t: Targeting, show: RuleShow, isRedirect: boolean) 
   };
 }
 
-/** Step 5 — Targeting (design L1000–1082). */
+/**
+ * Whether the page rule is still the one the wizard sets itself — an exact match on the
+ * control URL (`leaveBasics` keeps it so). Design v2 hides the page-rule section; a draft whose
+ * rule was customised before that, or has an error there, still shows it so it can be seen and
+ * fixed.
+ */
+export function pageRuleIsDefault(t: Targeting, url: string): boolean {
+  return t.match === "exact" && stripU(t.pattern) === stripU(url);
+}
+
+/**
+ * Step 4 — Targeting (design v2 L1003–1104). The page rule follows the control URL and is
+ * hidden (see `pageRuleIsDefault`); audience rules are added by device only, while visitor-type,
+ * country and URL-parameter rules already in effect on a draft still show and can be removed.
+ */
 export function StepTargeting({
   draft,
   update,
@@ -78,13 +93,11 @@ export function StepTargeting({
 
   const vis = visibleRules(t, show, R);
   const nR = [vis.device, vis.visitor, vis.geo, vis.params].filter(Boolean).length;
-  const audCount = R
-    ? vis.device && t.devices.length < 3
+  const audCount =
+    vis.device && t.devices.length < 3
       ? `${t.devices.length} of 3 device types`
-      : "All visitors · all devices"
-    : nR
-      ? `${nR} rule${nR > 1 ? "s" : ""} · visitors must match all`
-      : "No rules · everyone qualifies";
+      : "All visitors · all devices";
+  const showPageRule = !!errPattern || !pageRuleIsDefault(t, draft.url);
 
   const allOn = ALL_DEVICES.every((k) => t.devices.includes(k));
   const toggleDevice = (k: Device) =>
@@ -101,38 +114,11 @@ export function StepTargeting({
       conditions: x.conditions.map((c, j) => (j === i ? { ...c, ...patch } : c)),
     }));
 
-  const RULES: { key: keyof RuleShow; label: string; on: boolean; add: () => void }[] = [
-    { key: "device", label: "Device", on: vis.device, add: () => setShow("device", true) },
-    {
-      key: "geo",
-      label: "Country",
-      on: vis.geo,
-      add: () => {
-        setShow("geo", true);
-        setT((x) => ({ ...x, geo: "some" }));
-      },
-    },
-    {
-      key: "visitor",
-      label: "New vs returning",
-      on: vis.visitor,
-      add: () => {
-        setShow("visitor", true);
-        setT((x) => ({ ...x, audience: "new" }));
-      },
-    },
-    {
-      key: "params",
-      label: "Query parameter / UTM",
-      on: vis.params,
-      add: () => {
-        setShow("params", true);
-        setT((x) => (x.conditions.length ? x : { ...x, conditions: [{ ...EMPTY_CONDITION }] }));
-      },
-    },
-  ];
-  const addRules = RULES.filter((r, i) => !r.on && (!R || i === 0));
-  const allRules = !addRules.length && !R;
+  // Design v2 offers only the device rule to add, for both types; the other rules show only
+  // while a draft made before that still has them in effect.
+  const addRules: { key: keyof RuleShow; label: string; add: () => void }[] = vis.device
+    ? []
+    : [{ key: "device", label: "Device", add: () => setShow("device", true) }];
 
   return (
     <>
@@ -140,73 +126,12 @@ export function StepTargeting({
         Start broad. Add audience rules only when your hypothesis is about a specific segment, since
         every rule shrinks the sample.
       </StepHeading>
-      <NavyStrip eyebrow="In plain English">{targetSummary(t)}</NavyStrip>
-
-      <Section as="div" padded className="gap-3">
-        <CardTitle as="h3">Page targeting</CardTitle>
-        <div className="flex flex-wrap gap-2.5">
-          <select
-            aria-label="Page match"
-            value={t.match}
-            onChange={(e) => {
-              const v = e.target.value as PageMatch;
-              setT((x) => ({ ...x, match: v }));
-            }}
-            className={cn(selectCls, "h-[42px] px-2.5 text-[13.5px]")}
-          >
-            {MATCH_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <input
-            aria-label="Page pattern"
-            name="pattern"
-            value={t.pattern}
-            placeholder="https://example.com/landing-page"
-            onChange={(e) => {
-              const v = e.target.value;
-              setT((x) => ({ ...x, pattern: v }));
-            }}
-            aria-invalid={errPattern ? true : undefined}
-            className={cn(
-              monoInput,
-              "h-[42px] min-w-0 flex-[1_1_260px] px-3 text-[13px]",
-              errPattern ? "border-danger" : "border-input",
-            )}
-          />
-        </div>
-        <FieldError>{errPattern}</FieldError>
-        <div className="flex flex-wrap items-center gap-2.5 rounded-lg bg-muted px-3 py-2.5">
-          <span className="text-[12.5px] font-extrabold text-ink-2">Test a URL</span>
-          <input
-            aria-label="Test a URL"
-            value={t.testUrl}
-            placeholder="Paste any URL to check it"
-            onChange={(e) => {
-              const v = e.target.value;
-              setT((x) => ({ ...x, testUrl: v }));
-            }}
-            className={cn(monoInput, "h-[34px] min-w-0 flex-[1_1_220px] border-input")}
-          />
-          {hasTest ? (
-            <span
-              role="status"
-              className={cn(
-                "rounded-md px-2 py-1 text-[12.5px] font-bold",
-                m === true ? "bg-[#E6F5EE] text-success-text" : "bg-[#FCE9E6] text-danger-text",
-              )}
-            >
-              {m === "invalid"
-                ? "Invalid pattern"
-                : m
-                  ? "Match · visitors on this URL enter the experiment"
-                  : "No match · visitors on this URL won’t enter the experiment"}
-            </span>
-          ) : null}
-        </div>
-      </Section>
+      {showPageRule ? (
+        <>
+          <NavyStrip eyebrow="In plain English">{targetSummary(t)}</NavyStrip>
+          <PageRule t={t} setT={setT} errPattern={errPattern} m={m} hasTest={hasTest} />
+        </>
+      ) : null}
 
       <Section as="div">
         <div className="flex flex-wrap items-baseline justify-between gap-2.5 border-b border-divider px-5 py-4">
@@ -462,11 +387,9 @@ export function StepTargeting({
           </RuleRow>
         ) : null}
 
-        {addRules.length || allRules ? (
+        {addRules.length ? (
           <div className="flex flex-wrap items-center gap-2 rounded-b-lg bg-[#FAFBFC] px-5 py-3">
-            {addRules.length ? (
-              <span className="mr-1 text-[12.5px] font-extrabold text-ink-2">Narrow by</span>
-            ) : null}
+            <span className="mr-1 text-[12.5px] font-extrabold text-ink-2">Narrow by</span>
             {addRules.map((r) => (
               <button
                 key={r.key}
@@ -477,13 +400,93 @@ export function StepTargeting({
                 + {r.label}
               </button>
             ))}
-            {allRules ? (
-              <span className="text-[12.5px] text-ink-3">All rule types are in use.</span>
-            ) : null}
           </div>
         ) : null}
       </Section>
     </>
+  );
+}
+
+/** The page rule (match + pattern + "Test a URL"), shown only for a customised legacy rule. */
+function PageRule({
+  t,
+  setT,
+  errPattern,
+  m,
+  hasTest,
+}: {
+  t: Targeting;
+  setT: (fn: (t: Targeting) => Targeting) => void;
+  errPattern: string;
+  m: ReturnType<typeof matches>;
+  hasTest: boolean;
+}) {
+  return (
+    <Section as="div" padded className="gap-3">
+      <CardTitle as="h3">Page targeting</CardTitle>
+      <div className="flex flex-wrap gap-2.5">
+        <select
+          aria-label="Page match"
+          value={t.match}
+          onChange={(e) => {
+            const v = e.target.value as PageMatch;
+            setT((x) => ({ ...x, match: v }));
+          }}
+          className={cn(selectCls, "h-[42px] px-2.5 text-[13.5px]")}
+        >
+          {MATCH_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <input
+          aria-label="Page pattern"
+          name="pattern"
+          value={t.pattern}
+          placeholder="https://example.com/landing-page"
+          onChange={(e) => {
+            const v = e.target.value;
+            setT((x) => ({ ...x, pattern: v }));
+          }}
+          aria-invalid={errPattern ? true : undefined}
+          className={cn(
+            monoInput,
+            "h-[42px] min-w-0 flex-[1_1_260px] px-3 text-[13px]",
+            errPattern ? "border-danger" : "border-input",
+          )}
+        />
+      </div>
+      <FieldError>{errPattern}</FieldError>
+      <div className="flex flex-wrap items-center gap-2.5 rounded-lg bg-muted px-3 py-2.5">
+        <span className="text-[12.5px] font-extrabold text-ink-2">Test a URL</span>
+        <input
+          aria-label="Test a URL"
+          value={t.testUrl}
+          placeholder="Paste any URL to check it"
+          onChange={(e) => {
+            const v = e.target.value;
+            setT((x) => ({ ...x, testUrl: v }));
+          }}
+          className={cn(monoInput, "h-[34px] min-w-0 flex-[1_1_220px] border-input")}
+        />
+        {hasTest ? (
+          <span
+            role="status"
+            className={cn(
+              "rounded-md px-2 py-1 text-[12.5px] font-bold",
+              m === true ? "bg-[#E6F5EE] text-success-text" : "bg-[#FCE9E6] text-danger-text",
+            )}
+          >
+            {m === "invalid"
+              ? "Invalid pattern"
+              : m
+                ? "Match · visitors on this URL enter the experiment"
+                : "No match · visitors on this URL won’t enter the experiment"}
+          </span>
+        ) : null}
+      </div>
+    </Section>
   );
 }
 

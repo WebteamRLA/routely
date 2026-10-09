@@ -50,7 +50,7 @@ export function FormField({
 }
 
 const control =
-  "w-full min-w-0 rounded-md border bg-card px-3 text-sm text-foreground outline-none placeholder:text-faint focus:border-brand focus:ring-3 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-muted disabled:text-ink-3";
+  "w-full min-w-0 rounded-md border bg-card px-3 text-[14px] text-foreground outline-none placeholder:text-faint focus:border-brand focus:ring-3 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-muted disabled:text-ink-3";
 
 type InputSize = "sm" | "md" | "lg";
 const H: Record<InputSize, string> = { sm: "h-9", md: "h-10", lg: "h-[42px]" };

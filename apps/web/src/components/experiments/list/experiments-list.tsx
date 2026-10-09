@@ -74,7 +74,7 @@ export function ExperimentsList({
   const filtered = filters.status !== "all" || filters.type !== "all" || !!filters.q;
 
   return (
-    <div className="mx-auto flex max-w-[1320px] animate-rl-in flex-col gap-[18px]">
+    <div className="mx-auto flex w-full max-w-[1680px] animate-rl-in flex-col gap-[18px]">
       <PageTitle
         title="Experiments"
         sub={`${shownCounts.all} experiment${shownCounts.all === 1 ? "" : "s"} · ${shownCounts.running} running · ${domain}`}

@@ -84,32 +84,43 @@ export function Modal({
   );
 }
 
+/**
+ * Modal heading (Sora 19px) and its body copy, which sits one panel gap (14px) below at a 1.5
+ * line height. The design sets the confirmations about an experiment, cache or connection in
+ * 600 and the project/session ones in 700, hence `weight`.
+ */
 export function ModalTitle({
   eyebrow,
   title,
   children,
+  weight = 700,
 }: {
   eyebrow?: ReactNode;
   title: ReactNode;
   children?: ReactNode;
+  weight?: 600 | 700;
 }) {
   return (
     <div>
       {eyebrow ? (
-        <div className="mb-1.5 text-xs font-extrabold tracking-[0.08em] text-coral uppercase">
+        <div className="mb-1.5 text-[12px] font-extrabold tracking-[0.08em] text-coral uppercase">
           {eyebrow}
         </div>
       ) : null}
-      <h2 className="font-heading text-[19px] font-bold tracking-[-0.01em]">{title}</h2>
+      <h2
+        className={cn("font-heading text-[19px]", weight === 600 ? "font-semibold" : "font-bold")}
+      >
+        {title}
+      </h2>
       {children ? (
-        <div className="mt-1.5 text-sm leading-relaxed text-ink-2">{children}</div>
+        <div className="mt-3.5 text-[14px] leading-[1.5] text-ink-2">{children}</div>
       ) : null}
     </div>
   );
 }
 
 export function ModalActions({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("mt-1 flex flex-wrap justify-end gap-2", className)}>{children}</div>;
+  return <div className={cn("flex flex-wrap justify-end gap-2", className)}>{children}</div>;
 }
 
 /**
@@ -128,6 +139,7 @@ export function ConfirmModal({
   disabled = false,
   children,
   extraActions,
+  titleWeight = 700,
 }: {
   open: boolean;
   onClose: () => void;
@@ -141,6 +153,7 @@ export function ConfirmModal({
   children?: ReactNode;
   /** Extra buttons placed between Cancel and the confirm button. */
   extraActions?: ReactNode;
+  titleWeight?: 600 | 700;
 }) {
   return (
     <Modal
@@ -149,7 +162,9 @@ export function ConfirmModal({
       label={typeof title === "string" ? title : "Confirm"}
       locked={pending}
     >
-      <ModalTitle title={title}>{body}</ModalTitle>
+      <ModalTitle title={title} weight={titleWeight}>
+        {body}
+      </ModalTitle>
       {children}
       <ModalActions>
         <Button variant="outline" size="lg" onClick={onClose} disabled={pending}>

@@ -88,7 +88,7 @@ export function TeamCard({ projectId, members }: { projectId: string; members: M
           >
             <span
               aria-hidden
-              className="grid size-8 shrink-0 place-items-center rounded-full bg-navy text-xs font-extrabold text-white"
+              className="grid size-8 shrink-0 place-items-center rounded-full bg-navy text-[12px] font-extrabold text-white"
             >
               {m.initials}
             </span>
@@ -108,7 +108,7 @@ export function TeamCard({ projectId, members }: { projectId: string; members: M
                 <SelectInput
                   aria-label={`Role for ${m.name}`}
                   inputSize="sm"
-                  className="h-[34px] w-auto text-[13px]"
+                  className="h-[34px] w-auto px-2 text-[13px]"
                   value={m.role}
                   disabled={busy === m.id}
                   onChange={(e) => changeRole(m, e.target.value as Role)}
@@ -153,14 +153,14 @@ export function TeamCard({ projectId, members }: { projectId: string; members: M
         <SelectInput
           aria-label="Role for the invite"
           inputSize="md"
-          className="h-[38px] w-auto text-[13px]"
+          className="h-[38px] w-auto px-2 text-[13px]"
           value={role}
           onChange={(e) => setRole(e.target.value as Role)}
         >
           <option value="Editor">Editor</option>
           <option value="Viewer">Viewer</option>
         </SelectInput>
-        <Button type="submit" disabled={inviting}>
+        <Button type="submit" className="font-extrabold" disabled={inviting}>
           {inviting ? "Sending…" : "Send invite"}
         </Button>
       </form>

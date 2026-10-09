@@ -2,16 +2,16 @@ import type { CountingKey } from "@/lib/domain";
 import type { ExperimentDetail } from "@/lib/view-models";
 
 /**
- * What can still change once an experiment has started (mirrors the service's `editLive`):
- * name, hypothesis, the traffic split, coverage, secondary goals and counting. URLs, A/B
- * changes, targeting and the primary goal are fixed — visitors are already bucketed.
+ * What can still change once an experiment has started (a subset of the service's `editLive`):
+ * name, hypothesis, the traffic split, coverage and counting. URLs, A/B changes, targeting and
+ * the goal are fixed — visitors are already bucketed. Design v2 retired secondary goals, so the
+ * edit never sends `secondary`: the service then leaves an older experiment's list untouched.
  */
 export interface LiveEdit {
   name: string;
   hypothesis: string;
   arms: { name: string; weight: number }[];
   coverage: number;
-  secondary: string[];
   counting: CountingKey;
 }
 
@@ -23,7 +23,6 @@ export function liveEditFrom(detail: ExperimentDetail): LiveEdit {
       .sort((a, b) => a.position - b.position)
       .map((a) => ({ name: a.name, weight: a.weight })),
     coverage: detail.coverage,
-    secondary: [...detail.secondaryMetricIds],
     counting: detail.counting,
   };
 }
@@ -37,7 +36,6 @@ export function liveEditChanges(
   hypothesis: string;
   weights: number[];
   coverage: number;
-  secondary: string[];
   counting: CountingKey;
 }> {
   const saved = liveEditFrom(detail);
@@ -47,10 +45,6 @@ export function liveEditChanges(
   const weights = edit.arms.map((a) => a.weight);
   if (weights.some((w, i) => w !== saved.arms[i]?.weight)) out.weights = weights;
   if (edit.coverage !== saved.coverage) out.coverage = edit.coverage;
-  const sameSecondary =
-    edit.secondary.length === saved.secondary.length &&
-    edit.secondary.every((id) => saved.secondary.includes(id));
-  if (!sameSecondary) out.secondary = edit.secondary;
   if (edit.counting !== saved.counting) out.counting = edit.counting;
   return out;
 }

@@ -51,8 +51,13 @@ function ab(): ExperimentDraft {
       { ...d.arms[1]!, changes: [{ selector: "h1", prop: "text", value: "x", el: "headline" }] },
     ],
     targeting: { ...d.targeting, pattern: "https://acme.com/" },
-    goal: "m1",
+    convUrl: "https://acme.com/thanks",
   };
+}
+
+/** An A/B draft made before design v2, judged on a metric. */
+function legacyAb(): ExperimentDraft {
+  return { ...ab(), goalMode: "event", goal: "m1", convUrl: "" };
 }
 
 const byId = (checks: ReturnType<typeof qaChecks>) =>
@@ -92,7 +97,10 @@ describe("qaChecks", () => {
     const c = byId(checks);
     expect(c.control!.label).toBe("Page loads");
     expect(c.changes!.detail).toBe("1 change will be applied by CSS selector");
-    expect(c.goal!.detail).toBe("Last signup event received 1h ago");
+    expect(c.goal!.detail).toBe("Visits to /thanks are counted automatically");
+    expect(byId(qaChecks(legacyAb(), ctx())).goal!.detail).toBe(
+      "Last signup event received 1h ago",
+    );
   });
 
   it("fails the script check when tracking is missing or the host is foreign", () => {
@@ -169,13 +177,13 @@ describe("qaChecks", () => {
   });
 
   it("goal: missing fails, never received warns", () => {
-    expect(byId(qaChecks({ ...ab(), goal: "" }, ctx())).goal).toMatchObject({
+    expect(byId(qaChecks({ ...ab(), convUrl: "" }, ctx())).goal).toMatchObject({
       state: "fail",
       detail: "Choose a primary goal",
       hint: "No goal selected",
     });
     expect(
-      byId(qaChecks(ab(), ctx({ metrics: [metric({ lastReceivedAt: null })] }))).goal,
+      byId(qaChecks(legacyAb(), ctx({ metrics: [metric({ lastReceivedAt: null })] }))).goal,
     ).toMatchObject({
       state: "warn",
       detail: "No signup events received yet. Check your GTM setup.",
@@ -216,12 +224,13 @@ describe("resolveGoal", () => {
       key: "/thanks",
     });
     expect(resolveGoal({ ...redirect(), convUrl: "" }, [])).toBeUndefined();
-    expect(resolveGoal(ab(), [metric()])).toMatchObject({
+    expect(resolveGoal(ab(), [metric()])).toMatchObject({ isUrl: true, key: "/thanks" });
+    expect(resolveGoal(legacyAb(), [metric()])).toMatchObject({
       isUrl: false,
       name: "Sign up",
       key: "signup",
     });
-    expect(resolveGoal(ab(), [])).toBeUndefined();
+    expect(resolveGoal(legacyAb(), [])).toBeUndefined();
   });
 });
 
@@ -237,19 +246,31 @@ describe("readiness", () => {
   });
 
   it("collects validation errors as blocking and dedupes QA failures on the same step", () => {
-    const d = { ...ab(), goal: "" };
+    const d = { ...ab(), convUrl: "" };
     const r = readiness(d, validateDraft(d), qaChecks(d, ctx()), ctx());
     expect(r.blocking).toEqual([
       {
-        text: "Choose the primary goal this experiment is judged on.",
+        text: "Enter the conversion URL: the page that counts as a conversion.",
         detail: "",
         step: "goal",
         stepLabel: "Goals",
-        stepIndex: 5,
+        stepIndex: 4,
         action: "Fix",
       },
     ]);
     expect(r.state).toBe("blocked");
+  });
+
+  it("routes variant errors to Setup and dedupes every Setup check behind them", () => {
+    const d = redirect();
+    d.arms = [d.arms[0]!, { ...d.arms[1]!, url: "nope" }];
+    const c = ctx({ urlChecks: { "https://acme.com/pricing": { ok: false, status: 404 } } });
+    const r = readiness(d, validateDraft(d), qaChecks(d, c), c);
+    // The failing "Control URL responds" and "Variant URLs respond" checks are both on Setup,
+    // which already has a validation error.
+    expect(r.blocking.map((b) => [b.step, b.stepLabel, b.stepIndex, b.text])).toEqual([
+      ["variants", "Setup", 1, "This doesn't look like a full URL (https://…)."],
+    ]);
   });
 
   it("adds the warnings the review screen shows", () => {
@@ -258,14 +279,30 @@ describe("readiness", () => {
       { ...d.arms[0]!, weight: 100 },
       { ...d.arms[1]!, weight: 0 },
     ];
-    const c = ctx({ metrics: [metric({ lastReceivedAt: null })] });
-    const r = readiness(d, validateDraft(d), qaChecks(d, c), c);
-    expect(r.warnings.map((w) => w.text)).toEqual([
-      "Sign up has never been received. Conversions won’t count until tracking is set up.",
-      "Variant A is set to 0% and will get no traffic.",
-      "Only 50% of matching visitors are included. The test will take longer to reach significance.",
+    const r = readiness(d, validateDraft(d), qaChecks(d, ctx()), ctx());
+    expect(r.warnings.map((w) => [w.text, w.stepLabel, w.stepIndex])).toEqual([
+      ["Variant A is set to 0% and will get no traffic.", "Traffic", 2],
+      [
+        "Only 50% of matching visitors are included. The test will take longer to reach significance.",
+        "Traffic",
+        2,
+      ],
     ]);
     expect(r).toMatchObject({ state: "warn", canLaunch: true });
+  });
+
+  it("still warns about a legacy metric goal that was never received", () => {
+    const d = legacyAb();
+    const c = ctx({ metrics: [metric({ lastReceivedAt: null })] });
+    const r = readiness(d, validateDraft(d), qaChecks(d, c), c);
+    expect(r.warnings.map((w) => w.text)).toContain(
+      "Sign up has never been received. Conversions won’t count until tracking is set up.",
+    );
+    // …but it cannot launch: every experiment needs a conversion URL now.
+    expect(r.blocking.map((b) => b.text)).toEqual([
+      "Enter the conversion URL: the page that counts as a conversion.",
+    ]);
+    expect(r.canLaunch).toBe(false);
   });
 
   it("counts missing tracking as a blocker without duplicating the script check", () => {

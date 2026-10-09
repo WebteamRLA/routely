@@ -7,7 +7,7 @@ const TITLE_SIZE = {
   14.5: "text-[14.5px]",
   15: "text-[15px]",
   15.5: "text-[15.5px]",
-  16: "text-base",
+  16: "text-[16px]",
 } as const;
 
 /**
@@ -102,7 +102,10 @@ export function Eyebrow({
   if (tone === "coral")
     return (
       <div
-        className={cn("text-xs font-extrabold tracking-[0.08em] text-coral uppercase", className)}
+        className={cn(
+          "text-[12px] font-extrabold tracking-[0.08em] text-coral uppercase",
+          className,
+        )}
       >
         {children}
       </div>
@@ -136,7 +139,7 @@ export function PageTitle({
         >
           {title}
         </h1>
-        {sub ? <div className="text-sm text-pretty text-ink-3">{sub}</div> : null}
+        {sub ? <div className="text-[14px] text-pretty text-ink-3">{sub}</div> : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
     </div>
@@ -220,8 +223,8 @@ export function StatTile({
 }) {
   return (
     <div className={cn("rounded-lg border border-divider px-3.5 py-3", className)}>
-      <div className="text-xs font-bold text-ink-3">{label}</div>
-      <div className="mt-1 font-heading text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="text-[12px] font-bold text-ink-3">{label}</div>
+      <div className="mt-1 font-heading text-[24px] font-semibold tabular-nums">{value}</div>
     </div>
   );
 }

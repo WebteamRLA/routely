@@ -92,13 +92,16 @@ export function MockHero({
         {target("eyebrow", "text-xs font-extrabold tracking-[0.12em] text-brand", vals.eyebrow)}
         {target(
           "headline",
+          // The line height comes after the size: tailwind-merge drops a `leading-*` that
+          // precedes a font-size class, which left the headline at the body's 1.5.
           cn(
-            "font-heading leading-[1.08] font-bold tracking-[-0.025em] text-foreground",
+            "font-heading font-bold tracking-[-0.025em] text-foreground",
             layout === "preview"
               ? "text-[clamp(28px,4vw,44px)]"
               : mobile
                 ? "text-[30px]"
                 : "text-[44px]",
+            "leading-[1.08]",
           ),
           vals.headline,
         )}

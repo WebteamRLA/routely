@@ -339,18 +339,6 @@ export async function removeProjectDomain(actorUserId: string, input: unknown): 
   return projectDomains(await requireProject(actorUserId, project.id));
 }
 
-/** Records how the snippet is installed (manual or Google Tag Manager). Display only. */
-export async function setInstallMethod(
-  actorUserId: string,
-  projectId: string,
-  method: InstallMethodKey,
-): Promise<void> {
-  const result = await websiteRepo.updateWebsite(projectId, actorUserId, {
-    installMethod: method === "gtm" ? "GTM" : "MANUAL",
-  });
-  if (result.count === 0) throw notFound("That project does not exist.");
-}
-
 // ===========================================================================================
 // Public SDK endpoints
 // ===========================================================================================

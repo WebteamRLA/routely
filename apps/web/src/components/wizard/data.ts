@@ -1,6 +1,7 @@
 import "server-only";
 
 import { installInfoFor } from "@/components/tracking/data";
+import { WIZARD_STEPS } from "@/lib/domain";
 import * as metricService from "@/server/services/metric.service";
 import * as websiteService from "@/server/services/website.service";
 
@@ -27,13 +28,17 @@ export async function loadWizardContext(
   };
 }
 
-/** `?step=` accepts a step key ("goal") or a 1-based number ("6"). */
+/**
+ * `?step=` accepts a step key ("goal") or a 1-based number ("5"). The Variants step was merged
+ * into Setup in design v2, so an old `?step=variants` link opens Setup, and a number past the
+ * last step (old 7-step links) opens the last one.
+ */
 export function parseStep(raw: string | string[] | undefined): number | null {
   const v = Array.isArray(raw) ? raw[0] : raw;
   if (!v) return null;
-  const keys = ["type", "basics", "variants", "traffic", "targeting", "goal", "review"];
-  const byKey = keys.indexOf(v);
+  const keys: string[] = WIZARD_STEPS.map(([k]) => k);
+  const byKey = keys.indexOf(v === "variants" ? "basics" : v);
   if (byKey >= 0) return byKey;
   const n = Number(v);
-  return Number.isInteger(n) && n >= 1 && n <= keys.length ? n - 1 : null;
+  return Number.isInteger(n) && n >= 1 ? Math.min(n, keys.length) - 1 : null;
 }

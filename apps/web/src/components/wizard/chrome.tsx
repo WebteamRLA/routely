@@ -5,7 +5,11 @@ import { WIZARD_STEPS, type ExperimentDraft } from "@/lib/domain";
 import { pathOf } from "@/lib/domain-normalize";
 import { cn } from "@/lib/utils";
 
-/** Desktop stepper (L790–805): bars + "01"…"07", clickable up to `maxStep`. */
+/**
+ * Desktop stepper (design v2 L380–393): bars + "01"…"06", clickable up to `maxStep`. The
+ * prototype keeps a 7-column grid for its 6 steps, leaving an empty column; the grid here has
+ * one column per step.
+ */
 export function DesktopStepper({
   step,
   maxStep,
@@ -32,7 +36,10 @@ export function DesktopStepper({
           {next ? `Next: ${next[1]}` : "Final step"}
         </span>
       </div>
-      <ol className="m-0 grid list-none grid-cols-7 gap-1.5 p-0">
+      <ol
+        className="m-0 grid list-none gap-1.5 p-0"
+        style={{ gridTemplateColumns: `repeat(${WIZARD_STEPS.length}, minmax(0, 1fr))` }}
+      >
         {WIZARD_STEPS.map(([key, label], i) => {
           const done = i < step;
           const curr = i === step;
@@ -105,7 +112,7 @@ export function MobileStepper({ step }: { step: number }) {
   );
 }
 
-/** Live summary rail (L1324–1338), ≥1180px, every step but Review. */
+/** Live summary rail (design v2 L851–865), ≥1180px, every step but Review: 30% wide, 290–480px. */
 export function SummaryRail({
   draft,
   goalName,
@@ -129,7 +136,7 @@ export function SummaryRail({
     <Section
       as="aside"
       aria-label="Summary"
-      className="sticky top-6 hidden w-[290px] flex-none flex-col gap-3.5 p-[18px] min-[1180px]:flex"
+      className="sticky top-6 hidden w-[30%] max-w-[480px] min-w-[290px] flex-none flex-col gap-3.5 p-[18px] min-[1180px]:flex"
     >
       <div className="text-[11px] font-extrabold tracking-[0.1em] text-ink-3">SUMMARY</div>
       <div>

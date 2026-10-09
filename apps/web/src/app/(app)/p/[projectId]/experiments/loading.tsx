@@ -3,7 +3,7 @@ import { Shimmer } from "@/components/rl";
 
 export default function ExperimentsLoading() {
   return (
-    <div className="mx-auto flex max-w-[1320px] flex-col gap-[18px]">
+    <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-[18px]">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-2">
           <Shimmer className="h-7 w-40 rounded-md" />

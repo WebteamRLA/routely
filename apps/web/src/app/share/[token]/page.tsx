@@ -60,7 +60,7 @@ export default async function SharedResultsPage({
               Routely
             </span>
           </span>
-          <span className="rounded-md border border-white/20 px-2 py-0.5 text-xs font-bold text-white/80">
+          <span className="rounded-md border border-white/20 px-2 py-0.5 text-[12px] font-bold text-white/80">
             Shared results · read-only
           </span>
         </div>
@@ -70,7 +70,7 @@ export default async function SharedResultsPage({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill status={view.displayStatus} />
-            <span className="rounded-md border border-input px-[7px] py-0.5 text-xs font-bold text-ink-2">
+            <span className="rounded-md border border-input px-[7px] py-0.5 text-[12px] font-bold text-ink-2">
               {TYPE_LABEL[view.type]}
             </span>
             <span className="text-[12.5px] text-ink-3">{timingText(view, view.timezone)}</span>
@@ -80,7 +80,7 @@ export default async function SharedResultsPage({
           </h1>
           <p className="font-mono text-[12.5px] break-all text-ink-3">{view.url}</p>
           {view.hypothesis ? (
-            <p className="mt-2 max-w-[680px] text-sm text-pretty text-ink-2 italic">
+            <p className="mt-2 max-w-[680px] text-[14px] text-pretty text-ink-2 italic">
               {view.hypothesis}
             </p>
           ) : null}

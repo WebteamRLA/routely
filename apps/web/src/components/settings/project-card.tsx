@@ -99,6 +99,7 @@ export function ProjectCard({
           <SelectInput
             id="project-tz"
             inputSize="md"
+            className="text-[14px]"
             value={timezone}
             onChange={(e) => setTimezone(e.target.value)}
           >
@@ -127,7 +128,7 @@ export function ProjectCard({
           longer tests. Applies to every experiment’s verdict.
         </span>
       </div>
-      <Button className="self-start" onClick={save} disabled={saving}>
+      <Button className="self-start px-4 font-extrabold" onClick={save} disabled={saving}>
         {saving ? "Saving…" : "Save changes"}
       </Button>
     </Section>

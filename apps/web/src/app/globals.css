@@ -179,9 +179,12 @@
   html {
     @apply font-sans;
   }
+  /* The prototype's body sets no line height, so text inherits the browser's `normal`, not
+   * Tailwind's 1.5; places that want looser text say so explicitly (leading-[1.5] etc.). */
   body {
     @apply bg-background text-foreground;
     font-size: 14px;
+    line-height: normal;
     -webkit-font-smoothing: antialiased;
   }
   h1,

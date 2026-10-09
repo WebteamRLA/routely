@@ -245,25 +245,35 @@ export interface GoalPerformance {
   arms: ArmTotals[];
 }
 
+/** One row of an experiment's activity log, as the dashboard's "Team activity" feed shows it. */
+export interface DashboardActivity {
+  id: string;
+  experimentId: string;
+  text: string;
+  /** Display name recorded at the time (name, else email); null when unknown. */
+  actorName: string | null;
+  createdAt: string;
+}
+
 export interface DashboardData {
   timezone: string;
-  /** Project-local days, oldest first: 30 entries (the last 28 are the previous 14 then the last 14). */
+  /** Project-local days, oldest first: the last 14, today last. */
   days: string[];
-  /** Project-wide assigned visitors / primary-goal conversions per day, aligned with `days`. */
+  /**
+   * Per day, aligned with `days`: distinct visitors newly assigned to any of the project's
+   * experiments (`v`), and conversions on each experiment's primary goal (`c`).
+   */
   daily: DailyPoint[];
-  last14: DailyPoint;
-  previous14: DailyPoint;
-  runningCount: number;
-  /** Completed experiments whose declared winner is a variant. */
-  winnersCount: number;
+  /** Distinct visitors assigned across the 14 days (one visitor in two experiments counts once). */
+  uniqueVisitors: number;
   /** Every experiment in the project, with all-time totals — compute verdicts with lib/stats. */
   experiments: ExperimentListItem[];
-  /** Running and paused experiments, running first then by visitors. */
-  live: ExperimentListItem[];
-  /** Running experiments with any data (candidates for "Ready to call"), then paused ones. */
-  needsDecision: ExperimentListItem[];
-  /** Metrics never received (shown as "Tracking" attention items). */
+  /** Metrics never received ("Goal never fired"). */
   silentMetrics: MetricRow[];
+  /** The newest activity rows across the project's experiments, newest first (at most 6). */
+  activity: DashboardActivity[];
+  /** A connected Google grant AND a spreadsheet attached to this project — it really exports. */
+  sheetsConnected: boolean;
 }
 
 // ---------------------------------------------------------------------------

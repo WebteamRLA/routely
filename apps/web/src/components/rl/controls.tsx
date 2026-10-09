@@ -11,7 +11,7 @@ export interface SegOption<T extends string> {
 }
 
 const SEG_LIGHT_SIZE = {
-  xs: "h-7 px-2.5 text-xs",
+  xs: "h-7 px-2.5 text-[12px]",
   sm: "h-8 px-3 text-[13px]",
   md: "h-[34px] px-3 text-[13px]",
 } as const;
@@ -280,7 +280,7 @@ export function CheckBox({
       <span
         aria-hidden
         className={cn(
-          "grid size-5 shrink-0 place-items-center rounded-[5px] border-[1.5px] text-xs text-white",
+          "grid size-5 shrink-0 place-items-center rounded-[5px] border-[1.5px] text-[12px] text-white",
           checked ? "border-brand bg-brand" : "border-[#CBD1DC] bg-white",
         )}
       >
@@ -308,7 +308,7 @@ export function RemovableChip({
         type="button"
         aria-label={`Remove ${label}`}
         onClick={onRemove}
-        className="cursor-pointer border-0 bg-transparent text-sm leading-none text-[#1F3FB0]"
+        className="cursor-pointer border-0 bg-transparent text-[14px] leading-none text-[#1F3FB0]"
       >
         ×
       </button>

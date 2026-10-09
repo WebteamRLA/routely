@@ -54,7 +54,7 @@ export function ExperimentTable({
               >
                 {r.name}
               </Link>
-              <div className="mt-[3px] truncate text-xs text-ink-3">
+              <div className="mt-[3px] truncate text-[12px] text-ink-3">
                 <span className="font-mono">{r.path}</span> · Created {r.created}
               </div>
             </div>
@@ -117,7 +117,7 @@ export function ExperimentCards({
               >
                 {r.name}
               </Link>
-              <div className="mt-[3px] font-mono text-xs break-all text-ink-3">{r.path}</div>
+              <div className="mt-[3px] font-mono text-[12px] break-all text-ink-3">{r.path}</div>
             </div>
             <div className="flex items-center gap-1">
               <StatusPill status={r.displayStatus} />

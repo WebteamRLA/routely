@@ -27,11 +27,11 @@ export default function DashboardError({
       title="Something went wrong"
       body={
         <>
-          <p className="m-0 text-sm">
+          <p className="m-0 text-[14px]">
             We could not load this page. Try again, and if it keeps happening let us know.
           </p>
           {error.digest ? (
-            <p className="m-0 mt-1 font-mono text-xs">Reference: {error.digest}</p>
+            <p className="m-0 mt-1 font-mono text-[12px]">Reference: {error.digest}</p>
           ) : null}
         </>
       }

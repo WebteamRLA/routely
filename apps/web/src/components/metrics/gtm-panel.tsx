@@ -25,7 +25,8 @@ type TestState =
  */
 export function gtmTagCode(key: string): string {
   // Event keys are validated as /^[a-z][a-z0-9_]*$/, so they need no escaping inside quotes.
-  return `<script>(window.routely = window.routely || []).push(['track', '${key}']);</script>`;
+  // Laid out like the design's block (L1061), which calls `routely.track(key, {…})` instead.
+  return `<script>\n  window.routely = window.routely || [];\n  routely.push(['track', '${key}']);\n</script>`;
 }
 
 /**
@@ -145,6 +146,7 @@ export function GtmPanel({
         <SelectInput
           id="gtm-metric"
           inputSize="md"
+          className="text-[14px]"
           value={metric.id}
           onChange={(e) => selectMetric(e.target.value)}
         >
@@ -176,7 +178,7 @@ export function GtmPanel({
         <button
           type="button"
           onClick={copy}
-          className="h-7 shrink-0 cursor-pointer rounded-md border border-white/25 bg-transparent px-2.5 text-xs font-bold text-white outline-none hover:bg-white/10 focus-visible:ring-3 focus-visible:ring-white/40"
+          className="h-7 shrink-0 cursor-pointer rounded-md border border-white/25 bg-transparent px-2.5 text-[12px] font-bold text-white outline-none hover:bg-white/10 focus-visible:ring-3 focus-visible:ring-white/40"
         >
           {copied ? "Copied ✓" : "Copy"}
         </button>
@@ -242,7 +244,7 @@ function TestStatus({ state, metricKey }: { state: TestState; metricKey: string 
 function StepTile({ n, title, children }: { n: string; title: string; children: ReactNode }) {
   return (
     <div className="rounded-lg border border-divider p-3.5">
-      <div className="font-heading text-xl font-semibold text-coral">{n}</div>
+      <div className="font-heading text-[20px] font-semibold text-coral">{n}</div>
       <div className="mt-1 font-extrabold">{title}</div>
       <div className="mt-0.5 text-[13px] text-ink-3">{children}</div>
     </div>

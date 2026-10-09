@@ -120,7 +120,7 @@ function MetricModalBody({ open, onClose, projectId, fromWizard, onCreated }: Me
                 className="p-3"
               >
                 <div className="text-[13.5px] font-extrabold">{t.label}</div>
-                <div className="mt-0.5 text-xs text-ink-3">{t.sub}</div>
+                <div className="mt-0.5 text-[12px] text-ink-3">{t.sub}</div>
               </RadioCard>
             );
           })}

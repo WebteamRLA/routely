@@ -59,7 +59,7 @@ export function HeadToHead({ arms, type }: { arms: ArmStat[]; type: ExperimentKi
               </option>
             ))}
           </select>
-          <span className="text-xs font-bold text-ink-3">vs</span>
+          <span className="text-[12px] font-bold text-ink-3">vs</span>
           <select
             aria-label="Against"
             value={nB}
@@ -81,10 +81,10 @@ export function HeadToHead({ arms, type }: { arms: ArmStat[]; type: ExperimentKi
               <ArmSwatch size={8} color={x.color} />
               <span className="text-[13px] font-extrabold">{x.name}</span>
             </div>
-            <div className="mt-1.5 font-heading text-2xl font-semibold tabular-nums">
+            <div className="mt-1.5 font-heading text-[24px] font-semibold tabular-nums">
               {fP(x.cr, 2)}
             </div>
-            <div className="text-xs text-ink-3">
+            <div className="text-[12px] text-ink-3">
               {fN(x.c)} of {fN(x.v)} visitors
             </div>
             <div className="mt-1.5 truncate text-[11.5px] text-ink-2">{detail(x, type)}</div>

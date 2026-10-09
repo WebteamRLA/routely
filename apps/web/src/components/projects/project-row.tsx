@@ -48,14 +48,14 @@ export function ProjectRow({
         />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-extrabold">{project.name}</span>
+            <span className="truncate text-[14px] font-extrabold">{project.name}</span>
             {current ? (
               <Tag tone="navy" className="tracking-[0.06em]">
                 Current
               </Tag>
             ) : null}
           </div>
-          <div className="mt-0.5 truncate font-mono text-xs text-ink-3">{project.domain}</div>
+          <div className="mt-0.5 truncate font-mono text-[12px] text-ink-3">{project.domain}</div>
         </div>
       </div>
       <div className="min-w-[140px] flex-[0_1_190px] text-[13px]">
@@ -64,7 +64,7 @@ export function ProjectRow({
             ? `${project.running} running · ${n} experiment${n > 1 ? "s" : ""}`
             : "No experiments yet"}
         </div>
-        <div className="mt-0.5 text-xs text-ink-3">{project.activity}</div>
+        <div className="mt-0.5 text-[12px] text-ink-3">{project.activity}</div>
       </div>
       <div className="relative ml-auto flex items-center gap-1.5">
         {project.archived ? (
@@ -130,7 +130,7 @@ function RowActions({
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="size-[34px] cursor-pointer rounded-md border border-transparent bg-transparent text-base font-extrabold text-ink-2 hover:bg-divider"
+        className="size-[34px] cursor-pointer rounded-md border border-transparent bg-transparent text-[16px] font-extrabold text-ink-2 hover:bg-divider"
       >
         ⋯
       </button>
@@ -171,7 +171,7 @@ function RowActions({
             Delete project
           </button>
           {blocked ? (
-            <div className="px-2.5 pt-1.5 pb-2 text-xs leading-[1.4] text-ink-3">
+            <div className="px-2.5 pt-1.5 pb-2 text-[12px] leading-[1.4] text-ink-3">
               Switch to another project first to archive or delete this one.
             </div>
           ) : null}

@@ -134,11 +134,6 @@ export function liftColor(lift: number): string {
   return lift >= 0 ? "#0F7A52" : "#B4361F";
 }
 
-/** The goal's label in the goal select: "Signup (primary)" / "Lead (secondary)". */
-export function goalOptionLabel(goal: GoalView, primary: boolean): string {
-  return goal.name + (primary ? " (primary)" : " (secondary)");
-}
-
 export interface ArmBadge {
   label: "Winner" | "Winning" | "Leading";
   /** `Tag` tone: blue for Leading, red when Control wins, green for a winning variant. */

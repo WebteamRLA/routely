@@ -7,19 +7,27 @@ import { toast } from "sonner";
 import { PreviewModal } from "@/components/editor/preview-modal";
 import { previewLink } from "@/components/editor/preview-link";
 import { VisualEditor } from "@/components/editor/visual-editor";
-import { MetricModal } from "@/components/metrics/metric-modal";
 import { InstallModal } from "@/components/tracking/install-modal";
 import type { InstallInfo } from "@/components/tracking/types";
 import {
   WIZARD_STEPS,
   type DraftErrors,
   type ExperimentDraft,
+  type WizardStep,
   type WizardStepKey,
 } from "@/lib/domain";
-import { URL_RE } from "@/lib/domain-normalize";
+import { URL_RE, hostOf } from "@/lib/domain-normalize";
 import { qaChecks, readiness, resolveGoal, type QaCheck, type ReadinessItem } from "@/lib/qa";
 import { routes } from "@/lib/routes";
-import { hasErrors, leaveBasics, removeArm, validateDraft } from "@/lib/validate-draft";
+import {
+  ERROR_GROUPS,
+  groupsOf,
+  hasErrors,
+  leaveBasics,
+  removeArm,
+  stepHasErrors,
+  validateDraft,
+} from "@/lib/validate-draft";
 import type { MetricRow } from "@/lib/view-models";
 import { cn } from "@/lib/utils";
 import { launchExperimentAction, saveDraftAction } from "@/server/actions/experiment.actions";
@@ -35,7 +43,6 @@ import { StepSetup } from "./step-setup";
 import { type RuleShow, StepTargeting } from "./step-targeting";
 import { StepTraffic } from "./step-traffic";
 import { StepType } from "./step-type";
-import { StepVariants } from "./step-variants";
 import {
   LEAVE_REQUEST_EVENT,
   type LeaveRequestDetail,
@@ -45,12 +52,12 @@ import {
   type WizardStart,
 } from "./types";
 
-const STEP_KEYS = WIZARD_STEPS.map(([k]) => k);
+const STEP_KEYS: WizardStep[] = WIZARD_STEPS.map(([k]) => k);
 const REVIEW = STEP_KEYS.length - 1;
 
-/** The fields each step owns, to drop a server error once the customer edits that step. */
-function stepSlice(d: ExperimentDraft, step: WizardStepKey): string {
-  switch (step) {
+/** The fields each group owns, to drop a server error once the customer edits them. */
+function stepSlice(d: ExperimentDraft, group: WizardStepKey): string {
+  switch (group) {
     case "basics":
       return JSON.stringify([d.name, d.url, d.hypothesis]);
     case "variants":
@@ -66,22 +73,32 @@ function stepSlice(d: ExperimentDraft, step: WizardStepKey): string {
   }
 }
 
-/** `{"basics.url": ["…"]}` → `{ basics: { url: "…" } }`; unknown steps go to Review's list via "basics". */
+/**
+ * `{"variants.v1": ["…"]}` → `{ variants: { v1: "…" } }` (shown on Setup); unknown groups go to
+ * Review's list via "basics".
+ */
 function toDraftErrors(fieldErrors: Record<string, string[]> | undefined): DraftErrors {
   const out: DraftErrors = {};
   for (const [k, msgs] of Object.entries(fieldErrors ?? {})) {
     const dot = k.indexOf(".");
-    const step = (dot > 0 ? k.slice(0, dot) : "") as WizardStepKey;
+    const group = (dot > 0 ? k.slice(0, dot) : "") as WizardStepKey;
     const field = dot > 0 ? k.slice(dot + 1) : k;
-    const s: WizardStepKey = STEP_KEYS.includes(step) && step !== "review" ? step : "basics";
-    if (msgs?.[0]) (out[s] ??= {})[field] = msgs[0];
+    const g: WizardStepKey = ERROR_GROUPS.includes(group) ? group : "basics";
+    if (msgs?.[0]) (out[g] ??= {})[field] = msgs[0];
   }
   return out;
 }
 
+/** Reveals the errors of every field group a step shows (Setup: basics and variants). */
+function revealStep(s: ShowErr, step: WizardStep): ShowErr {
+  const n = { ...s };
+  for (const g of groupsOf(step)) n[g] = true;
+  return n;
+}
+
 function mergeErrors(a: DraftErrors, b: DraftErrors): DraftErrors {
   const out: DraftErrors = {};
-  for (const k of STEP_KEYS) {
+  for (const k of ERROR_GROUPS) {
     const merged = { ...(a[k] ?? {}), ...(b[k] ?? {}) };
     if (Object.keys(merged).length) out[k] = merged;
   }
@@ -121,9 +138,14 @@ function initialState(project: WizardProject, start: WizardStart) {
       : null;
   return {
     key,
-    draft: stored?.draft ?? start.draft,
-    step: Math.min(stored?.step ?? start.step, REVIEW),
-    maxStep: Math.max(stored?.maxStep ?? start.maxStep, stored?.step ?? start.step),
+    // Design v2 dropped secondary goals: the wizard shows none and saves none (a legacy draft's
+    // are replaced on its next save, as the prototype's save does).
+    draft: { ...(stored?.draft ?? start.draft), secondary: [] },
+    step: Math.max(0, Math.min(stored?.step ?? start.step, REVIEW)),
+    maxStep: Math.min(
+      REVIEW,
+      Math.max(stored?.maxStep ?? start.maxStep, stored?.step ?? start.step),
+    ),
     dirty: stored?.dirty ?? false,
     lastUrl: stored ? stored.lastUrl : start.mode === "edit" ? start.draft.url : null,
   };
@@ -136,7 +158,10 @@ export interface WizardProps {
   start: WizardStart;
 }
 
-/** The create/edit wizard (DESIGN.md 2.4, L777–1341) for both experiment types. */
+/**
+ * The create/edit wizard for both experiment types — design v2's six steps: Type, Setup (with
+ * the variants), Traffic, Targeting, Goals, Review & launch.
+ */
 export function Wizard({ project, install, metrics: initialMetrics, start }: WizardProps) {
   const router = useRouter();
   const [init] = useState(() => initialState(project, start));
@@ -150,19 +175,23 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
   const [maxStep, setMaxStep] = useState(init.maxStep);
   const [dirty, setDirty] = useState(init.dirty);
   const [lastUrl, setLastUrl] = useState<string | null>(init.lastUrl);
+  // Mirrors `lastUrl` for the async save/launch handlers.
+  const lastUrlRef = useRef(init.lastUrl);
   const [showErr, setShowErr] = useState<ShowErr>({});
   const [serverErrors, setServerErrors] = useState<DraftErrors>({});
   const [urlChecks, setUrlChecks] = useState<Record<string, UrlCheckEntry>>({});
   const [qa, setQa] = useState({ running: false, ran: false });
   const qaToken = useRef(0);
-  const [metrics, setMetrics] = useState(initialMetrics);
+  const metrics = initialMetrics;
   const [ruleShow, setRuleShow] = useState<RuleShow>({});
   const [editorArm, setEditorArm] = useState<number | null>(null);
+  // The arm whose editor waits for the snippet to be verified (the design's `pendingEd`).
+  const [pendingEd, setPendingEd] = useState<number | null>(null);
+  const pendingEdRef = useRef<number | null>(null);
   const [previewArm, setPreviewArm] = useState<number | null>(null);
   const [launch, setLaunch] = useState<LaunchState | null>(null);
   const [modal, setModal] = useState<LeaveModal | null>(null);
   const [installOpen, setInstallOpen] = useState(false);
-  const [metricOpen, setMetricOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copying, setCopying] = useState<number | null>(null);
   const leaving = useRef(false);
@@ -178,7 +207,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
 
   useEffect(() => {
     if (leaving.current) return;
-    writeStored(key, { v: 1, draft, step, maxStep, dirty, lastUrl });
+    writeStored(key, { v: 2, draft, step, maxStep, dirty, lastUrl });
   }, [key, draft, step, maxStep, dirty, lastUrl]);
 
   // Leaving the wizard by client-side navigation drops the stored copy; a refresh never unmounts.
@@ -214,13 +243,15 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
     return () => window.removeEventListener(LEAVE_REQUEST_EVENT, onLeave);
   }, []);
 
-  // Keep ?step= in the address bar in sync, without a server round trip.
+  // Keep ?step= in the address bar in sync, without a server round trip. The state must be
+  // `null`: Next treats a state carrying its own `__NA` marker as an internal call and skips
+  // syncing its router, which then puts the stale URL back after the next Server Action.
   useEffect(() => {
     try {
       const u = new URL(window.location.href);
       if (u.searchParams.get("step") === cur) return;
       u.searchParams.set("step", cur);
-      window.history.replaceState(window.history.state, "", u.pathname + u.search);
+      window.history.replaceState(null, "", u.pathname + u.search);
     } catch {
       // ignore
     }
@@ -358,39 +389,50 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
     document.querySelector("main")?.scrollTo?.({ top: 0 });
   };
 
+  /**
+   * What the prototype does when Continue leaves Setup (`leaveBasics`): control's arm URL and
+   * the page rule follow the experiment URL while the rule is still the auto-filled one. Run on
+   * every way out of Setup and before saving or launching — design v2 hides the page rule, so
+   * it must never be left behind on an old URL.
+   */
+  const syncSetup = useCallback((): ExperimentDraft => {
+    const d = leaveBasics(draftRef.current, lastUrlRef.current);
+    if (JSON.stringify(d) !== JSON.stringify(draftRef.current)) {
+      draftRef.current = d;
+      setDraft(d);
+    }
+    lastUrlRef.current = d.url;
+    setLastUrl(d.url);
+    return d;
+  }, []);
+
   const goStep = useCallback(
     (i: number, reveal = false) => {
       const target = Math.max(0, Math.min(i, REVIEW));
+      if (STEP_KEYS[step] === "basics" && target !== step) syncSetup();
       setStep(target);
-      if (reveal && target < REVIEW) setShowErr((s) => ({ ...s, [STEP_KEYS[target]!]: true }));
+      if (reveal && target < REVIEW) setShowErr((s) => revealStep(s, STEP_KEYS[target]!));
       if (target === REVIEW) void runQa();
       scrollTop();
     },
-    [runQa],
+    [runQa, step, syncSetup],
   );
 
   const missingChanges = !R
     ? draft.arms.filter((a, i) => i > 0 && !a.changes.length).map((a) => a.name)
     : [];
-  const variantsBlocked = cur === "variants" && !R && hasErrors(clientErrors, "variants");
+  // An A/B variant without changes blocks Continue on Setup (design v2 `vBlock`).
+  const variantsBlocked = cur === "basics" && !R && hasErrors(clientErrors, "variants");
 
   const next = () => {
     if (variantsBlocked) {
       setShowErr((s) => ({ ...s, variants: true }));
       return;
     }
-    if (cur !== "review" && hasErrors(errors, cur)) {
-      setShowErr((s) => ({ ...s, [cur]: true }));
+    if (cur !== "review" && stepHasErrors(errors, cur)) {
+      setShowErr((s) => revealStep(s, cur));
       toast("Fix the highlighted fields to continue");
       return;
-    }
-    if (cur === "basics") {
-      const d = leaveBasics(draftRef.current, lastUrl);
-      if (JSON.stringify(d) !== JSON.stringify(draftRef.current)) {
-        draftRef.current = d;
-        setDraft(d);
-      }
-      setLastUrl(d.url);
     }
     const n = step + 1;
     setMaxStep((m) => Math.max(m, n));
@@ -400,7 +442,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
   // ---- save / exit / leave -------------------------------------------------------------------
 
   const saveDraft = useCallback(async (): Promise<string | null> => {
-    const snapshot = draftRef.current;
+    const snapshot = syncSetup();
     setSaving(true);
     try {
       const res = await saveDraftAction(snapshot);
@@ -423,7 +465,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [syncSetup]);
 
   const leaveTo = useCallback(
     (href: string) => {
@@ -470,6 +512,45 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
     goStep(item.stepIndex, item.action === "Fix");
   };
 
+  // ---- visual editor, gated on the snippet (design v2 `pendingEd`) -----------------------------
+
+  const setPending = (arm: number | null) => {
+    pendingEdRef.current = arm;
+    setPendingEd(arm);
+  };
+
+  /**
+   * Editing a variant needs the Routely snippet on the page, so without verified tracking the
+   * install modal opens instead (in its editor mode) and the editor follows once the snippet is
+   * verified. Control's "View original" only previews, so it is never gated.
+   */
+  const openEditor = (arm: number) => {
+    if (arm > 0 && !install.installed) {
+      setPending(arm);
+      setInstallOpen(true);
+      return;
+    }
+    setEditorArm(arm);
+  };
+
+  const closeInstall = () => {
+    setInstallOpen(false);
+    setPending(null);
+    router.refresh();
+    if (STEP_KEYS[step] === "review") window.setTimeout(() => void runQa(), 80);
+  };
+
+  /** The snippet was verified: an editor waiting on it opens now. */
+  const onInstallVerified = () => {
+    const arm = pendingEdRef.current;
+    if (arm === null) return;
+    setPending(null);
+    setInstallOpen(false);
+    router.refresh();
+    setEditorArm(arm);
+    toast("Routely verified · opening the visual editor");
+  };
+
   const onCopyLink = async (arm: number) => {
     let id = draftRef.current.id;
     if (!id || dirty) {
@@ -505,7 +586,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
     if (!launch || launch.state !== "confirm" || !launch.ok) return;
     setLaunch({ ...launch, state: "launching" });
     try {
-      const res = await launchExperimentAction(draftRef.current);
+      const res = await launchExperimentAction(syncSetup());
       if (res.status === "success") {
         leaving.current = true;
         clearStored(key);
@@ -519,7 +600,12 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
         setServerErrors(fe);
         setShowErr((s) => {
           const n = { ...s };
-          for (const k of Object.keys(fe)) n[k as WizardStepKey] = true;
+          for (const k of Object.keys(fe)) {
+            const g = k as WizardStepKey;
+            n[g] = true;
+            // Setup shows both of its groups' errors together.
+            if (g === "basics" || g === "variants") n.basics = n.variants = true;
+          }
           return n;
         });
       } else {
@@ -566,7 +652,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
           : "text-ink-3";
 
   return (
-    <div className="mx-auto flex w-full max-w-[1240px] animate-rl-in flex-col gap-[18px]">
+    <div className="mx-auto flex w-full max-w-[1680px] animate-rl-in flex-col gap-[18px]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <button
@@ -596,7 +682,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
       <DesktopStepper
         step={step}
         maxStep={maxStep}
-        bad={(i) => !!showErr[STEP_KEYS[i]!] && hasErrors(errors, STEP_KEYS[i]!)}
+        bad={(i) => groupsOf(STEP_KEYS[i]!).some((g) => !!showErr[g] && hasErrors(errors, g))}
         onGo={(i) => goStep(i)}
       />
       <MobileStepper step={step} />
@@ -607,10 +693,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
         >
           {cur === "type" ? <StepType draft={draft} update={update} /> : null}
           {cur === "basics" ? (
-            <StepSetup {...stepProps} urlCheck={urlCheck} onCheckUrl={checkUrl} />
-          ) : null}
-          {cur === "variants" ? (
-            <StepVariants
+            <StepSetup
               {...stepProps}
               urlCheck={urlCheck}
               onCheckUrl={checkUrl}
@@ -618,7 +701,8 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
                 update((d) => removeArm(d, i));
                 toast("Variant removed · traffic re-split evenly");
               }}
-              onOpenEditor={(i) => setEditorArm(i)}
+              onOpenEditor={openEditor}
+              installed={install.installed}
             />
           ) : null}
           {cur === "traffic" ? <StepTraffic {...stepProps} /> : null}
@@ -629,16 +713,7 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
               setShow={(k, on) => setRuleShow((s) => ({ ...s, [k]: on }))}
             />
           ) : null}
-          {cur === "goal" ? (
-            <StepGoals
-              {...stepProps}
-              metrics={metrics}
-              onNewMetric={() => setMetricOpen(true)}
-              installed={install.installed}
-              primaryDomain={project.domain}
-              onOpenInstall={() => setInstallOpen(true)}
-            />
-          ) : null}
+          {cur === "goal" ? <StepGoals {...stepProps} metrics={metrics} /> : null}
           {isReview ? (
             <StepReview
               draft={draft}
@@ -647,7 +722,6 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
               qa={qa}
               rowPending={rowPending}
               goal={goal}
-              metrics={metrics}
               installed={install.installed}
               primaryDomain={project.domain}
               onGoStep={(i) => goStep(i)}
@@ -775,34 +849,15 @@ export function Wizard({ project, install, metrics: initialMetrics, start }: Wiz
       />
       <InstallModal
         open={installOpen}
-        onClose={() => {
-          setInstallOpen(false);
-          router.refresh();
-          if (STEP_KEYS[step] === "review") window.setTimeout(() => void runQa(), 80);
-        }}
-        onContinue={() => {
-          setInstallOpen(false);
-          router.refresh();
-          if (STEP_KEYS[step] === "review") window.setTimeout(() => void runQa(), 80);
-        }}
+        onClose={closeInstall}
+        onContinue={() => (pendingEdRef.current !== null ? onInstallVerified() : closeInstall())}
+        onVerified={onInstallVerified}
+        editorHost={
+          pendingEd !== null ? hostOf(draft.url.trim()) || project.domain || "your site" : undefined
+        }
         install={install}
         projectName={project.name}
         context="wizard"
-      />
-      <MetricModal
-        open={metricOpen}
-        onClose={() => setMetricOpen(false)}
-        projectId={project.id}
-        fromWizard
-        onCreated={(m) => {
-          setMetrics((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
-          update((d) => ({
-            ...d,
-            goal: m.id,
-            goalMode: "event",
-            secondary: d.secondary.filter((z) => z !== m.id),
-          }));
-        }}
       />
     </div>
   );

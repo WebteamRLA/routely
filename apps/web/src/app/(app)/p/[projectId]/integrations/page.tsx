@@ -5,9 +5,10 @@ import { CdnPanel } from "@/components/integrations/cdn-panel";
 import { getSheetsPanel } from "@/components/integrations/data";
 import { readOAuthFlash } from "@/components/integrations/flash";
 import { SheetsCard } from "@/components/integrations/sheets-card";
-import { Banner, ErrorCard, PageTitle, UnderlineTabs } from "@/components/rl";
+import { Banner, ErrorCard } from "@/components/rl";
 import { Button } from "@/components/ui/button";
 import { loadProject, orNotFound } from "@/components/settings/data";
+import { SettingsShell } from "@/components/settings/settings-shell";
 import { demoState } from "@/lib/demo-state";
 import { routes, type IntegrationsTab } from "@/lib/routes";
 import * as cdnService from "@/server/services/cdn.service";
@@ -18,7 +19,10 @@ export const metadata: Metadata = { title: "Integrations" };
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/** Integrations: Google Sheets (`?tab=sheets`, default) and CDN delivery (`?tab=cdn`). */
+/**
+ * Integrations: Google Sheets (`?tab=sheets`, default) and CDN delivery (`?tab=cdn`), shown as
+ * those two tabs of the design's Settings page.
+ */
 export default async function IntegrationsPage({
   params,
   searchParams,
@@ -41,17 +45,7 @@ export default async function IntegrationsPage({
   ]);
 
   return (
-    <div className="mx-auto flex w-full max-w-[1200px] animate-rl-in flex-col gap-[18px]">
-      <PageTitle title="Integrations" sub={`Reporting and delivery for ${project.name}.`} />
-      <UnderlineTabs
-        className="border-b border-border"
-        ariaLabel="Integrations"
-        active={tab}
-        tabs={[
-          { key: "sheets", label: "Google Sheets", href: r.integrations() },
-          { key: "cdn", label: "CDN delivery", href: r.integrations("cdn") },
-        ]}
-      />
+    <SettingsShell projectId={project.id} projectName={project.name} active={tab}>
       {flash ? (
         <Banner tone={flash.tone}>
           <span className="font-extrabold">{flash.title}</span>{" "}
@@ -82,6 +76,6 @@ export default async function IntegrationsPage({
         />
       ) : null}
       {cdn ? <CdnPanel projectId={project.id} overview={cdn} timezone={project.timezone} /> : null}
-    </div>
+    </SettingsShell>
   );
 }

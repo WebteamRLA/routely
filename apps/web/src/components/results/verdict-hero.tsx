@@ -97,7 +97,7 @@ export function VerdictHero({
           value={range}
           onChange={onRange}
         />
-        <div className="text-xs text-ink-3">{rangeText}</div>
+        <div className="text-[12px] text-ink-3">{rangeText}</div>
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ import { pathOf } from "@/lib/domain-normalize";
 import { changeCount } from "@/lib/editor";
 import type { QaCheck, Readiness, ReadinessItem, ResolvedGoal } from "@/lib/qa";
 import { targetSummary } from "@/lib/targeting";
-import type { MetricRow } from "@/lib/view-models";
+import { stepIndex } from "@/lib/validate-draft";
 import { cn } from "@/lib/utils";
 
 const pl = (n: number, w: string) => n + " " + w + (n === 1 ? "" : "s");
@@ -30,7 +30,6 @@ interface ReviewProps {
   /** Whether a check row is still waiting for its real URL check. */
   rowPending: (c: QaCheck) => boolean;
   goal: ResolvedGoal | undefined;
-  metrics: MetricRow[];
   installed: boolean;
   primaryDomain: string;
   onGoStep: (index: number) => void;
@@ -42,7 +41,10 @@ interface ReviewProps {
   copying: number | null;
 }
 
-/** Step 7 — Review & launch (design L1172–1311). The launch button lives in the footer. */
+/**
+ * Step 6 — Review & launch (design v2 L700–848). The launch button lives in the footer. Every
+ * experiment shows its conversion URL; design v2 removed the secondary-goals row.
+ */
 export function StepReview(p: ReviewProps) {
   const { draft: d, readiness: rd, checks, qa } = p;
   const R = d.type === "redirect";
@@ -104,12 +106,6 @@ export function StepReview(p: ReviewProps) {
         ? "text-[#94600A]"
         : "text-success-text"
     : "text-ink-3";
-
-  const secondaryNames =
-    d.secondary
-      .map((id) => p.metrics.find((m) => m.id === id)?.name)
-      .filter(Boolean)
-      .join(", ") || "None";
 
   return (
     <>
@@ -254,13 +250,16 @@ export function StepReview(p: ReviewProps) {
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <CardTitle size={16}>Experiment summary</CardTitle>
         </div>
-        <SummaryRow label={R ? "Control URL" : "Page"} onEdit={() => p.onGoStep(1)}>
+        <SummaryRow
+          label={R ? "Control URL" : "Page"}
+          onEdit={() => p.onGoStep(stepIndex("basics"))}
+        >
           <div className="flex min-w-0 items-baseline gap-2">
             <ArmSwatch position={0} size={8} />
             <span className="font-mono text-[13px] break-all">{d.url || "Not set"}</span>
           </div>
         </SummaryRow>
-        <SummaryRow label="Variants" onEdit={() => p.onGoStep(2)}>
+        <SummaryRow label="Variants" onEdit={() => p.onGoStep(stepIndex("variants"))}>
           <div className="flex flex-col gap-1.5">
             {d.arms.slice(1).map((a, j) => (
               <div key={j} className="flex min-w-0 items-baseline gap-2">
@@ -277,21 +276,19 @@ export function StepReview(p: ReviewProps) {
             ))}
           </div>
         </SummaryRow>
-        {R && d.goalMode === "url" ? (
-          <SummaryRow label="Conversion URL" onEdit={() => p.onGoStep(5)}>
-            <div className="flex min-w-0 items-baseline gap-2">
-              <Diamond className="bg-success" />
-              <span className="font-mono text-[13px] break-all">
-                {d.convUrl.trim() || "Not set"}
-              </span>
-            </div>
-            <div className="mt-[3px] text-[12.5px] text-ink-3">
-              {d.convMatch === "starts" ? "URL starts with" : "Exact match"} · reaching this page
-              counts as a conversion
-            </div>
-          </SummaryRow>
-        ) : null}
-        <SummaryRow label="Traffic split" onEdit={() => p.onGoStep(3)}>
+        <SummaryRow label="Conversion URL" onEdit={() => p.onGoStep(stepIndex("goal"))}>
+          <div className="flex min-w-0 items-baseline gap-2">
+            <Diamond className="bg-success" />
+            <span className="font-mono text-[13px] break-all">
+              {(d.goalMode === "url" && d.convUrl.trim()) || "Not set"}
+            </span>
+          </div>
+          <div className="mt-[3px] text-[12.5px] text-ink-3">
+            {d.convMatch === "starts" ? "URL starts with" : "Exact match"} · reaching this page
+            counts as a conversion
+          </div>
+        </SummaryRow>
+        <SummaryRow label="Traffic split" onEdit={() => p.onGoStep(stepIndex("traffic"))}>
           <TrafficBar
             size="sm"
             className="max-w-[360px]"
@@ -310,14 +307,14 @@ export function StepReview(p: ReviewProps) {
               : `${d.coverage}% of matching visitors are included`}
           </div>
         </SummaryRow>
-        <SummaryRow label="Audience" onEdit={() => p.onGoStep(4)}>
+        <SummaryRow label="Audience" onEdit={() => p.onGoStep(stepIndex("targeting"))}>
           <div className="text-[13.5px] leading-normal">{targetSummary(d.targeting)}</div>
         </SummaryRow>
-        <SummaryRow label="Primary goal" onEdit={() => p.onGoStep(5)}>
+        <SummaryRow label="Primary goal" onEdit={() => p.onGoStep(stepIndex("goal"))}>
           <div className="text-[13.5px] font-extrabold">
             {p.goal
               ? p.goal.isUrl
-                ? "Page visit · conversion URL reached"
+                ? "Page view · conversion URL reached"
                 : p.goal.name
               : "Not set"}
           </div>
@@ -350,8 +347,6 @@ export function StepReview(p: ReviewProps) {
               </span>
               <span className="font-bold text-ink-3">Counting</span>
               <span>{d.counting === "unique" ? "Once per visitor" : "Every conversion"}</span>
-              <span className="font-bold text-ink-3">Secondary goals</span>
-              <span>{secondaryNames}</span>
               {R ? (
                 <>
                   <span className="font-bold text-ink-3">Delivery</span>

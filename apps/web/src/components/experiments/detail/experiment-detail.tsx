@@ -10,12 +10,7 @@ import type { DemoState } from "@/lib/demo-state";
 import type { ExperimentDetailTab } from "@/lib/routes";
 import { routes } from "@/lib/routes";
 import type { ArmStat } from "@/lib/stats";
-import type {
-  ExperimentDetail,
-  ExperimentResults,
-  GoalPerformance,
-  MetricRow,
-} from "@/lib/view-models";
+import type { ExperimentDetail, ExperimentResults, GoalPerformance } from "@/lib/view-models";
 
 import { DeleteExperimentModal } from "../delete-experiment-modal";
 import { EndExperimentModal } from "../end-experiment-modal";
@@ -37,7 +32,6 @@ export function ExperimentDetailView({
   results,
   goalPerformance,
   activity,
-  metrics,
   endArms,
   endWinner,
   demo,
@@ -52,8 +46,6 @@ export function ExperimentDetailView({
   results: ExperimentResults | null;
   goalPerformance: GoalPerformance[] | null;
   activity: ActivityRow[];
-  /** Project metrics for live editing (Setup tab of a running/paused test), else null. */
-  metrics: MetricRow[] | null;
   /** All-time stats on the primary goal, for the End modal. */
   endArms: ArmStat[];
   endWinner: number;
@@ -128,7 +120,7 @@ export function ExperimentDetailView({
       ) : null}
 
       {activeTab === "setup" ? (
-        <SetupTab projectId={projectId} detail={detail} metrics={metrics}>
+        <SetupTab projectId={projectId} detail={detail}>
           {!draft ? (
             <ShareCard projectId={projectId} experimentId={detail.id} url={detail.share.url} />
           ) : null}

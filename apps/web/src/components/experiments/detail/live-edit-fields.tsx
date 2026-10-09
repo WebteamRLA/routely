@@ -1,9 +1,8 @@
 "use client";
 
-import { CountingControl, SecondaryGoalPills } from "@/components/experiments/goal-controls";
+import { CountingControl } from "@/components/experiments/goal-controls";
 import { SplitEditor } from "@/components/experiments/split-editor";
 import { FieldError, FormField, TextArea, TextInput } from "@/components/rl";
-import type { MetricRow } from "@/lib/view-models";
 
 import type { LiveEdit } from "./live-edit";
 
@@ -121,46 +120,24 @@ export function CoverageField({
   );
 }
 
-/** Counting + secondary goals, edited in the GOAL cell. The primary goal stays fixed. */
+/** Counting, edited in the GOAL cell. The goal itself stays fixed. */
 export function GoalFields({
   edit,
   update,
-  metrics,
-  primaryMetricId,
   error,
 }: {
   edit: LiveEdit;
   update: Update;
-  metrics: MetricRow[];
-  primaryMetricId: string | null;
   error: string | null;
 }) {
-  const options = metrics.filter((m) => m.id !== primaryMetricId);
   return (
-    <div className="mt-2 flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-extrabold">Count conversions</span>
-        <CountingControl
-          value={edit.counting}
-          onChange={(k) => update((s) => ({ ...s, counting: k }))}
-        />
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[13px] font-extrabold">
-          Secondary goals{" "}
-          <span className="font-medium text-ink-3">· reported, don’t decide the winner</span>
-        </span>
-        {options.length ? (
-          <SecondaryGoalPills
-            metrics={options}
-            selected={edit.secondary}
-            onChange={(ids) => update((s) => ({ ...s, secondary: ids }))}
-          />
-        ) : (
-          <span className="text-[12.5px] text-ink-3">This project has no other metrics yet.</span>
-        )}
-        <FieldError>{error}</FieldError>
-      </div>
+    <div className="mt-2 flex flex-col gap-1.5">
+      <span className="text-[13px] font-extrabold">Count conversions</span>
+      <CountingControl
+        value={edit.counting}
+        onChange={(k) => update((s) => ({ ...s, counting: k }))}
+      />
+      <FieldError>{error}</FieldError>
     </div>
   );
 }

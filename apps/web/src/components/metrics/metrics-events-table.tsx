@@ -13,8 +13,10 @@ import { routes } from "@/lib/routes";
 import type { MetricRow } from "@/lib/view-models";
 import { deleteMetricAction } from "@/server/actions/metric.actions";
 
+// The design's columns (L1225), with the actions cell widened for Delete beside GTM setup and
+// "Used" narrowed to pay for it, so the table still fits the 1200px Settings page unscrolled.
 const COLS =
-  "grid grid-cols-[minmax(140px,1.2fr)_110px_minmax(120px,1fr)_110px_70px_60px_150px] gap-3";
+  "grid grid-cols-[minmax(140px,1.2fr)_120px_minmax(120px,1fr)_110px_90px_60px_124px] gap-3";
 
 /**
  * "Metrics & custom events" (DESIGN.md 2.7 Metrics): every metric with its real last-received
@@ -34,6 +36,8 @@ export function MetricsEventsTable({
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<MetricRow | null>(null);
   const [pending, startDelete] = useTransition();
+  // The design lists the automatic page_view metric last.
+  const ordered = [...metrics.filter((m) => !m.system), ...metrics.filter((m) => m.system)];
 
   function confirmDelete() {
     const metric = deleting;
@@ -56,7 +60,7 @@ export function MetricsEventsTable({
             conversion goal. page_view is tracked automatically.
           </p>
         </div>
-        <Button size="sm" className="h-9 font-extrabold" onClick={() => setCreating(true)}>
+        <Button size="sm" className="h-9 px-3.5 font-extrabold" onClick={() => setCreating(true)}>
           + New metric
         </Button>
       </div>
@@ -79,7 +83,7 @@ export function MetricsEventsTable({
             </div>
             <div role="columnheader" aria-label="Actions" />
           </div>
-          {metrics.map((m) => {
+          {ordered.map((m) => {
             const never = !m.lastReceivedAt;
             return (
               <div
@@ -95,14 +99,14 @@ export function MetricsEventsTable({
                   {m.name}
                 </div>
                 <div role="cell" className="text-ink-2">
-                  {m.system ? "Page view" : m.kind === "page" ? "Page visit" : "Custom event"}
+                  {m.system || m.kind === "page" ? "Page view" : "Custom event"}
                 </div>
                 <div role="cell" className="min-w-0 truncate font-mono text-[12.5px]">
                   {m.key}
                 </div>
                 <div
                   role="cell"
-                  className={never ? "font-semibold text-[#94600A]" : "font-semibold text-ink-3"}
+                  className={never ? "font-semibold text-danger-text" : "font-semibold text-ink-3"}
                 >
                   {never ? "Never" : fAgo(minutesSince(m.lastReceivedAt!, new Date(now)))}
                 </div>
@@ -112,9 +116,9 @@ export function MetricsEventsTable({
                 <div role="cell" className="text-right tabular-nums">
                   {m.usedIn}
                 </div>
-                <div role="cell" className="flex items-center justify-end gap-3">
+                <div role="cell" className="flex items-center justify-end gap-2.5">
                   {m.system || m.kind === "page" ? (
-                    <span className="text-xs text-ink-3">Automatic</span>
+                    <span className="text-[12px] text-ink-3">Automatic</span>
                   ) : (
                     <Link
                       href={routes.project(projectId).metrics("gtm", { metric: m.id })}

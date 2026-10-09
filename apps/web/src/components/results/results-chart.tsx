@@ -142,7 +142,7 @@ export function ResultsChart({
             </span>
           ))}
         </div>
-        <div className="mt-2.5 text-xs text-ink-3">{note}</div>
+        <div className="mt-2.5 text-[12px] text-ink-3">{note}</div>
       </div>
     </Section>
   );

@@ -53,7 +53,7 @@ export function ShareCard({
   return (
     <Section className="flex flex-col gap-3 px-5 py-4">
       <div>
-        <div className="text-xs font-extrabold tracking-[0.06em] text-ink-3">SHARE RESULTS</div>
+        <div className="text-[12px] font-extrabold tracking-[0.06em] text-ink-3">SHARE RESULTS</div>
         <p className="mt-1 max-w-[680px] text-[13.5px] text-pretty text-ink-2">
           Create a read-only link so someone can see this experiment’s results without a Routely
           account. It shows only this experiment — not your other tests, projects or account.

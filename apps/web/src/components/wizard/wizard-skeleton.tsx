@@ -1,4 +1,5 @@
 import { Shimmer } from "@/components/rl";
+import { WIZARD_STEPS } from "@/lib/domain";
 
 /** Loading state for the wizard routes: top bar, stepper and a form card. */
 export function WizardSkeleton() {
@@ -6,7 +7,7 @@ export function WizardSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading experiment setup"
-      className="mx-auto flex w-full max-w-[1240px] flex-col gap-[18px]"
+      className="mx-auto flex w-full max-w-[1680px] flex-col gap-[18px]"
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -18,9 +19,12 @@ export function WizardSkeleton() {
         </div>
         <Shimmer className="h-9 w-24 rounded-md" />
       </div>
-      <div className="hidden grid-cols-7 gap-1.5 nav:grid">
-        {Array.from({ length: 7 }, (_, i) => (
-          <Shimmer key={i} className="h-1 rounded-[2px]" />
+      <div
+        className="hidden gap-1.5 nav:grid"
+        style={{ gridTemplateColumns: `repeat(${WIZARD_STEPS.length}, minmax(0, 1fr))` }}
+      >
+        {WIZARD_STEPS.map(([k]) => (
+          <Shimmer key={k} className="h-1 rounded-[2px]" />
         ))}
       </div>
       <div className="flex items-start gap-5">
@@ -28,7 +32,7 @@ export function WizardSkeleton() {
           <Shimmer className="h-6 w-64 rounded-sm" />
           <Shimmer className="h-[280px]" />
         </div>
-        <Shimmer className="hidden h-[320px] w-[290px] min-[1180px]:block" />
+        <Shimmer className="hidden h-[320px] w-[30%] max-w-[480px] min-w-[290px] min-[1180px]:block" />
       </div>
     </div>
   );

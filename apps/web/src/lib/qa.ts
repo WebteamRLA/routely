@@ -37,7 +37,10 @@ export interface QaCheck {
   hint: string;
   state: QaState;
   detail: string;
-  /** Where to fix it: a wizard step, or the project's installation screen. */
+  /**
+   * Where to fix it: a field group (`variants` is on the Setup step), or the project's
+   * installation screen.
+   */
   step: QaStep;
 }
 
@@ -246,6 +249,7 @@ export function qaChecks(d: ExperimentDraft, ctx: QaContext): QaCheck[] {
 export interface ReadinessItem {
   text: string;
   detail: string;
+  /** Field group, or "install". */
   step: QaStep;
   /** "Setup", "Goals", … or "Installation". */
   stepLabel: string;
@@ -277,7 +281,9 @@ const idx = (step: QaStep) => (step === "install" ? -1 : stepIndex(step));
  * - Warnings: the goal metric has never been received, an arm at 0%, coverage below 100%.
  * - Once QA ran: a failed check is blocking unless its step already has a validation error
  *   (and the script check is skipped while tracking is missing — the tracking row covers it);
- *   a warned check is a warning unless its step already has a warning or error.
+ *   a warned check is a warning unless its step already has a warning or error. "Its step" is
+ *   the wizard step, as the prototype dedupes by step name: a Setup error covers both the
+ *   control-URL and the variant checks, since Setup shows both.
  * - `canLaunch` = no blockers, QA ran, tracking installed.
  */
 export function readiness(
@@ -334,18 +340,19 @@ export function readiness(
   }
 
   const passed: Readiness["passed"] = [];
-  const errSteps = new Set(blocking.map((b) => b.step));
-  const warnSteps = new Set(warnings.map((w) => w.step));
+  const errSteps = new Set(blocking.map((b) => b.stepIndex));
+  const warnSteps = new Set(warnings.map((w) => w.stepIndex));
   if (qa) {
     for (const c of qa) {
       const inWizard = c.step !== "install";
+      const at = idx(c.step);
       if (c.state === "pass") passed.push({ text: c.label, detail: c.detail });
       else if (c.state === "fail") {
-        if (inWizard && errSteps.has(c.step)) continue;
+        if (inWizard && errSteps.has(at)) continue;
         if (c.id === "script" && !ctx.trackingInstalled) continue;
         blocking.push(item(c.label, c.detail, c.step, inWizard ? "Fix" : "Open installation"));
       } else {
-        if (inWizard && (warnSteps.has(c.step) || errSteps.has(c.step))) continue;
+        if (inWizard && (warnSteps.has(at) || errSteps.has(at))) continue;
         warnings.push(item(c.label, c.detail, c.step, inWizard ? "Review" : "Open installation"));
       }
     }

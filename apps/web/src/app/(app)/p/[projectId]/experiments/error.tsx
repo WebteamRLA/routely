@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 export default function ExperimentsError({ reset }: { error: Error; reset: () => void }) {
   return (
-    <div className="mx-auto flex max-w-[1320px] flex-col gap-[18px]">
+    <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-[18px]">
       <ErrorCard
         title="Experiments failed to load"
         body="The request didn’t complete. Nothing has changed with your running experiments."

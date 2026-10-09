@@ -56,6 +56,7 @@ describe("prototype formatters", () => {
     expect(fS(0.12)).toBe("+12.0%");
     expect(fS(-0.034)).toBe("−3.4%");
     expect(fS(0)).toBe("+0.0%");
+    expect(fS(-0.0004)).toBe("+0.0%");
     expect(fS(0.3, 0)).toBe("+30%");
   });
 

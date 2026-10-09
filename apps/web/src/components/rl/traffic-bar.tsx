@@ -42,7 +42,7 @@ export function TrafficBar({
           key={i}
           className={cn(
             "flex min-w-0 items-center justify-center overflow-hidden text-white transition-[flex] duration-200",
-            size === "xxl" ? "text-[13px] font-extrabold" : "text-xs font-extrabold",
+            size === "xxl" ? "text-[13px] font-extrabold" : "text-[12px] font-extrabold",
           )}
           style={{
             flex: Math.max(seg.weight, seg.weight > 0 ? 1 : 0.0001),

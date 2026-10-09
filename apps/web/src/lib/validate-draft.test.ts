@@ -7,12 +7,16 @@ import {
   duplicateDraft,
   errorList,
   firstErrorStep,
+  groupsOf,
   hasErrors,
+  incompleteSteps,
   leaveBasics,
   newDraft,
   removeArm,
   setDraftType,
+  stepHasErrors,
   stepIndex,
+  stepLabel,
   validateDraft,
 } from "./validate-draft";
 
@@ -41,7 +45,7 @@ function validAb(): ExperimentDraft {
     url: "https://acme.com/",
     arms: [d.arms[0]!, { ...d.arms[1]!, changes: [change] }],
     targeting: { ...d.targeting, pattern: "https://acme.com/" },
-    goal: "metric_1",
+    convUrl: "https://acme.com/thanks",
   };
 }
 
@@ -62,7 +66,7 @@ describe("validateDraft", () => {
       basics: { name: "Give your experiment a name.", url: "Enter the page URL." },
       variants: { v1: "Variant A has no changes yet, so it would be identical to Control." },
       targeting: { pattern: "Enter a page URL or pattern." },
-      goal: { goal: "Choose the primary goal this experiment is judged on." },
+      goal: { conv: "Enter the conversion URL: the page that counts as a conversion." },
     });
   });
 
@@ -113,11 +117,22 @@ describe("validateDraft", () => {
     }
   });
 
-  it("requires a metric in event mode, for either type", () => {
-    expect(validateDraft({ ...validRedirect(), goalMode: "event", goal: "" }).goal).toEqual({
-      goal: "Choose the primary goal this experiment is judged on.",
+  it("requires a conversion URL for A/B tests too, without the variant-URL rule", () => {
+    expect(validateDraft({ ...validAb(), convUrl: "" }).goal).toEqual({
+      conv: "Enter the conversion URL: the page that counts as a conversion.",
     });
-    expect(validateDraft({ ...validRedirect(), goalMode: "event", goal: "m" })).toEqual({});
+    expect(validateDraft({ ...validAb(), convUrl: "https://acme.com" }).goal).toEqual({
+      conv: "The conversion URL can’t be the same as the entry URL.",
+    });
+    // A/B variants have no URL of their own, so "" never collides with the conversion URL.
+    expect(validateDraft({ ...validAb(), convUrl: "https://acme.com/thanks" })).toEqual({});
+  });
+
+  it("asks a legacy metric goal for a conversion URL, whatever else is set", () => {
+    const conv = { conv: "Enter the conversion URL: the page that counts as a conversion." };
+    expect(validateDraft({ ...validRedirect(), goalMode: "event", goal: "m" }).goal).toEqual(conv);
+    expect(validateDraft({ ...validAb(), goalMode: "event", goal: "m" }).goal).toEqual(conv);
+    expect(validateDraft({ ...validAb(), goalMode: "event", goal: "" }).goal).toEqual(conv);
   });
 
   it("includes targeting errors", () => {
@@ -128,38 +143,63 @@ describe("validateDraft", () => {
 });
 
 describe("error helpers", () => {
-  it("finds, counts and flattens in step order", () => {
+  it("finds, counts and flattens in step order, with variants on Setup", () => {
     const e = validateDraft(newDraft("p", "ab"));
     expect(hasErrors(e)).toBe(true);
     expect(hasErrors(e, "traffic")).toBe(false);
     expect(firstErrorStep(e)).toBe("basics");
-    expect(errorList(e).map((x) => [x.stepLabel, x.key])).toEqual([
-      ["Setup", "name"],
-      ["Setup", "url"],
-      ["Variants", "v1"],
-      ["Targeting", "pattern"],
-      ["Goals", "goal"],
+    expect(errorList(e).map((x) => [x.step, x.stepLabel, x.stepIndex, x.key])).toEqual([
+      ["basics", "Setup", 1, "name"],
+      ["basics", "Setup", 1, "url"],
+      ["variants", "Setup", 1, "v1"],
+      ["targeting", "Targeting", 3, "pattern"],
+      ["goal", "Goals", 4, "conv"],
     ]);
     expect(hasErrors({})).toBe(false);
     expect(firstErrorStep({})).toBeNull();
-    expect(stepIndex("review")).toBe(6);
+    expect(firstErrorStep({ variants: { v1: "x" } })).toBe("basics");
+  });
+
+  it("maps groups onto the six steps", () => {
+    expect([stepIndex("type"), stepIndex("basics"), stepIndex("variants")]).toEqual([0, 1, 1]);
+    expect([stepIndex("traffic"), stepIndex("goal"), stepIndex("review")]).toEqual([2, 4, 5]);
+    expect(stepLabel("variants")).toBe("Setup");
+    expect(groupsOf("basics")).toEqual(["basics", "variants"]);
+    expect(groupsOf("goal")).toEqual(["goal"]);
+  });
+
+  it("checks a step across its groups", () => {
+    const onlyVariants = { variants: { v1: "x" } };
+    expect(stepHasErrors(onlyVariants, "basics")).toBe(true);
+    expect(stepHasErrors(onlyVariants, "traffic")).toBe(false);
+    expect(incompleteSteps(onlyVariants)).toEqual(["basics"]);
+    expect(incompleteSteps(validateDraft(newDraft("p", "ab")))).toEqual([
+      "basics",
+      "targeting",
+      "goal",
+    ]);
+    expect(incompleteSteps({})).toEqual([]);
   });
 });
 
 describe("draft transitions", () => {
-  it("newDraft picks the goal mode by type", () => {
+  it("newDraft uses a URL goal for both types", () => {
     expect(newDraft("p", "redirect").goalMode).toBe("url");
-    expect(newDraft("p", "ab").goalMode).toBe("event");
+    expect(newDraft("p", "ab").goalMode).toBe("url");
     expect(newDraft("p", "ab").arms.map((a) => [a.name, a.weight])).toEqual([
       ["Control", 50],
       ["Variant A", 50],
     ]);
   });
 
-  it("setDraftType forces event goals for A/B", () => {
-    expect(setDraftType(newDraft("p", "redirect"), "ab").goalMode).toBe("event");
-    expect(setDraftType(newDraft("p", "ab"), "redirect").goalMode).toBe("url");
-    expect(setDraftType({ ...newDraft("p", "ab"), goal: "m" }, "redirect").goalMode).toBe("event");
+  it("setDraftType switches the type and leaves the goal alone", () => {
+    const r = { ...newDraft("p", "redirect"), convUrl: "https://acme.com/thanks" };
+    const ab = setDraftType(r, "ab");
+    expect(ab).toMatchObject({ type: "ab", goalMode: "url", convUrl: "https://acme.com/thanks" });
+    expect(setDraftType(ab, "redirect").type).toBe("redirect");
+    const legacy = { ...newDraft("p", "ab"), goalMode: "event" as const, goal: "m" };
+    expect(setDraftType(legacy, "redirect")).toMatchObject({ goalMode: "event", goal: "m" });
+    expect(setDraftType(r, "redirect")).toBe(r);
   });
 
   it("adds up to five arms and re-splits", () => {
@@ -262,7 +302,8 @@ describe("draft transitions", () => {
     expect(ab.arms[1]!.changes).toEqual([change]);
     expect(ab.arms[1]!.changes[0]).not.toBe(change);
     expect(ab.arms[1]!.url).toBe("");
-    expect(draftFromExperiment({ ...src, type: "ab", conversionUrl: null }).goalMode).toBe("event");
+    // No goal at all: the wizard asks for a conversion URL, for either type.
+    expect(draftFromExperiment({ ...src, type: "ab", conversionUrl: null }).goalMode).toBe("url");
   });
 
   it("duplicateDraft drops ids", () => {

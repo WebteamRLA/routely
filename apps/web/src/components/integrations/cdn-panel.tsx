@@ -56,7 +56,7 @@ export function CdnPanel({
             personalised and is never cached, so one visitor’s variant is never shown to another.
           </p>
         </div>
-        <span className="flex items-center gap-1.5 rounded-[20px] bg-divider px-2.5 py-1 text-xs font-extrabold text-ink-2">
+        <span className="flex items-center gap-1.5 rounded-[20px] bg-divider px-2.5 py-1 text-[12px] font-extrabold text-ink-2">
           <span aria-hidden className="size-[7px] rounded-full bg-[#9AA3B5]" />
           Not connected
         </span>
@@ -81,7 +81,7 @@ export function CdnPanel({
           />
         ))}
         <div className="rounded-lg border border-divider px-3.5 py-3">
-          <div className="text-xs font-bold text-ink-3">Last purge</div>
+          <div className="text-[12px] font-bold text-ink-3">Last purge</div>
           <div className="mt-2 font-heading text-[17px] font-semibold">
             {purging ? "Purging…" : lastPurge}
           </div>
@@ -99,7 +99,7 @@ export function CdnPanel({
               className="flex justify-between gap-2.5 border-t border-divider px-3.5 py-[9px] text-[13px]"
             >
               <span>{r.asset}</span>
-              <span className="text-right font-mono text-xs text-ink-3">{r.ttl}</span>
+              <span className="text-right font-mono text-[12px] text-ink-3">{r.ttl}</span>
             </div>
           ))}
         </div>
@@ -113,7 +113,7 @@ export function CdnPanel({
               className="flex justify-between gap-2.5 border-t border-divider px-3.5 py-[9px] text-[13px]"
             >
               <span>{r}</span>
-              <span className="font-mono text-xs text-ink-3">no-store</span>
+              <span className="font-mono text-[12px] text-ink-3">no-store</span>
             </div>
           ))}
         </div>
@@ -135,6 +135,7 @@ export function CdnPanel({
         body="Edge locations would re-fetch scripts, variant assets and campaign pages. No CDN is connected yet, so Routely only records when you purged. Visitor assignments are not affected."
         confirmLabel="Purge cache"
         tone="dark"
+        titleWeight={600}
         onConfirm={purge}
       />
     </Section>

@@ -24,7 +24,7 @@ export function LoginShowcase({ className }: { className?: string }) {
     >
       <div className="flex items-center gap-2.5">
         <BrandMark />
-        <span className="font-heading text-xl font-bold tracking-[-0.01em]">Routely</span>
+        <span className="font-heading text-[20px] font-bold tracking-[-0.01em]">Routely</span>
       </div>
 
       <div className="max-w-[480px]">
@@ -37,7 +37,7 @@ export function LoginShowcase({ className }: { className?: string }) {
           <br />
           Learn what converts.
         </h2>
-        <p className="text-[15.5px] leading-relaxed text-white/72">
+        <p className="text-[15.5px] leading-[1.6] text-white/72">
           Split URL and A/B tests with plain-language results your whole team can act on.
         </p>
       </div>
@@ -47,7 +47,7 @@ export function LoginShowcase({ className }: { className?: string }) {
           <div className="flex-[50] bg-arm-control" />
           <div className="flex-[50] bg-arm-a" />
         </div>
-        <div className="flex justify-between font-mono text-xs text-white/60">
+        <div className="flex justify-between font-mono text-[12px] text-white/60">
           <span>/pricing · 50%</span>
           <span>/pricing-b · 50%</span>
         </div>

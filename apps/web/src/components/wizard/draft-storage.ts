@@ -7,7 +7,8 @@ import type { ExperimentDraft } from "@/lib/domain";
  * without it.
  */
 export interface StoredWizard {
-  v: 1;
+  /** 2 = six steps (design v2); 1 = the old seven, with Variants third. */
+  v: 2;
   draft: ExperimentDraft;
   step: number;
   maxStep: number;
@@ -19,14 +20,30 @@ export function storageKey(projectId: string, experimentId: string | null): stri
   return `rl:wizard:${projectId}:${experimentId ?? "new"}`;
 }
 
+/** A seven-step index (Type, Setup, Variants, Traffic, …) as a six-step one: Variants → Setup. */
+function fromV1Step(i: number): number {
+  return i <= 2 ? Math.min(i, 1) : i - 1;
+}
+
+/**
+ * Validates a stored copy (parsed JSON) for this project. A copy written before design v2 — a
+ * tab refreshed across the deploy — has its step indices moved onto the six steps.
+ */
+export function parseStored(parsed: unknown, projectId: string): StoredWizard | null {
+  const p = parsed as (Omit<StoredWizard, "v"> & { v: number }) | null;
+  if (!p || (p.v !== 1 && p.v !== 2) || !p.draft || p.draft.projectId !== projectId) return null;
+  if (!Array.isArray(p.draft.arms) || p.draft.arms.length < 2) return null;
+  const step = Number.isInteger(p.step) ? p.step : 0;
+  const maxStep = Number.isInteger(p.maxStep) ? p.maxStep : step;
+  if (p.v === 2) return { ...p, v: 2, step, maxStep };
+  return { ...p, v: 2, step: fromV1Step(step), maxStep: fromV1Step(maxStep) };
+}
+
 export function readStored(key: string, projectId: string): StoredWizard | null {
   try {
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as StoredWizard;
-    if (parsed?.v !== 1 || !parsed.draft || parsed.draft.projectId !== projectId) return null;
-    if (!Array.isArray(parsed.draft.arms) || parsed.draft.arms.length < 2) return null;
-    return parsed;
+    return parseStored(JSON.parse(raw), projectId);
   } catch {
     return null;
   }

@@ -13,9 +13,10 @@ import { Avatar, ProjectIcon } from "@/components/rl";
 import { cn } from "@/lib/utils";
 
 /**
- * Below 900px: the 56px navy top bar with "Menu", and the drawer it opens (DESIGN.md §1.4–1.5):
- * PROJECTS (✓ on the current one), "+ Create new project", the nav, "+ New experiment" and the
- * user row with "Log out".
+ * Below 900px: the 56px navy top bar with "Menu", and the drawer it opens (design v2): PROJECTS
+ * (✓ on the current one), "+ Create new project", the grouped nav — spaced by the drawer's own
+ * 16px gap, as the prototype lays its items out directly in the drawer column — "+ New
+ * experiment" and the user row with "Log out".
  */
 export function MobileNav({ user, nav }: { user: ShellUser; nav: NavItem[] }) {
   const { projects, current, switchProject, openCreateProject, logout } = useShell();
@@ -120,7 +121,7 @@ export function MobileNav({ user, nav }: { user: ShellUser; nav: NavItem[] }) {
               </button>
             </div>
 
-            <nav aria-label="Main" className="flex flex-col gap-0.5">
+            <nav aria-label="Main" className="flex flex-col gap-4">
               <NavList items={nav} size="drawer" onNavigate={close} />
             </nav>
 

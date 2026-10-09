@@ -19,7 +19,7 @@ export function TrafficDistribution({
     <Section className="flex flex-col gap-3.5 p-[18px]">
       <CardTitle>Traffic distribution</CardTitle>
       <div>
-        <div className="mb-1.5 text-xs font-bold text-ink-3">Actual visitors</div>
+        <div className="mb-1.5 text-[12px] font-bold text-ink-3">Actual visitors</div>
         <TrafficBar
           size="xl"
           segments={arms.map((a) => {
@@ -36,7 +36,7 @@ export function TrafficDistribution({
         />
       </div>
       <div>
-        <div className="mb-1.5 text-xs font-bold text-ink-3">
+        <div className="mb-1.5 text-[12px] font-bold text-ink-3">
           Planned {arms.map((a) => `${a.weight ?? 0}%`).join(" / ")} · {coverage}% of matching
           visitors
         </div>

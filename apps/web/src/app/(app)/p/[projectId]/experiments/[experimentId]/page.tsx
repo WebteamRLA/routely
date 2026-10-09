@@ -12,12 +12,11 @@ import { fDate } from "@/lib/format";
 import type { ExperimentDetailTab } from "@/lib/routes";
 import { computeStats } from "@/lib/stats";
 import { defaultWinner, verdict } from "@/lib/verdict";
-import type { ExperimentDetail, GoalPerformance, MetricRow, ResultsRange } from "@/lib/view-models";
+import type { ExperimentDetail, GoalPerformance, ResultsRange } from "@/lib/view-models";
 import { requireSession } from "@/server/auth/session";
 import { isAppError } from "@/server/errors";
 import * as analyticsService from "@/server/services/analytics.service";
 import * as experimentService from "@/server/services/experiment.service";
-import { listProjectMetrics } from "@/server/services/metric.service";
 import { getProject } from "@/server/services/website.service";
 
 export const metadata: Metadata = { title: "Experiment" };
@@ -92,12 +91,6 @@ export default async function ExperimentDetailPage({
     ]);
   }
 
-  // Running/paused tests can be edited inline on the Setup tab (secondary goals need metrics).
-  const metrics: MetricRow[] | null =
-    tab === "setup" && (detail.status === "running" || detail.status === "paused")
-      ? await listProjectMetrics(actor, projectId)
-      : null;
-
   const meta: ResultsMeta = {
     status: detail.status,
     type: detail.type,
@@ -139,7 +132,6 @@ export default async function ExperimentDetailPage({
       results={results}
       goalPerformance={goalPerformance}
       activity={activity}
-      metrics={metrics}
       endArms={endStats.arms}
       endWinner={endWinner}
       demo={demoState(sp)}

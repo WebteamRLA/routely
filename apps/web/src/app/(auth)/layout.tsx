@@ -17,7 +17,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="flex w-full max-w-[400px] flex-col gap-[18px]">
           <div className="flex items-center gap-2.5 nav:hidden">
             <BrandMark className="size-[22px]" />
-            <span className="font-heading text-lg font-bold">Routely</span>
+            <span className="font-heading text-[18px] font-bold">Routely</span>
           </div>
           {children}
         </div>

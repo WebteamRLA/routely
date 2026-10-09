@@ -69,7 +69,7 @@ export function NavyStrip({
           {eyebrow}
         </div>
       ) : null}
-      <div className="text-sm leading-relaxed">{children}</div>
+      <div className="text-[14px] leading-relaxed">{children}</div>
     </div>
   );
 }

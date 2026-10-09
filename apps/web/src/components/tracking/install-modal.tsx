@@ -9,16 +9,27 @@ export interface InstallModalProps {
   onClose: () => void;
   install: InstallInfo;
   projectName: string;
-  /** "wizard": the success action reads "Continue to launch"; "settings": "Done". */
+  /** "wizard": the footer's success action reads "Continue to launch"; "settings": "Done". */
   context: "wizard" | "settings";
   /** Called by "Continue to launch" / "Done". Defaults to `onClose`. */
   onContinue?: () => void;
+  /**
+   * Opened from the visual editor's install gate: the host the editor wants to load. Shows the
+   * amber "Install Routely to open the visual editor" note above the snippet.
+   */
+  editorHost?: string;
+  /**
+   * Called once, when a verification the customer runs in this modal detects the snippet — so the
+   * caller can close the modal and open the editor. With `editorHost` set, the toast reads
+   * "Routely verified · opening the visual editor".
+   */
+  onVerified?: () => void;
 }
 
 /**
- * The install modal (DESIGN.md 3.7): the Installation panel in a 760px dialog with a × beside the
- * status badge, a continue button in the success banner and a sticky footer. Escape and a backdrop
- * click close it.
+ * The install modal (design v2): the Installation panel in a 760px dialog with a × beside the
+ * status badge and a sticky footer whose continue button appears once tracking is installed.
+ * Escape and a backdrop click close it. The panel unmounts on close, so every opening starts fresh.
  */
 export function InstallModal({
   open,
@@ -27,6 +38,8 @@ export function InstallModal({
   projectName,
   context,
   onContinue,
+  editorHost,
+  onVerified,
 }: InstallModalProps) {
   const continueText = context === "wizard" ? "Continue to launch" : "Done";
   const proceed = onContinue ?? onClose;
@@ -44,6 +57,8 @@ export function InstallModal({
       <InstallPanel
         install={install}
         projectName={projectName}
+        editorHost={editorHost}
+        onVerified={onVerified}
         headerAside={
           <button
             type="button"
@@ -54,20 +69,8 @@ export function InstallModal({
             ×
           </button>
         }
-        successAction={
-          <button
-            type="button"
-            onClick={proceed}
-            className="h-[38px] cursor-pointer rounded-md border-0 bg-success px-4 text-[13.5px] font-extrabold text-white outline-none hover:bg-[#0F8A5C] focus-visible:ring-3 focus-visible:ring-primary/30"
-          >
-            {continueText}
-          </button>
-        }
         footer={(installed) => (
-          <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2.5 border-t border-divider bg-card px-4 py-3.5 sm:px-[22px]">
-            <span className="text-[12.5px] text-ink-3">
-              Project-level · shared by every A/B and split URL test in {projectName}
-            </span>
+          <div className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2.5 border-t border-divider bg-card px-[22px] py-3.5">
             <div className="flex gap-2">
               <button
                 type="button"
