@@ -4,9 +4,10 @@ import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { DashboardEmpty } from "@/components/dashboard/dashboard-empty";
 import { DashboardSkeleton, DemoDashboardError } from "@/components/dashboard/dashboard-states";
 import { DashboardKpis } from "@/components/dashboard/kpi-strip";
-import { LiveExperiments } from "@/components/dashboard/live-experiments";
+import { ConversionsCard } from "@/components/dashboard/conversions-card";
+import { ExperimentsOverview } from "@/components/dashboard/experiments-overview";
 import { buildDashboard } from "@/components/dashboard/model";
-import { NeedsDecision } from "@/components/dashboard/needs-decision";
+import { VisitorsCard } from "@/components/dashboard/visitors-card";
 import { demoState } from "@/lib/demo-state";
 import { routes } from "@/lib/routes";
 import { draftFromExperiment, validateDraft } from "@/lib/validate-draft";
@@ -84,12 +85,15 @@ export default async function DashboardPage({
       ) : (
         <>
           <DashboardKpis tiles={view.strip} />
-          <LiveExperiments
-            rows={view.live}
-            threshold={project.threshold}
-            allHref={routes.project(projectId).experiments({ status: "all" })}
+          <ExperimentsOverview
+            rows={view.rows}
+            counts={view.counts}
+            viewAllHref={routes.project(projectId).experiments({ status: "all" })}
           />
-          <NeedsDecision items={view.attention} count={view.attentionCount} />
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,420px),1fr))] gap-4">
+            <ConversionsCard slices={view.conversions} />
+            <VisitorsCard points={view.visitors} />
+          </div>
         </>
       )}
     </div>

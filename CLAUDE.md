@@ -82,7 +82,7 @@ routely/
 │       │   ├── rl/           design primitives (status pill, traffic bar, modal, tabs, …)
 │       │   ├── layout/       shell: sidebar, project switcher, nav, profile menu, drawer, leave guard
 │       │   ├── projects/     project modal (favicon probe), manage-projects rows/dialogs
-│       │   ├── dashboard/    KPI strip, live experiments, needs-a-decision, empty state
+│       │   ├── dashboard/    KPI strip, experiments table, conversions + visitors cards, empty state
 │       │   ├── experiments/  list/ and detail/ (header, setup, activity, share), end/delete modals
 │       │   ├── results/      verdict hero, scorecards, chart, comparison + CI, goals, traffic, h2h
 │       │   ├── wizard/       the 7-step create/edit wizard, launch + leave modals
@@ -135,7 +135,7 @@ owned → not found). The last project visited is remembered in the `rl_project`
 | `/` | → remembered project's dashboard, else the first active project, else `/projects` |
 | `/login` | Google sign-in in the design's two-column layout (`?signedOut=1` shows the notice) |
 | `/projects` | Manage projects: search, switch, edit, archive/restore, delete, create |
-| `/p/[projectId]` | Dashboard: KPI strip, live experiments, needs a decision, empty state |
+| `/p/[projectId]` | Dashboard: KPI strip, Experiments table (All · Running · Needs action), conversions by running experiment, visitors over time (30 days), empty state |
 | `/p/[projectId]/experiments` | List: status tabs, search, type filter, sort (all in the URL) |
 | `/p/[projectId]/experiments/new` | Wizard (`?type=ab\|redirect`, `?step=`) |
 | `/p/[projectId]/experiments/[id]` | Detail: `?tab=results\|setup\|activity`, `?range=`, `?goal=` |
@@ -460,7 +460,7 @@ z-test per variant against control giving **chance to beat control**, a 95% inte
 lift and a p-value, judged against the project's **significance threshold** (90/95/99%, set in
 Settings → Project). The verdict ("Variant A is winning", "Too early to call" with an estimate of
 visitors and days still needed, "Control is winning", …) and the dashboard's confidence bars use
-the same functions. This replaced the earlier "currently ahead · not proof" rule at the user's
+the same functions (the dashboard table's "Ready to call" and result labels too). This replaced the earlier "currently ahead · not proof" rule at the user's
 explicit request. Keep the methodology note visible wherever intervals and p-values appear.
 
 ---

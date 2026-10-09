@@ -17,7 +17,9 @@ import { addDays, dayKeyInZone, daysBetween, startOfDayInZone } from "@/server/t
  * dashboard and the results page can never disagree about the same numbers.
  */
 
-const WINDOW_DAYS = 28;
+/** 30 project-local days: "Visitors over time" shows them all; the KPI strip compares the last
+ * 14 with the 14 before. */
+const WINDOW_DAYS = 30;
 
 export async function getProjectDashboard(
   actorUserId: string,
@@ -78,8 +80,8 @@ export async function getProjectDashboard(
     timezone: tz,
     days,
     daily,
-    last14: sum(daily.slice(14)),
-    previous14: sum(daily.slice(0, 14)),
+    last14: sum(daily.slice(-14)),
+    previous14: sum(daily.slice(-28, -14)),
     runningCount: experiments.filter((e) => e.status === "running").length,
     winnersCount: experiments.filter((e) => e.displayStatus === "winner").length,
     experiments,

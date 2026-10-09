@@ -17,8 +17,9 @@ const SEG_LIGHT_SIZE = {
 } as const;
 
 /**
- * Segmented control in the design's three treatments: `light` (separate buttons, navy when on),
- * `joined` (one bordered strip) and `dark` (on the navy editor/preview bars). Single-select, so
+ * Segmented control in four treatments: `light` (separate buttons, navy when on), `joined` (one
+ * bordered strip), `dark` (on the navy editor/preview bars) and `pill` (a grey track with a
+ * raised white tab — the dashboard's experiment filter). Single-select, so
  * it is a radio group — or a tab list (`role="tab"`) when it switches what a panel shows.
  */
 export function Segmented<T extends string>({
@@ -37,7 +38,7 @@ export function Segmented<T extends string>({
   options: SegOption<T>[];
   value: T;
   onChange: (value: T) => void;
-  variant?: "light" | "joined" | "dark";
+  variant?: "light" | "joined" | "dark" | "pill";
   /** Light variant only: 28px (xs), 32px (sm) or 34px (md) tall. */
   size?: keyof typeof SEG_LIGHT_SIZE;
   disabled?: boolean;
@@ -57,6 +58,8 @@ export function Segmented<T extends string>({
         variant === "light" && "flex-wrap gap-1.5",
         variant === "joined" && "w-fit overflow-hidden rounded-lg border border-input",
         variant === "dark" && "w-fit gap-0.5 rounded-lg bg-white/8 p-[3px]",
+        variant === "pill" &&
+          "w-fit max-w-full gap-0.5 overflow-x-auto rounded-lg bg-secondary p-[3px]",
         className,
       )}
     >
@@ -90,6 +93,13 @@ export function Segmented<T extends string>({
                 cn(
                   "h-[30px] rounded-md px-3 text-[12.5px]",
                   on ? "bg-white text-foreground" : "bg-transparent text-white/78 hover:text-white",
+                ),
+              variant === "pill" &&
+                cn(
+                  "flex h-[30px] shrink-0 items-center gap-1.5 rounded-md px-3 text-[13px] disabled:opacity-50",
+                  on
+                    ? "bg-card text-foreground shadow-[0_1px_2px_rgba(10,22,51,0.12)]"
+                    : "bg-transparent text-ink-3 hover:text-foreground",
                 ),
               itemClassName,
             )}

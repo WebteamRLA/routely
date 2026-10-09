@@ -247,7 +247,7 @@ export interface GoalPerformance {
 
 export interface DashboardData {
   timezone: string;
-  /** Project-local days, oldest first: 28 entries (previous 14, then the last 14). */
+  /** Project-local days, oldest first: 30 entries (the last 28 are the previous 14 then the last 14). */
   days: string[];
   /** Project-wide assigned visitors / primary-goal conversions per day, aligned with `days`. */
   daily: DailyPoint[];

@@ -1,12 +1,12 @@
 /**
- * The dashboard's view model (DESIGN.md §2.2, prototype `renderVals` L2718–2763): KPI strip,
- * live rows, "Needs a decision" and the title — computed from real data with `lib/stats` and
- * `lib/verdict`, so the dashboard and the results page agree about the same numbers.
+ * The dashboard's view model: KPI strip, the Experiments table (with each row's needs-action
+ * reason), the conversions breakdown and the 30-day visitor series — computed from real data
+ * with `lib/stats` and `lib/verdict`, so the dashboard and the results page agree about the
+ * same numbers.
  *
  * Pure: no server imports. The page builds it and hands plain rows to the components.
  */
 import type { DisplayStatusKey, Threshold } from "@/lib/domain";
-import { pathOf } from "@/lib/domain-normalize";
 import { fAgo, fN, fP, fS, minutesSince } from "@/lib/format";
 import { routes } from "@/lib/routes";
 import { computeStats, type ExperimentStats } from "@/lib/stats";
@@ -22,38 +22,70 @@ export interface KpiView {
   href: string;
 }
 
-export interface LiveRow {
+/** Which tab of the Experiments section a row appears under. */
+export type ExperimentTab = "all" | "running" | "action";
+
+/** One row of the dashboard's Experiments table. */
+export interface ExperimentRow {
   id: string;
   name: string;
-  type: string;
-  path: string;
-  day: string;
-  visitors: string;
-  lift: string;
-  liftColor: string;
-  leader: string;
-  /** Chance to beat control of the best variant, or null with no data. */
-  prob: number | null;
+  /** Letter tile: initial and a colour stable for this experiment. */
+  initial: string;
+  tileColor: string;
   status: DisplayStatusKey;
+  /** "Running · day 42", "Paused · 3h ago", "Draft · updated 2h ago". */
+  statusLine: string;
+  typeLabel: string;
+  /** Why this experiment needs a decision, or null. */
+  needsAction: string | null;
+  /** Tone of the needs-action reason. */
+  actionTone: "good" | "warn" | "bad" | "neutral";
+  visitors: string;
+  variantsLabel: string;
+  /** Share of the listed experiments' assigned visitors, 0–1. */
+  share: number;
+  shareLabel: string;
+  conversionRate: string;
+  /** Verdict in a few words, or "no result yet". */
+  resultLabel: string;
+  resultColor: string;
+  /** The row button: "Review", "Continue" or "View". */
+  actionLabel: string;
+  actionHref: string;
   href: string;
+  running: boolean;
 }
 
-export interface AttentionItem {
-  tag: "Ready to call" | "Paused" | "Draft" | "Tracking";
-  title: string;
-  body: string;
-  action: string;
-  href: string;
+/** A running experiment's slice of the "Conversions by running experiment" chart. */
+export interface ConversionSlice {
+  id: string;
+  name: string;
+  color: string;
+  conversions: number;
+}
+
+export interface VisitorPoint {
+  /** Project-local day, YYYY-MM-DD. */
+  day: string;
+  visitors: number;
 }
 
 export interface DashboardView {
   title: string;
   sub: string;
   strip: KpiView[];
-  live: LiveRow[];
-  /** At most three, as designed. */
-  attention: AttentionItem[];
-  attentionCount: string;
+  rows: ExperimentRow[];
+  counts: Record<ExperimentTab, number>;
+  conversions: ConversionSlice[];
+  visitors: VisitorPoint[];
+}
+
+/** Tile colours: the arm palette plus navy, so tiles stay on brand. */
+const TILE_COLORS = ["#2B59F0", "#F0603F", "#11A08F", "#B7860B", "#0A1633", "#7C879C"];
+function tileColor(id: string): string {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TILE_COLORS[h % TILE_COLORS.length]!;
 }
 
 const GOOD = "#0F7A52";
@@ -139,94 +171,121 @@ export function buildDashboard(
     },
   ];
 
-  const live: LiveRow[] = data.live.map((e) => {
-    const x = all.find((y) => y.e.id === e.id)!;
-    const has = x.st.v > 0;
-    const best = x.st.arms
+  // The table lists everything not yet finished: running, then paused, then drafts.
+  const order: Record<string, number> = { running: 0, paused: 1, draft: 2 };
+  const listed = all
+    .filter((x) => x.e.status !== "completed")
+    .sort(
+      (a, b) =>
+        order[a.e.status]! - order[b.e.status]! ||
+        b.e.visitors - a.e.visitors ||
+        b.e.updatedAt.localeCompare(a.e.updatedAt),
+    );
+  const listedVisitors = listed.reduce((t, x) => t + x.st.v, 0);
+  const silent = new Set(data.silentMetrics.map((m) => m.id));
+
+  const rows: ExperimentRow[] = listed.map(({ e, st, vd }) => {
+    const has = st.v > 0;
+    const best = st.arms
       .slice(1)
-      .reduce<(typeof x.st.arms)[number] | null>((m, a) => (!m || a.cr > m.cr ? a : m), null);
-    const prob = has && best ? best.prob : null;
+      .reduce<(typeof st.arms)[number] | null>((m, a) => (!m || a.cr > m.cr ? a : m), null);
+    const variants = e.arms.length - 1;
+    const ago = fAgo(minutesSince(e.updatedAt, now)).toLowerCase();
+
+    let needsAction: string | null = null;
+    let actionTone: ExperimentRow["actionTone"] = "neutral";
+    let actionLabel = "View";
+    let actionHref = p.experiment(e.id);
+    if (e.status === "running" && vd.ready) {
+      needsAction = vd.kind === "control" ? "Control is winning" : "Ready to call";
+      actionTone = "good";
+      actionLabel = "Review";
+    } else if (e.status === "running" && e.goal?.metricId && silent.has(e.goal.metricId)) {
+      needsAction = "Goal never received";
+      actionTone = "bad";
+      actionLabel = "Check tracking";
+      actionHref = p.metrics("gtm", { metric: e.goal.metricId });
+    } else if (e.status === "running" && !has) {
+      needsAction = "No traffic";
+      actionTone = "warn";
+      actionLabel = "Review";
+    } else if (e.status === "paused") {
+      needsAction = "Paused";
+      actionTone = "warn";
+      actionLabel = "Review";
+    } else if (e.status === "draft") {
+      const n = draftIncomplete[e.id] ?? 0;
+      needsAction = n ? `${n} setup step${n > 1 ? "s" : ""} left` : "Ready to launch";
+      actionTone = n ? "neutral" : "good";
+      actionLabel = "Continue";
+      actionHref = p.editExperiment(e.id);
+    }
+
+    const statusLine =
+      e.status === "running"
+        ? `Running · ${e.daysRunning ? `day ${e.daysRunning}` : "launched today"}`
+        : e.status === "paused"
+          ? `Paused · ${ago}`
+          : `Draft · updated ${ago}`;
+
     return {
       id: e.id,
       name: e.name,
-      type: TYPE_LABEL[e.type],
-      path: e.path || pathOf(e.url),
-      day: e.daysRunning ? `day ${e.daysRunning}` : "launched today",
-      visitors: has ? fN(x.st.v) : "—",
-      lift: prob != null && best ? fS(best.lift) : "—",
-      liftColor: prob != null && best ? deltaColor(best.lift) : "#5B6579",
-      leader: !has
-        ? "No data yet"
-        : x.vd.kind === "control"
-          ? "Control leads"
-          : (best?.name ?? "—"),
-      prob,
+      initial: e.name.trim().charAt(0).toUpperCase() || "?",
+      tileColor: tileColor(e.id),
       status: e.displayStatus,
+      statusLine,
+      typeLabel: TYPE_LABEL[e.type],
+      needsAction,
+      actionTone,
+      visitors: fN(st.v),
+      variantsLabel: `${variants} variant${variants === 1 ? "" : "s"}`,
+      share: listedVisitors ? st.v / listedVisitors : 0,
+      shareLabel: fP(listedVisitors ? st.v / listedVisitors : 0, 0),
+      conversionRate: has ? fP(st.c / st.v, 2) : "—",
+      resultLabel:
+        e.status === "draft"
+          ? "not launched"
+          : !has
+            ? "no result yet"
+            : vd.kind === "early" && best && best.prob != null
+              ? `${vd.short} · ${Math.round(best.prob * 100)}%`
+              : vd.short,
+      resultColor: !has
+        ? "#5B6579"
+        : vd.tone === "good"
+          ? GOOD
+          : vd.tone === "bad"
+            ? BAD
+            : "#4B5568",
+      actionLabel,
+      actionHref,
       href: p.experiment(e.id),
+      running: e.status === "running",
     };
   });
 
-  const att: AttentionItem[] = [];
-  for (const x of all)
-    if (x.e.status === "running" && x.vd.ready)
-      att.push({
-        tag: "Ready to call",
-        title: x.e.name,
-        body: x.vd.body,
-        action: "Review & end test",
-        href: p.experiment(x.e.id),
-      });
-  for (const x of all)
-    if (x.e.status === "paused") {
-      const ago = fAgo(minutesSince(x.e.updatedAt, now));
-      att.push({
-        tag: "Paused",
-        title: x.e.name,
-        body: `Paused ${ago === "Just now" ? "just now" : ago}. Visitors see Control and no data is collected.`,
-        action: "Open experiment",
-        href: p.experiment(x.e.id),
-      });
-    }
-  for (const x of all)
-    if (x.e.status === "draft") {
-      const n = draftIncomplete[x.e.id] ?? 0;
-      att.push({
-        tag: "Draft",
-        title: x.e.name,
-        body: n
-          ? `${n} setup step${n > 1 ? "s" : ""} incomplete.`
-          : "Fully configured. Run QA and launch when ready.",
-        action: "Continue setup",
-        href: p.editExperiment(x.e.id),
-      });
-    }
-  for (const m of data.silentMetrics)
-    att.push({
-      tag: "Tracking",
-      title: `${m.name} metric`,
-      body: `${m.key} has never been received. Experiments using it will show zero conversions.`,
-      action: "Check GTM setup",
-      href: p.metrics("gtm", { metric: m.id }),
-    });
+  const conversions: ConversionSlice[] = all
+    .filter((x) => x.e.status === "running")
+    .map((x) => ({ id: x.e.id, name: x.e.name, color: tileColor(x.e.id), conversions: x.st.c }))
+    .sort((a, b) => b.conversions - a.conversions);
 
-  const nAttE = att.filter((a) => a.tag !== "Tracking").length;
+  const nAction = rows.filter((r) => r.needsAction).length;
   return {
-    title: nAttE
-      ? `${nAttE}${nAttE === 1 ? " experiment needs" : " experiments need"} attention.`
+    title: nAction
+      ? `${nAction}${nAction === 1 ? " experiment needs" : " experiments need"} attention.`
       : "Everything is running to plan.",
     sub: ready
       ? `${ready} ready to call, the rest are still collecting data.`
       : "No experiment is ready to call yet.",
     strip,
-    live,
-    attention: att.slice(0, 3),
-    attentionCount: att.length > 3 ? `Showing 3 of ${att.length}` : `${att.length} open`,
+    rows,
+    counts: {
+      all: rows.length,
+      running: rows.filter((r) => r.running).length,
+      action: nAction,
+    },
+    conversions,
+    visitors: data.days.map((day, i) => ({ day, visitors: data.daily[i]?.v ?? 0 })),
   };
 }
-
-export const ATTENTION_TAG: Record<AttentionItem["tag"], { bg: string; color: string }> = {
-  "Ready to call": { bg: "#E6F5EE", color: "#0F7A52" },
-  Paused: { bg: "#FDF3E1", color: "#94600A" },
-  Draft: { bg: "#EEF0F4", color: "#4B5568" },
-  Tracking: { bg: "#FCE9E6", color: "#B4361F" },
-};
