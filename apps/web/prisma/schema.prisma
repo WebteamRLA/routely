@@ -22,8 +22,12 @@
 // `controlUrl` as a second source of truth for the same fact.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  // Loads an `include`/`select` of relations in one SQL statement (LATERAL joins) instead of one
+  // query per relation level. The access filters read experiment → website → workspace →
+  // membership, which is four sequential round trips without it. See docs/DEPLOY-VERCEL.md §8.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

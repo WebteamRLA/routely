@@ -27,13 +27,17 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
  * own pool, so the ceiling is `instances × max`, and a busy moment can exhaust Postgres'
  * `max_connections` long before it exhausts the machine.
  *
- * Hence one connection per instance in serverless. It is not a throughput limit in practice —
- * an instance handles one request at a time — and it is what makes a spike survivable. Point
- * `DATABASE_URL` at a pooler (PgBouncer, or Neon/Supabase's pooled port) as well; this setting
- * bounds the damage, the pooler is what actually multiplexes.
+ * Hence a small pool in serverless — but not a pool of one. A page's services issue their
+ * independent reads together (`Promise.all`), and Vercel's Fluid Compute sends concurrent requests
+ * to the same instance; with one connection every one of those queries waits its turn, so a page
+ * pays one database round trip per query instead of one per *stage* (measured: the project
+ * dashboard went from 29 sequential round trips to 11 on this change alone). Five keeps the
+ * parallelism the services were written for while `instances × max` stays far below a pooler's
+ * client limit. `DATABASE_URL` must still point at a pooler (PgBouncer, or Neon/Supabase's pooled
+ * port): this setting bounds the damage, the pooler is what actually multiplexes.
  */
 const isServerless = Boolean(process.env["VERCEL"] || process.env["AWS_LAMBDA_FUNCTION_NAME"]);
-const POOL_MAX = isServerless ? 1 : 10;
+const POOL_MAX = isServerless ? 5 : 10;
 
 function createPrismaClient(): PrismaClient {
   const adapter = new PrismaPg({

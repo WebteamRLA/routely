@@ -810,6 +810,12 @@ checks against a local test site fail under `next start` that pass under `next d
 other one: with no `RESEND_API_KEY`, production **withholds** the body (its links are bearer
 tokens) instead of printing it, so a local `next start` cannot finish a sign-up or reset by console.
 
+**Production functions must run in the database's region.** `vercel.json` pins `regions: ["sin1"]`
+because the production Neon database is in `ap-southeast-1`. On the default `iad1` every query
+crossed the Pacific (~220 ms) and pages took 2–6 s. `relationJoins` (in `schema.prisma`) and the
+serverless pool of 5 (`db.ts`) keep each page to a handful of sequential round trips; a
+`Promise.all` is only parallel if the pool has the connections for it.
+
 **This branch uses its own database.** `new-design`'s `apps/web/.env` points at the local database
 `routely_design`; the local `routely` database belongs to the older dev branch and must not be
 touched (or migrated, seeded or reset) from here. `.env.example` still names `routely`.

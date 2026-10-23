@@ -3,6 +3,7 @@
   "buildCommand": "npm run vercel-build",
   "installCommand": "npm install",
   "framework": "nextjs",
+  "regions": ["sin1"],
   "outputDirectory": "apps/web/.next",
   "crons": [
     {

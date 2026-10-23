@@ -35,6 +35,15 @@ Any of these work. All offer a free tier big enough for this:
 | [Supabase](https://supabase.com) | **Transaction pooler**, port `6543` |
 | Vercel Postgres (Neon under the hood) | `POSTGRES_PRISMA_URL` |
 
+**Put the functions in the database's region.** Set `regions` in `vercel.json` to the Vercel
+region nearest the database — production's Neon database is in AWS `ap-southeast-1`, so the repo
+pins `sin1` (Singapore). Vercel's default is `iad1` (Washington DC), and a page here makes
+several *sequential* database round trips (session → membership → the page's reads), so the
+distance is paid many times per page: with `iad1` against Singapore (~220 ms per round trip),
+pages took 2–6 s and a one-query public page had a median of 1.5 s. If the database ever
+moves, move `regions` with it. The build log names the database host on its `Datasource "db"`
+line, which is the quickest way to read its region.
+
 Two URLs matter and they are not interchangeable:
 
 - **Pooled** — what the running app uses. Goes in `DATABASE_URL`.
@@ -95,9 +104,12 @@ git tree, which never contained the file.
 ```json
 {
   "buildCommand": "npm run vercel-build",
-  "outputDirectory": "apps/web/.next"
+  "outputDirectory": "apps/web/.next",
+  "regions": ["sin1"]
 }
 ```
+
+`regions` must name the database's region (§2).
 
 `vercel-build` runs `prisma migrate deploy` and then the build, so **every deployment applies
 pending migrations before the new code goes live**.
@@ -247,8 +259,12 @@ For the record, so you do not go looking:
   the Edge runtime would fail.
 - **`output: "standalone"`** is now conditional on `process.env.VERCEL`. Docker still gets it,
   Vercel does not — Vercel rejects it.
-- **The connection pool** is capped at 1 per instance on serverless (`db.ts`), with a shorter
-  idle timeout. This bounds the damage; the pooler is what actually multiplexes.
+- **The connection pool** is capped at 5 per instance on serverless (`db.ts`), with a shorter
+  idle timeout. This bounds the damage; the pooler is what actually multiplexes. It was 1, which
+  made every `Promise.all` in the services run one query at a time.
+- **Nested reads are one query each.** `schema.prisma` enables Prisma's `relationJoins`, so an
+  `include` loads in one SQL statement rather than one per relation level (the access filters
+  read experiment → website → workspace → membership).
 - **`prisma generate`** already runs in the app's `build` script, so the client is always
   generated from the schema in CI.
 - **`outputFileTracingRoot`** already points at the monorepo root.
@@ -273,6 +289,7 @@ version of the code still runs against the new schema. `DATABASE.md` covers the 
 ## 10. Quick checklist
 
 - [ ] Postgres provisioned, **pooled** URL to hand
+- [ ] `regions` in `vercel.json` is the database's region (§2)
 - [ ] Repo imported, Root Directory left at the repository root
 - [ ] All nine environment variables set for Production
 - [ ] `AUTH_SECRET` freshly generated
