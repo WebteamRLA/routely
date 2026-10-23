@@ -1,12 +1,25 @@
 import "server-only";
 
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 
 import { env } from "@/env";
 import { AFTER_SIGN_IN, routes } from "@/lib/routes";
+import { RoutelyAdapter } from "@/server/auth/adapter";
+import { SESSION_MAX_AGE_SECONDS, requestOrigin } from "@/server/auth/password-session";
 import { db } from "@/server/db";
+
+declare module "next-auth" {
+  interface Session {
+    /** The `sessions` row id. Read by the session seam; never trusted from a client. */
+    sessionId?: string;
+    /** `User.currentWorkspaceId` as loaded with the session. The seam re-checks membership. */
+    currentWorkspaceId?: string | null;
+  }
+}
+
+/** How stale `Session.lastSeenAt` may get before a request refreshes it. */
+const SESSION_SEEN_THROTTLE_MS = 5 * 60 * 1000;
 
 /**
  * Auth.js configuration.
@@ -23,14 +36,13 @@ import { db } from "@/server/db";
  * immediately, whereas a signed JWT stays valid until it expires no matter what the server
  * does. For a dashboard that already queries the database on every page, that read is free.
  */
-const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60; // 30 days
+// `SESSION_MAX_AGE_SECONDS` (30 days) lives in `password-session.ts`, which mints the same rows
+// for email + password sign-in and must expire them identically.
 
 export const authConfig: NextAuthConfig = {
-  // The adapter's types are written against the `@prisma/client` package, while this project
-  // generates its client into src/generated/prisma. The runtime shape is identical — the
-  // adapter only calls model methods — so the structural mismatch is narrowed here rather
-  // than being allowed to leak into every call site.
-  adapter: PrismaAdapter(db as never),
+  // The stock Prisma adapter, plus a personal workspace on sign-up and session metadata — see
+  // `adapter.ts`.
+  adapter: RoutelyAdapter(),
 
   session: {
     strategy: "database",
@@ -68,15 +80,62 @@ export const authConfig: NextAuthConfig = {
 
   callbacks: {
     /**
+     * Refuses a disabled account at the door (→ `?error=AccessDenied`, the design's "doesn't have
+     * access" state). For an existing account `user` is the adapter's row; a first-time sign-in
+     * has no row yet and so nothing to refuse.
+     */
+    signIn({ user }) {
+      return !(user as { disabledAt?: Date | null }).disabledAt;
+    },
+
+    /**
      * The database strategy hands the adapter's user record to this callback. The default
      * session shape omits the id, and every service call needs it, so it is copied across
      * once here instead of being re-fetched by each caller.
+     *
+     * Under the database strategy `session` is the whole `sessions` row (Auth.js spreads it in),
+     * so the result is built field by field rather than returned as received: that keeps the
+     * session token itself out of the `/api/auth/session` response.
+     *
+     * Also refreshes `Session.lastSeenAt` for "Where you're signed in" — at most once per
+     * `SESSION_SEEN_THROTTLE_MS`, decided from the row already loaded (so a fresh session costs
+     * nothing) and written as a compare-and-set on the value read (so a burst writes once).
      */
-    session({ session, user }) {
-      if (session.user) {
-        session.user.id = user.id;
+    async session({ session, user }) {
+      const row = session as unknown as { id?: string; lastSeenAt?: Date };
+      const fullUser = user as typeof user & {
+        currentWorkspaceId?: string | null;
+        disabledAt?: Date | null;
+      };
+
+      // A disabled account keeps no session, even one minted before it was disabled.
+      if (fullUser.disabledAt) {
+        return { ...session, user: undefined } as unknown as typeof session;
       }
-      return session;
+
+      if (row.id && row.lastSeenAt instanceof Date) {
+        const now = Date.now();
+        if (now - row.lastSeenAt.getTime() >= SESSION_SEEN_THROTTLE_MS) {
+          await db.session
+            .updateMany({
+              where: { id: row.id, lastSeenAt: row.lastSeenAt },
+              data: { lastSeenAt: new Date(now) },
+            })
+            .catch((error) => console.error("[routely] could not record session activity", error));
+        }
+      }
+
+      return {
+        expires: session.expires,
+        sessionId: row.id,
+        currentWorkspaceId: fullUser.currentWorkspaceId ?? null,
+        user: {
+          id: user.id,
+          name: user.name ?? null,
+          email: user.email,
+          image: user.image ?? null,
+        },
+      };
     },
 
     /**
@@ -103,6 +162,17 @@ export const authConfig: NextAuthConfig = {
   },
 
   events: {
+    /**
+     * "New sign-in to Routely" for Google sign-ins from a (browser, OS, country) this account has
+     * not used before — the password path does the same in its action. Loaded lazily: the account
+     * service sits above this config in the import graph.
+     */
+    async signIn({ user }) {
+      if (!user.id) return;
+      const { noteSignIn } = await import("@/server/services/account.service");
+      await noteSignIn(user.id, await requestOrigin());
+    },
+
     /**
      * The adapter creates the `users` row on first sign-in; this records that it happened.
      * Useful when diagnosing "why do I have two accounts" reports, which are almost always a

@@ -10,11 +10,13 @@
 //     `variantId` (and `websiteId` where useful) directly, so every dashboard query is served
 //     by a covering index on the table it reads.
 //
-// Ownership always flows User → Website → Experiment → (Assignment | Event | Conversion),
-// and every cascade follows that same chain, so deleting a website removes its entire tree.
+// Ownership flows Workspace → Website → Experiment → (Assignment | Event | Conversion), and every
+// cascade follows that chain, so deleting a website removes its entire tree. Users reach a
+// workspace only through a Membership, whose role decides what they may change.
 //
 // An experiment has one control (`Experiment.controlUrl` — the page visitors already land on,
-// never redirected) and one or more variants (`ExperimentVariant` rows — redirect targets).
+// never redirected) and one or more variants (`ExperimentVariant` rows — a redirect target for a
+// SPLIT_URL test, a set of DOM changes for an AB_TEST).
 // `variantId` on Assignment/Event/Conversion is nullable: NULL means control. Control isn't a
 // row in `ExperimentVariant` because it isn't a redirect target — giving it one would duplicate
 // `controlUrl` as a second source of truth for the same fact.
@@ -42,12 +44,30 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts Account[]
-  sessions Session[]
-  websites Website[]
+  /// `scrypt$N$r$p$salt$hash`. Null for an account that has only ever signed in with Google.
+  passwordHash      String?
+  passwordChangedAt DateTime?
 
-  /// At most one Google Sheets destination per account — see SheetsConnection.
-  sheetsConnection SheetsConnection?
+  /// The workspace the dashboard shows. Not a foreign key on purpose: a membership can be removed
+  /// while this still points at it, so the session seam re-checks membership on every request and
+  /// falls back to the oldest one. Null until the first workspace exists.
+  currentWorkspaceId String?
+
+  /// Set when the account is disabled. Sign-in refuses a disabled account.
+  disabledAt DateTime?
+
+  accounts           Account[]
+  sessions           Session[]
+  memberships        Membership[]
+  invitesSent        WorkspaceInvite[]        @relation("InvitesSent")
+  emailChanges       EmailChangeRequest[]
+  passwordResets     PasswordResetToken[]
+  notificationPrefs  NotificationPreference[]
+  knownDevices       KnownSignInDevice[]
+  websitesCreated    Website[]                @relation("WebsiteCreatedBy")
+  experimentsCreated Experiment[]             @relation("ExperimentCreatedBy")
+  activities         ExperimentActivity[]
+  sheetsConnected    SheetsConnection[]       @relation("SheetsConnectedBy")
 
   @@map("users")
 }
@@ -79,6 +99,16 @@ model Session {
   userId       String
   expires      DateTime
 
+  // Extra columns for "Where you're signed in". The Auth.js adapter ignores columns it does not
+  // know about, so these never interfere with its own reads and writes.
+  createdAt  DateTime @default(now())
+  /// Last request seen on this session. Bumped by a throttled compare-and-set, never per request.
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+  city       String?
+  /// ISO 3166-1 alpha-2.
+  country    String?
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -95,15 +125,127 @@ model VerificationToken {
 }
 
 // ---------------------------------------------------------------------------
+// Account — tokens and preferences. Every token is 32 random bytes; only its SHA-256 is stored.
+// ---------------------------------------------------------------------------
+
+/// A pending change of the sign-in address. Takes effect only when the link sent to the new
+/// address is followed.
+model EmailChangeRequest {
+  id         String    @id @default(cuid())
+  userId     String
+  newEmail   String
+  tokenHash  String    @unique
+  /// createdAt + 24 h.
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("email_change_requests")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  /// createdAt + 1 h.
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+/// An explicit opt-in or opt-out. No row means the kind's default applies.
+model NotificationPreference {
+  userId    String
+  kind      NotificationKind
+  enabled   Boolean
+  updatedAt DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, kind])
+  @@map("notification_preferences")
+}
+
+/// A (browser, OS, country) combination this user has signed in from before. Drives the
+/// "New sign-in to Routely" email.
+model KnownSignInDevice {
+  userId          String
+  /// sha256(browser | os | country).
+  fingerprintHash String
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, fingerprintHash])
+  @@map("known_sign_in_devices")
+}
+
+// ---------------------------------------------------------------------------
 // Enums
 // ---------------------------------------------------------------------------
 
-/// Lifecycle of an experiment. Only ACTIVE experiments are published to the SDK.
+/// Lifecycle of an experiment. Only ACTIVE experiments are published to the SDK. COMPLETED is
+/// terminal (renamed from ARCHIVED in place, so existing rows kept their meaning).
 enum ExperimentStatus {
   DRAFT
   ACTIVE
   PAUSED
-  ARCHIVED
+  COMPLETED
+}
+
+/// SPLIT_URL redirects each variant to its own URL; AB_TEST applies DOM changes on the same URL.
+enum ExperimentType {
+  SPLIT_URL
+  AB_TEST
+}
+
+/// Device classes a test can be limited to. An empty list means every device.
+enum DeviceType {
+  DESKTOP
+  MOBILE
+  TABLET
+}
+
+/// A member's role in a workspace, in descending order of power. `lib/permissions.ts` holds the
+/// matrix of what each may do.
+enum MemberRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum ExperimentActivityType {
+  CREATED
+  LAUNCHED
+  PAUSED
+  RESUMED
+  ENDED
+  EDITED
+  RESULT_READY
+}
+
+/// Opt-out-able emails. Security emails are not listed because they cannot be turned off.
+enum NotificationKind {
+  RESULT_READY
+  TRACKING_STOPPED
+  SHEETS_SYNC_FAILED
+  EXPERIMENT_PAUSED
+}
+
+enum TrackingCheckResult {
+  OK
+  MISSING
+  ERROR
 }
 
 /// How a configured URL is compared against the visitor's current URL.
@@ -138,43 +280,175 @@ enum EventType {
 // Tenancy
 // ---------------------------------------------------------------------------
 
+/// The tenant. Every website belongs to exactly one workspace, and users reach it only through a
+/// Membership. Every new user gets one of their own ("{First}'s workspace") as its OWNER.
+model Workspace {
+  id        String   @id @default(cuid())
+  /// "{First}’s workspace" by default; at most 80 characters (enforced in Zod).
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships      Membership[]
+  invites          WorkspaceInvite[]
+  websites         Website[]
+  sheetsConnection SheetsConnection?
+
+  @@map("workspaces")
+}
+
+/// A user's place in a workspace. Exactly one OWNER per workspace, enforced by the partial unique
+/// index `memberships_one_owner` (hand-written in the migration — Prisma cannot express it).
+model Membership {
+  id           String     @id @default(cuid())
+  workspaceId  String
+  userId       String
+  role         MemberRole
+  /// "Last active" on the Team tab. Bumped by a throttled compare-and-set.
+  lastActiveAt DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+/// An emailed invitation. At most one *pending* invite per (workspace, email), enforced by the
+/// partial unique index `workspace_invites_pending` (hand-written in the migration).
+model WorkspaceInvite {
+  id           String     @id @default(cuid())
+  workspaceId  String
+  /// Lowercased.
+  email        String
+  /// Never OWNER — ownership is not granted by invitation (a service rule).
+  role         MemberRole
+  tokenHash    String     @unique
+  invitedById  String?
+  sentAt       DateTime   @default(now())
+  /// sentAt + 7 days.
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  acceptedById String?
+  revokedAt    DateTime?
+  createdAt    DateTime   @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User?     @relation("InvitesSent", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([email])
+  @@map("workspace_invites")
+}
+
 /// A customer property. Owns experiments and visitors, and carries the public site id embedded
 /// in the tracking snippet.
 model Website {
-  id              String       @id @default(cuid())
-  userId          String
-  name            String
+  id                  String       @id @default(cuid())
+  /// The tenant key. Replaced `userId`; existing rows were moved into their owner's workspace.
+  workspaceId         String
+  /// Who added it. Display only — never an authorization input.
+  createdById         String?
+  name                String
   /// Primary domain, e.g. "acme.com". Used for the Origin soft-check on ingestion.
-  domain          String
+  domain              String
   /// Scheme this site is served over. Stored because `domain` is a bare hostname, so nothing
   /// else records whether the site is http or https — and every URL the UI prefills (the
   /// install check, experiment URL placeholders) has to guess otherwise. Defaults to https,
   /// which is right for everything except local development.
-  protocol        SiteProtocol @default(HTTPS)
+  protocol            SiteProtocol @default(HTTPS)
   /// Public identifier embedded in the install snippet ("rt_…"). An identifier, not a secret:
   /// it is visible in page source by design and grants no access beyond appending events.
-  publicSiteId    String       @unique
+  publicSiteId        String       @unique
   /// When the snippet was last confirmed present on a page of this website, by fetching that
   /// page and finding the site id in its HTML. Null until the install check has passed once.
   ///
   /// Deliberately the timestamp of an *observation*, not a boolean "is installed": a customer
   /// can remove the snippet at any time and nothing tells us, so this records when we last
   /// looked and what we saw, which is all it can honestly claim.
-  pixelVerifiedAt DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  pixelVerifiedAt     DateTime?
+  /// Avatar palette slot, 0–4.
+  colorIndex          Int          @default(0)
+  /// Last site-wide SDK hit, bumped by a throttled compare-and-set. A freshness timestamp, not a
+  /// metric — tracking status is derived from it.
+  lastSeenAt          DateTime?
+  /// Latch for the "Tracking stops" email, so it is sent once per outage.
+  trackingAlertSentAt DateTime?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  experiments Experiment[]
-  visitors    Visitor[]
-  events      Event[]
+  workspace      Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy      User?               @relation("WebsiteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  experiments    Experiment[]
+  visitors       Visitor[]
+  events         Event[]
+  visitorDays    WebsiteVisitorDay[]
+  pageDays       PageVisitorDay[]
+  trackingChecks TrackingCheck[]
 
   /// At most one Google Sheets destination per website.
   sheetTarget WebsiteSheetTarget?
 
-  // Dashboard lists a user's websites newest-first.
-  @@index([userId, createdAt])
+  // One project per domain within a workspace. Names are unique case-insensitively too, through
+  // the expression index `websites_ws_name_ci` (hand-written in the migration).
+  @@unique([workspaceId, domain])
+  // Dashboard lists a workspace's websites newest-first.
+  @@index([workspaceId, createdAt])
   @@map("websites")
+}
+
+/// One row per website × UTC day × browser that loaded any page carrying the snippet. Rows, not a
+/// counter: a daily visitor count is `count(*)` and cannot drift from what was recorded.
+model WebsiteVisitorDay {
+  websiteId   String
+  day         DateTime @db.Date
+  /// The SDK's anonymous id. Deliberately not a foreign key: Visitor rows exist only for
+  /// experiment participants, and a site-wide hit must not create one.
+  anonymousId String
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@id([websiteId, day, anonymousId])
+  @@map("website_visitor_days")
+}
+
+/// Per-page daily visitors: the traffic baseline for a URL, and the "seen" fallback for tracking
+/// checks on sites that inject the snippet through a tag manager.
+model PageVisitorDay {
+  websiteId   String
+  /// Server-normalised URL.
+  urlKey      String
+  day         DateTime @db.Date
+  anonymousId String
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@id([websiteId, urlKey, day, anonymousId])
+  @@index([websiteId, urlKey, day])
+  @@map("page_visitor_days")
+}
+
+/// The last snippet check for one URL of a website. Changing a URL changes its key, so a stale
+/// check can never vouch for a page it did not look at.
+model TrackingCheck {
+  id         String              @id @default(cuid())
+  websiteId  String
+  urlKey     String
+  result     TrackingCheckResult
+  /// "html" (the snippet was in the page) or "seen" (the page reported hits recently).
+  method     String?
+  pageLoaded Boolean             @default(false)
+  httpStatus Int?
+  detail     String?
+  checkedAt  DateTime            @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, urlKey])
+  @@map("tracking_checks")
 }
 
 // ---------------------------------------------------------------------------
@@ -185,19 +459,24 @@ model Website {
 /// one of `variants`, in the proportions given by `controlWeight` and each variant's `weight`;
 /// reaching `conversionUrl` counts as a conversion.
 model Experiment {
-  id          String  @id @default(cuid())
+  id          String         @id @default(cuid())
   websiteId   String
-  name        String
+  type        ExperimentType @default(SPLIT_URL)
+  /// May be empty while DRAFT; required at launch.
+  name        String         @default("")
   description String?
 
-  controlUrl       String
+  /// Null only while DRAFT — launch requires it, and the config and ingestion paths only read
+  /// ACTIVE rows (and skip any that lack it).
+  controlUrl       String?
   controlMatchType UrlMatchType @default(EXACT)
 
   /// Label for the conversion goal, shown on the Metrics list. Nullable because every
   /// experiment created before goals were nameable has one and needs no backfill — the UI
   /// falls back to the experiment's own name.
   conversionName      String?
-  conversionUrl       String
+  /// Null only while DRAFT, like `controlUrl`.
+  conversionUrl       String?
   conversionMatchType UrlMatchType @default(EXACT)
 
   /// Control's share of the traffic entered into this experiment, relative to each variant's
@@ -219,21 +498,37 @@ model Experiment {
   /// always collected regardless of this choice — it only changes what is emphasised.
   primaryMetric PrimaryMetric @default(CONVERSION_RATE)
 
+  /// Devices the test is limited to. Empty means every device; all three is normalised to empty.
+  /// Decided by the SDK in the browser — the server cannot verify it.
+  targetDevices   DeviceType[] @default([])
+  /// SPLIT_URL: carry the visitor's query string over to the variant URL.
+  keepQueryParams Boolean      @default(true)
+  /// The wizard step (1–5) a draft resumes at.
+  wizardStep      Int          @default(1)
+  createdById     String?
+
   /// Unguessable token for the public, read-only results page. Null when sharing is off, so
   /// revoking a link is a matter of clearing it rather than maintaining a separate flag.
   shareToken String?   @unique
   sharedAt   DateTime?
 
-  publishedAt DateTime?
-  stoppedAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  publishedAt   DateTime?
+  /// The most recent pause.
+  pausedAt      DateTime?
+  /// When it was ended (status COMPLETED). Renamed from `stoppedAt`.
+  endedAt       DateTime?
+  /// Latch for the RESULT_READY activity and email, so each fires once.
+  resultReadyAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  website     Website             @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  website     Website              @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  createdBy   User?                @relation("ExperimentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   variants    ExperimentVariant[]
   assignments Assignment[]
   events      Event[]
   conversions Conversion[]
+  activities  ExperimentActivity[]
 
   // Serves the SDK config endpoint: "active experiments for this website".
   @@index([websiteId, status])
@@ -245,16 +540,24 @@ model Experiment {
 /// One redirect target for an experiment. The control arm is deliberately not a row here — see
 /// the note at the top of this file.
 model ExperimentVariant {
-  id           String @id @default(cuid())
+  id           String  @id @default(cuid())
   experimentId String
-  /// Display and redirect-draw order: 1, 2, 3… "Variant 1", "Variant 2" etc. are derived from
-  /// this rather than stored as a label, so reordering is one column, not a rename.
+  /// Display and redirect-draw order: 1, 2, 3…
   position     Int
-  url          String
+  /// Display name, "Variant A"–"Variant D" by default (editable for SPLIT_URL). Existing rows were
+  /// backfilled from their position.
+  name         String
+  /// Colour slot 1–4, the first unused one when the variant was added; stable across removals.
+  colorIndex   Int     @default(1)
+  /// SPLIT_URL: the redirect target. AB_TEST: null. Also null while a SPLIT_URL draft is unfinished.
+  url          String?
+  /// AB_TEST: the DOM changes (`VisualChange[]`, validated by Zod with a schemaVersion). Null for
+  /// SPLIT_URL.
+  changes      Json?
   /// This arm's share of the traffic entered into the experiment, relative to `controlWeight`
   /// and the other variants' weights. See `Experiment.controlWeight`. `0` parks an arm without
   /// deleting it — it keeps its collected results but stops receiving new visitors.
-  weight       Int    @default(50)
+  weight       Int     @default(50)
 
   experiment  Experiment   @relation(fields: [experimentId], references: [id], onDelete: Cascade)
   assignments Assignment[]
@@ -263,6 +566,25 @@ model ExperimentVariant {
 
   @@index([experimentId, position])
   @@map("experiment_variants")
+}
+
+/// The experiment's history, written in the same transaction as the change it records. One
+/// RESULT_READY per experiment, enforced by the partial unique index
+/// `experiment_activities_result_once` (hand-written in the migration).
+model ExperimentActivity {
+  id           String                 @id @default(cuid())
+  experimentId String
+  type         ExperimentActivityType
+  /// Null for system entries, and once the acting user has been deleted.
+  actorId      String?
+  meta         Json?
+  createdAt    DateTime               @default(now())
+
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  actor      User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([experimentId, createdAt])
+  @@map("experiment_activities")
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +728,7 @@ enum SheetsConnectionStatus {
   NEEDS_RECONNECT
 }
 
-/// One Google authorisation per Routely account.
+/// One Google authorisation per workspace.
 ///
 /// This row is the *grant*, not the destination. The customer authorises Google once; each of
 /// their websites then points at its own spreadsheet (see WebsiteSheetTarget). Splitting the two
@@ -421,8 +743,17 @@ enum SheetsConnectionStatus {
 model SheetsConnection {
   id String @id @default(cuid())
 
-  /// One connection per account. The uniqueness *is* the "one destination" rule.
-  userId String @unique
+  /// One connection per workspace. Replaced `userId`; existing rows moved to the connecting
+  /// user's workspace.
+  workspaceId String @unique
+
+  /// The member who connected it. Only they may open the Google Picker, because the Picker runs
+  /// on this grant's access token — another member would be browsing someone else's Drive.
+  connectedById String?
+
+  /// Google profile name and picture of the granting account, for display.
+  googleName    String?
+  googlePicture String?
 
   /// Google account that granted access. Display only, so the customer can confirm they
   /// connected the account they meant to.
@@ -457,11 +788,11 @@ model SheetsConnection {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  connectedBy User?     @relation("SheetsConnectedBy", fields: [connectedById], references: [id], onDelete: SetNull)
 
   @@map("sheets_connections")
 }
-
 
 /// Where one website's results are published, and the state of the tab holding them.
 ///
@@ -508,6 +839,9 @@ model WebsiteSheetTarget {
 
   /// Why the last refresh failed, in the customer's words. Null when the last one succeeded.
   lastError String?
+
+  /// Latch for the "Google Sheets sync fails" email, so one failure streak sends one email.
+  errorNotifiedAt DateTime?
 
   /// True when Routely created the spreadsheet rather than the customer picking an existing one.
   /// Only used to word the UI honestly.

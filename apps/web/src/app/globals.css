@@ -39,13 +39,16 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  /* Tailwind's own scale (4/6/8/12/16px…). The design specifies radii in pixels and the screens
+   * map them onto these names — `rounded-lg` is the design's 8px, `rounded-xl` its 12px — so the
+   * scale must not be derived from shadcn's `--radius`, which made them 10px and 14px. */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 2rem;
 }
 
 :root {
@@ -126,5 +129,73 @@
   }
   html {
     @apply font-sans;
+  }
+  /* Preflight makes form controls inherit the surrounding line-height (1.45 on the design's
+   * screens); the design leaves them at the browser's `normal`, and inheriting moved every button
+   * label by about a pixel. A `leading-*` utility on a control still wins. */
+  button,
+  input,
+  select,
+  textarea {
+    line-height: normal;
+  }
+}
+
+/*
+ * Motion from the Projects design (Projects.dc.html). Named rather than Tailwind's built-ins so
+ * the timings match the reference exactly: menus drop in 4px, toasts rise 8px, dialogs rise 6px
+ * with a slight scale, skeletons pulse between 45% and full opacity.
+ */
+@keyframes rt-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rt-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rt-dlg {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes rt-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+/* Indeterminate progress bar: a segment sweeping left to right. */
+@keyframes rt-indet {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[rt-"] {
+    animation: none !important;
   }
 }

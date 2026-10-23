@@ -1,17 +1,18 @@
 /**
- * Runs the Google Sheets daily sync from the command line.
+ * Runs the Google Sheets refresh from the command line.
  *
- *   npm run sheets:sync --workspace @routely/web            # write yesterday for every connection
- *   npm run sheets:sync --workspace @routely/web -- --dry-run
- *   npm run sheets:sync --workspace @routely/web -- --dry-run --day 2026-09-28 --user <userId> [--website <id>]
- *   npm run sheets:sync --workspace @routely/web -- --user <userId> --website <websiteId>
+ *   npm run sheets:sync --workspace @routely/web            # rewrite every attached website's tab
+ *   npm run sheets:sync --workspace @routely/web -- --dry-run --user <userId> [--day 2026-09-28] [--website <id>]
+ *   npm run sheets:sync --workspace @routely/web -- --website <websiteId>   # one tab, unthrottled
  *
- * Exists for two reasons. It is how the sync is exercised locally without waiting for a scheduled
- * run, and `--dry-run` prints exactly the rows that *would* be appended without touching Google at
- * all — which is the only way to check the numbers against the dashboard before trusting the write.
+ * Exists for two reasons. It is how the refresh is exercised locally without waiting for traffic or
+ * the scheduled run, and `--dry-run` prints one UTC day's rows exactly as they would be written into
+ * the tab (which holds the last 30 days, rewritten wholesale) without touching Google at all — the
+ * only way to check the numbers against the dashboard before trusting the write.
  *
- * It is a convenience, not the load-bearing path. The "Sync yesterday now" button drives the same
- * service through the real app, and that is the path that has to be trustworthy.
+ * It is a convenience, not the load-bearing path. Event ingestion, the scheduled cron and the
+ * "Sync now" button in the project's Google Sheets dialog drive the same service through the real
+ * app, and those are the paths that have to be trustworthy.
  *
  * ## Why `--conditions=react-server`
  *

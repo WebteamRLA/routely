@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { PIXEL_STATUS, type PixelStatus } from "@/lib/pixel-status";
+import type { TrackingStatus } from "@/lib/pixel-status";
 import { cn } from "@/lib/utils";
 
 const PILL_CLASSES =
@@ -11,13 +11,14 @@ const PILL_CLASSES =
 /**
  * A website's tracking status.
  *
- * Wording and tone come from the shared `PIXEL_STATUS` table, so this can never disagree with
- * the same status rendered elsewhere — which is the bug this component previously had.
+ * Wording comes from `trackingStatus()` (`lib/pixel-status.ts`), so this can never disagree with
+ * the same status rendered elsewhere.
  *
  * Pass `href` to make it a link — used as a shortcut back to the Get started guide.
  */
-export function PixelStatusBadge({ status, href }: { status: PixelStatus; href?: string }) {
-  const { label, positive } = PIXEL_STATUS[status];
+export function PixelStatusBadge({ status, href }: { status: TrackingStatus; href?: string }) {
+  const { label } = status;
+  const positive = status.state === "active";
 
   const badge = (
     <Badge

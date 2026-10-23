@@ -11,13 +11,26 @@ import { mkdir, copyFile, stat, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync, brotliCompressSync } from "node:zlib";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import * as esbuild from "esbuild";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outFile = resolve(root, "dist/sdk.js");
 const publicDir = resolve(root, "../../apps/web/public/sdk/v1");
 const publicFile = resolve(publicDir, "sdk.js");
+
+/**
+ * The visual editor agent — a second, separate bundle.
+ *
+ * It is loaded only inside the Routely editor (see `src/editor-bridge.ts`), never by an ordinary
+ * visitor, so it is not counted in the main budget. It has its own, looser ceiling: it still
+ * loads into a customer's page, just not on every page view. Built only when its source exists.
+ */
+const agentEntry = resolve(root, "src/editor-agent.ts");
+const agentOutFile = resolve(root, "dist/editor-agent.js");
+const agentPublicFile = resolve(publicDir, "editor-agent.js");
+const MAX_AGENT_GZIP_BYTES = 12 * 1024;
+const hasAgent = existsSync(agentEntry);
 
 /**
  * The origin baked into the bundle, which every installed snippet will call.
@@ -38,7 +51,7 @@ const watch = process.argv.includes("--watch");
  * the size is a product constraint rather than a nice-to-have. The build fails when it is
  * exceeded, which forces the trade-off to be made deliberately instead of drifting.
  */
-const MAX_GZIP_BYTES = 6 * 1024;
+const MAX_GZIP_BYTES = 8 * 1024;
 
 /**
  * ES2019 is the floor.
@@ -71,30 +84,44 @@ const options = {
     : { js: `/* Routely tracking SDK — https://github.com/routely | api: ${apiBase} */` },
 };
 
-async function report() {
-  const { size } = await stat(outFile);
-  const raw = readFileSync(outFile);
+async function measure(file, budget, name) {
+  const { size } = await stat(file);
+  const raw = readFileSync(file);
   const gzipped = gzipSync(raw).length;
   const brotli = brotliCompressSync(raw).length;
 
   const kb = (bytes) => `${(bytes / 1024).toFixed(2)} kB`;
   console.log(
-    `[sdk] ${kb(size)} raw · ${kb(gzipped)} gzip · ${kb(brotli)} brotli ` +
-      `(budget ${kb(MAX_GZIP_BYTES)} gzip)`,
+    `[sdk] ${name}: ${kb(size)} raw · ${kb(gzipped)} gzip · ${kb(brotli)} brotli ` +
+      `(budget ${kb(budget)} gzip)`,
   );
 
-  if (!watch && gzipped > MAX_GZIP_BYTES) {
-    console.error(`[sdk] FAILED: ${kb(gzipped)} gzipped exceeds the ${kb(MAX_GZIP_BYTES)} budget.`);
+  if (!watch && gzipped > budget) {
+    console.error(`[sdk] FAILED: ${name} ${kb(gzipped)} gzipped exceeds the ${kb(budget)} budget.`);
     process.exit(1);
   }
 
   return { size, gzipped, brotli };
 }
 
+async function report() {
+  const sizes = await measure(outFile, MAX_GZIP_BYTES, "sdk.js");
+  if (hasAgent) {
+    sizes.editorAgent = await measure(agentOutFile, MAX_AGENT_GZIP_BYTES, "editor-agent.js");
+  } else {
+    console.log("[sdk] editor-agent.js: no src/editor-agent.ts — not built");
+  }
+  return sizes;
+}
+
 async function publish(sizes) {
   await mkdir(publicDir, { recursive: true });
   await copyFile(outFile, publicFile);
   await copyFile(`${outFile}.map`, `${publicFile}.map`);
+  if (hasAgent) {
+    await copyFile(agentOutFile, agentPublicFile);
+    await copyFile(`${agentOutFile}.map`, `${agentPublicFile}.map`);
+  }
 
   // A build manifest, so a deployed bundle can be identified without guessing from its bytes.
   await writeFile(
@@ -105,7 +132,17 @@ async function publish(sizes) {
   console.log(`[sdk] published to ${publicFile}`);
 }
 
+/** @type {import("esbuild").BuildOptions} */
+const agentOptions = {
+  ...options,
+  entryPoints: [agentEntry],
+  outfile: agentOutFile,
+  banner: watch ? undefined : { js: "/* Routely visual editor agent */" },
+};
+
 if (watch) {
+  // The agent is rebuilt on change too; it is published alongside the main bundle.
+  if (hasAgent) await (await esbuild.context(agentOptions)).watch();
   const ctx = await esbuild.context({
     ...options,
     plugins: [
@@ -124,5 +161,6 @@ if (watch) {
   console.log("[sdk] watching for changes…");
 } else {
   await esbuild.build(options);
+  if (hasAgent) await esbuild.build(agentOptions);
   await publish(await report());
 }

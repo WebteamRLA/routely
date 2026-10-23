@@ -7,7 +7,7 @@ import { Archive, Loader2, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IDLE, type FormState } from "@/lib/form-state";
 
-type Status = "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED";
+type Status = "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED";
 
 const TRANSITIONS: Record<
   Status,
@@ -15,7 +15,7 @@ const TRANSITIONS: Record<
 > = {
   ACTIVE: { label: "Start experiment", icon: Play, variant: "default" },
   PAUSED: { label: "Pause", icon: Pause, variant: "outline" },
-  ARCHIVED: { label: "Archive", icon: Archive, variant: "outline" },
+  COMPLETED: { label: "End", icon: Archive, variant: "outline" },
   DRAFT: { label: "Back to draft", icon: Play, variant: "outline" },
 };
 
@@ -45,7 +45,7 @@ export function StatusControls({
   if (allowed.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        This experiment is archived. Its results are kept, but it will not collect anything new.
+        This experiment has ended. Its results are kept, but it will not collect anything new.
       </p>
     );
   }

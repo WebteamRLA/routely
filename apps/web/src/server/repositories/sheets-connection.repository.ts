@@ -1,17 +1,19 @@
 import "server-only";
 
-import type { Prisma, SheetsConnection } from "@/generated/prisma/client";
+import type { MemberRole, Prisma, SheetsConnection } from "@/generated/prisma/client";
 import { type DbClient, db } from "@/server/db";
+import { workspaceAccess } from "@/server/repositories/access";
 
 /**
  * Data access for a customer's Google Sheets connection.
  *
- * Same rule as every other repository: ownership-sensitive functions take `userId` and fold it
- * into the `where` clause, and writes use `updateMany`/`deleteMany` so the tenant filter
- * participates in the write itself rather than relying on a prior read.
+ * Same rule as every other repository: tenant-sensitive functions take the actor's `userId` and
+ * fold a workspace-membership filter into the `where` clause, and writes use
+ * `updateMany`/`deleteMany` so the tenant filter participates in the write itself rather than
+ * relying on a prior read.
  *
- * There is at most one connection per account (`SheetsConnection.userId` is unique), which is
- * why most functions here address it by `userId` rather than by its own id.
+ * There is at most one connection per workspace (`SheetsConnection.workspaceId` is unique), which
+ * is why most functions here address it by workspace rather than by its own id.
  *
  * This table holds the Google *grant* only. Where a website's rows are written lives in
  * `website-sheet-target.repository.ts` — one destination per website, so the two are deliberately
@@ -22,23 +24,30 @@ import { type DbClient, db } from "@/server/db";
  * logged in full still discloses nothing usable.
  */
 
-export function findConnectionForUser(
+/** The workspace's grant — only when `userId` is a member of that workspace. */
+export function findConnectionForWorkspace(
+  workspaceId: string,
   userId: string,
   client: DbClient = db,
 ): Promise<SheetsConnection | null> {
-  return client.sheetsConnection.findUnique({ where: { userId } });
+  return client.sheetsConnection.findFirst({
+    where: { workspaceId, workspace: workspaceAccess(userId) },
+  });
 }
 
 /**
  * Creates the connection, or updates the existing one in place.
  *
- * Upsert rather than delete-and-create, because reconnecting must **keep the destination and the
- * run history**. A customer whose token expired and who reconnects has not asked to re-sync days
- * already written — and losing the run rows would mean exactly that, silently, on the next sweep.
+ * Upsert rather than delete-and-create, so a reconnect (an expired token, say) is one write that
+ * replaces the tokens in place — never a moment with no connection for a concurrent refresh to
+ * trip over. Each website's spreadsheet lives in its own table and is not touched here.
  */
 export function upsertConnection(
-  userId: string,
+  workspaceId: string,
+  connectedById: string,
   data: {
+    googleName?: string | null;
+    googlePicture?: string | null;
     googleEmail: string | null;
     googleSubject: string | null;
     refreshTokenCipher: string;
@@ -49,10 +58,12 @@ export function upsertConnection(
   client: DbClient = db,
 ): Promise<SheetsConnection> {
   return client.sheetsConnection.upsert({
-    where: { userId },
-    create: { userId, ...data, status: "CONNECTED", statusDetail: null },
+    where: { workspaceId },
+    create: { workspaceId, connectedById, ...data, status: "CONNECTED", statusDetail: null },
     update: {
       ...data,
+      // Whoever reconnects becomes the connector: the Picker runs on their Google account now.
+      connectedById,
       // A reconnect clears the failure that prompted it. The destination fields are deliberately
       // absent from this update, so they survive.
       status: "CONNECTED",
@@ -109,27 +120,44 @@ export function markNeedsReconnect(
   });
 }
 
-export function deleteConnectionForUser(
+export function deleteConnectionForWorkspace(
+  workspaceId: string,
   userId: string,
+  roles: readonly MemberRole[],
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
-  // Run rows cascade from the foreign key.
-  return client.sheetsConnection.deleteMany({ where: { userId } });
+  return client.sheetsConnection.deleteMany({
+    where: { workspaceId, workspace: workspaceAccess(userId, { roles }) },
+  });
 }
 
 /**
- * The grant for one website's owner, for the daily sweep.
+ * The grant of one website's workspace, for the refresh.
  *
- * No `userId` argument, because the sweep acts for every account rather than on behalf of one
+ * No `userId` argument, because the refresh acts for the website rather than on behalf of an
  * actor — the same shape as the ingestion-path repository functions. Which *websites* get synced is
  * decided by `website-sheet-target.repository.listSyncableTargets`; this only fetches the tokens
- * needed to write them, and returns null when the owner's grant is gone or broken.
+ * needed to write them, and returns null when the workspace's grant is gone or broken.
  */
 export function findConnectedGrant(
-  userId: string,
+  workspaceId: string,
   client: DbClient = db,
 ): Promise<SheetsConnection | null> {
   return client.sheetsConnection.findFirst({
-    where: { userId, status: "CONNECTED" },
+    where: { workspaceId, status: "CONNECTED" },
   });
+}
+
+/** The workspace's display name, only when `userId` is a member. For the connected toast. */
+export async function findWorkspaceName(
+  workspaceId: string,
+  userId: string,
+  client: DbClient = db,
+): Promise<string | null> {
+  const workspace = await client.workspace.findFirst({
+    where: { id: workspaceId, ...workspaceAccess(userId) },
+    select: { name: true },
+  });
+
+  return workspace?.name ?? null;
 }

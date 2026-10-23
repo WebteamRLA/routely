@@ -30,7 +30,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { IDLE, type FormState } from "@/lib/form-state";
 import { routes } from "@/lib/routes";
-import { PIXEL_STATUS } from "@/lib/pixel-status";
 import { cn } from "@/lib/utils";
 import type { WebsiteWithStatus } from "@/server/services/website.service";
 
@@ -88,8 +87,15 @@ function WebsiteRow({
   sdkUrl: string;
   verifyAction: (state: FormState, formData: FormData) => Promise<FormState>;
 }) {
-  const { website, pixelStatus, experiments } = entry;
-  const status = PIXEL_STATUS[pixelStatus];
+  const { website, tracking, experiments } = entry;
+  const notInstalled = tracking.state === "not_installed";
+  const status = {
+    label: tracking.label,
+    positive: tracking.state === "active",
+    hint: notInstalled
+      ? "Install the snippet and verify it to finish setup"
+      : `Last seen ${tracking.when ?? ""}`,
+  };
 
   return (
     <div
@@ -170,9 +176,9 @@ function WebsiteRow({
           website={website}
           sdkUrl={sdkUrl}
           verifyAction={verifyAction}
-          triggerLabel={pixelStatus === "unknown" ? "Set up pixel" : "Re-check pixel"}
-          triggerVariant={pixelStatus === "unknown" ? "default" : "outline"}
-          alreadySetUp={pixelStatus !== "unknown"}
+          triggerLabel={notInstalled ? "Set up pixel" : "Re-check pixel"}
+          triggerVariant={notInstalled ? "default" : "outline"}
+          alreadySetUp={!notInstalled}
           triggerClassName="w-full"
         />
       </div>
@@ -301,7 +307,7 @@ export function WebsitesTable({
 
   // Only websites where nothing is known yet. A verified site awaiting its first experiment is
   // set up correctly and must not be counted as outstanding work.
-  const quiet = entries.filter((entry) => entry.pixelStatus === "unknown").length;
+  const quiet = entries.filter((entry) => entry.tracking.state === "not_installed").length;
 
   function toggle(websiteId: string, selected: boolean) {
     setSelectedIds((previous) =>

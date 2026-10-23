@@ -25,6 +25,7 @@ import * as sheetsSync from "@/server/services/sheets-sync.service";
 function revalidateSheetViews(websiteId: string): void {
   revalidatePath(routes.integrations);
   revalidatePath(routes.websites.detail(websiteId));
+  revalidatePath(routes.projects.detail(websiteId));
 }
 
 export type PickerTokenResult = { ok: true; accessToken: string } | { ok: false; message: string };
@@ -36,10 +37,18 @@ export type PickerTokenResult = { ok: true; accessToken: string } | { ok: false;
  * whatever the customer picks with it — not the rest of their Drive. See `getPickerToken` in the
  * service for the full reasoning on why handing it to the browser is sound.
  */
-export async function getPickerTokenAction(): Promise<PickerTokenResult> {
+export async function getPickerTokenAction(input?: {
+  websiteId?: string;
+}): Promise<PickerTokenResult> {
   const user = await requireUser();
 
-  const result = await runAction(() => sheetsSync.getPickerToken(user.id));
+  // With a project, the grant is that project's workspace's; without one (the legacy website page),
+  // the active workspace's. Either way only the member who connected Google gets a token.
+  const result = await runAction(() =>
+    input?.websiteId
+      ? sheetsSync.getPickerTokenForWebsite(user.id, input.websiteId)
+      : sheetsSync.getPickerToken(user.id, user.workspaceId),
+  );
 
   if (!result.ok) {
     return { ok: false, message: result.state.message ?? "Could not start the Google picker." };
@@ -93,7 +102,16 @@ export async function createSheetAction(
     };
   }
 
-  const result = await runAction(() => sheetsSync.createSheetForWebsite(user.id, websiteId));
+  // Absent on the legacy form, which means "use the default name"; present means validated.
+  const name = formData.get("name");
+
+  const result = await runAction(() =>
+    sheetsSync.createSheetForWebsite(
+      user.id,
+      websiteId,
+      typeof name === "string" ? name : undefined,
+    ),
+  );
   if (!result.ok) return result.state;
 
   revalidateSheetViews(websiteId);
@@ -104,7 +122,11 @@ export async function createSheetAction(
   };
 }
 
-/** Stops syncing a website. The spreadsheet itself is untouched. */
+/**
+ * Stops syncing a website. The spreadsheet itself is untouched, and so is the workspace's Google
+ * grant — this is the project dashboard's "Disconnect". Revoking Google for every project is
+ * `disconnectSheetsAction`, on the Integrations page.
+ */
 export async function detachSheetAction(
   _previous: FormState,
   formData: FormData,
@@ -160,17 +182,22 @@ export async function refreshSheetAction(
   };
 }
 
-/** Revokes at Google and removes every website's destination. */
+/**
+ * Revokes at Google and removes every website's destination in the active workspace — the
+ * Integrations page's workspace-level "Disconnect" (Owner/Admin).
+ */
 export async function disconnectSheetsAction(
   _previous: FormState,
   _formData: FormData,
 ): Promise<FormState> {
   const user = await requireUser();
 
-  const result = await runAction(() => sheetsSync.disconnect(user.id));
+  const result = await runAction(() => sheetsSync.disconnect(user.id, user.workspaceId));
   if (!result.ok) return result.state;
 
   revalidatePath(routes.integrations);
+  // Every project dashboard in the workspace showed this grant.
+  revalidatePath(routes.projects.list, "layout");
 
   return { status: "success", message: "Google disconnected. Your spreadsheets were not changed." };
 }

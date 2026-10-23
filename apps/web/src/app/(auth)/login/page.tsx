@@ -1,12 +1,20 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { ShieldCheck } from "lucide-react";
 
-import { ExperimentPreview } from "@/components/auth/experiment-preview";
-import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { LoginView } from "@/components/auth/login-view";
 import { describeAuthError } from "@/lib/auth-errors";
+import { env } from "@/env";
+import {
+  LOGIN_VIEWS,
+  PASSWORD_RESET,
+  SIGN_IN_REQUIRED,
+  authErrorCopy,
+  viewError,
+  type LoginMessage,
+  type LoginPhase,
+} from "@/lib/mock/login";
 import { AFTER_SIGN_IN } from "@/lib/routes";
+import { readView } from "@/lib/view-param";
 import { signInWithGoogle } from "@/server/auth/actions";
 import { getSession, isAuthConfigured } from "@/server/auth/session";
 
@@ -21,17 +29,15 @@ function safeCallbackUrl(value: string | undefined): string {
 /**
  * Sign-in screen.
  *
- * Reading order is heading → action → reassurance. Anything conditional — an error, a setup
- * notice — is inserted above the button so it is read before the user acts rather than after.
- *
- * The form sits directly on the column rather than inside a card: with the showcase panel
- * beside it the split already separates the two halves, and a card inside a panel is a border
- * drawn around a border.
+ * The real inputs map onto the design's states: arriving with `?callbackUrl=` (proxy stopped the
+ * visitor on the way somewhere) is "signInRequired", and an Auth.js `?error=` is one of the
+ * design's error states where one fits, or `describeAuthError`'s explanation where none does.
+ * `?view=` opens any designed state directly, including the mock-only Google round trip.
  */
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; error?: string; view?: string; reset?: string }>;
 }) {
   const [session, params] = await Promise.all([getSession(), searchParams]);
   const callbackUrl = safeCallbackUrl(params.callbackUrl);
@@ -41,69 +47,42 @@ export default async function LoginPage({
     redirect(callbackUrl);
   }
 
-  const configured = isAuthConfigured();
-  const authError = describeAuthError(params.error);
+  const view = readView(params.view, LOGIN_VIEWS, "idle");
+  const phase: LoginPhase =
+    view === "waiting" || view === "signingIn" || view === "success" ? view : "idle";
 
-  // Arriving with a callbackUrl means the visitor was stopped on the way somewhere.
-  const wasRedirected = callbackUrl !== AFTER_SIGN_IN;
+  let error: LoginMessage | null = viewError(view);
+  if (!error && params.error) {
+    const known = authErrorCopy(params.error);
+    const fallback = describeAuthError(params.error);
+    error = known ?? (fallback ? { title: fallback.title, body: fallback.description } : null);
+  }
+
+  const configured = isAuthConfigured();
+  if (!error && !configured) {
+    error = {
+      title: "Google sign-in is not configured",
+      body: "Sign in with your email and password below, or set AUTH_SECRET, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in apps/web/.env.",
+    };
+  }
+
+  const notice =
+    params.reset === "1"
+      ? { ...PASSWORD_RESET, tone: "success" as const }
+      : view === "signInRequired" || params.callbackUrl !== undefined
+        ? SIGN_IN_REQUIRED
+        : null;
 
   return (
-    <div className="space-y-8">
-      <header className="space-y-2">
-        {/* Not "Welcome back": with Google as the only method, signing in is also how an
-            account is created, so a first-time visitor sees this heading too. */}
-        <h1 className="text-3xl font-semibold tracking-tight">Sign in to Routely</h1>
-        <p className="text-sm text-pretty text-muted-foreground">
-          {wasRedirected
-            ? "Sign in to continue to the page you were opening."
-            : "Manage your websites and redirect experiments."}
-        </p>
-      </header>
-
-      <div className="space-y-4">
-        {authError ? (
-          <Alert variant="destructive" role="alert">
-            <AlertTitle>{authError.title}</AlertTitle>
-            <AlertDescription>{authError.description}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        {!configured ? (
-          <Alert>
-            <AlertTitle>Google sign-in is not configured</AlertTitle>
-            <AlertDescription>
-              Set <code className="font-mono text-xs">AUTH_SECRET</code>,{" "}
-              <code className="font-mono text-xs">GOOGLE_CLIENT_ID</code> and{" "}
-              <code className="font-mono text-xs">GOOGLE_CLIENT_SECRET</code> in{" "}
-              <code className="font-mono text-xs">apps/web/.env</code>. To browse the dashboard
-              without them, set <code className="font-mono text-xs">AUTH_DEV_BYPASS=true</code> —
-              that flag is refused in production.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        <form action={signInWithGoogle}>
-          <input type="hidden" name="callbackUrl" value={callbackUrl} />
-          <GoogleSignInButton disabled={!configured} />
-        </form>
-
-        <p className="text-sm text-muted-foreground">
-          New to Routely? Signing in with Google creates your account — there is no separate
-          sign-up, and no password to choose.
-        </p>
-      </div>
-
-      <div className="flex gap-2.5 border-t border-border/70 pt-6">
-        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-muted-foreground/70" aria-hidden />
-        <p className="text-xs leading-relaxed text-pretty text-muted-foreground">
-          We read only your name, email address and profile picture, and use them to identify your
-          account. Routely never posts to your Google account.
-        </p>
-      </div>
-
-      {/* The showcase panel carries this on wide screens; below `lg` it is not rendered, so the
-          compact version stands in rather than leaving the question unanswered. */}
-      <ExperimentPreview className="lg:hidden" />
-    </div>
+    <LoginView
+      key={view}
+      action={signInWithGoogle}
+      callbackUrl={callbackUrl}
+      phase={phase}
+      notice={notice}
+      error={error}
+      disabled={!configured}
+      supportEmail={env.SUPPORT_EMAIL ?? null}
+    />
   );
 }

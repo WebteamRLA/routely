@@ -17,8 +17,17 @@ import { SDK_PROTOCOL_VERSION } from "./contract";
  * before a redirect. `fetch` with `keepalive` is the fallback for browsers without it.
  */
 export function send(apiBase: string, batch: EventBatch): boolean {
-  const url = apiBase + "/api/v1/events";
-  const body = JSON.stringify(batch);
+  return post(apiBase + "/api/v1/events", batch);
+}
+
+/** Hands a JSON body to the browser for delivery. Returns whether it was accepted. Never throws. */
+export function post(url: string, payload: unknown): boolean {
+  let body: string;
+  try {
+    body = JSON.stringify(payload);
+  } catch {
+    return false;
+  }
 
   try {
     if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {

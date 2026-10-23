@@ -24,6 +24,11 @@ const nextConfig: NextConfig = {
   // repo root, producing a standalone build that cannot start.
   outputFileTracingRoot: path.join(appDir, "../../"),
 
+  // `next dev` refuses its dev resources to other hosts. A Cloudflare quick tunnel gives the local
+  // server a public https address so a real website can load the snippet from it (browsers block
+  // a public page from reaching `localhost`); this lets the dashboard work through it too.
+  allowedDevOrigins: ["*.trycloudflare.com"],
+
   // @routely/sdk is consumed from TypeScript source within the workspace, so Next compiles it
   // rather than expecting a prebuilt CommonJS/ESM artifact.
   transpilePackages: ["@routely/sdk"],
@@ -63,6 +68,13 @@ const nextConfig: NextConfig = {
           { key: "Access-Control-Allow-Origin", value: "*" },
           { key: "X-Content-Type-Options", value: "nosniff" },
         ],
+      },
+      {
+        // Overrides the rule above (the later match wins for the same key): the visual editor's
+        // agent keeps one name across releases, and it loads only while someone is editing, so
+        // revalidating it costs nothing worth an immutable cache that would pin an old agent.
+        source: "/sdk/v1/editor-agent.js",
+        headers: [{ key: "Cache-Control", value: "no-cache" }],
       },
     ];
   },

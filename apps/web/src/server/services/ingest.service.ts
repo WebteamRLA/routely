@@ -1,15 +1,19 @@
 import "server-only";
 
 import type { EventType } from "@/generated/prisma/client";
-import { normalizeUrl, urlMatches } from "@/lib/url";
+import { isSameSite, normalizeUrl, urlMatches } from "@/lib/url";
 import { db } from "@/server/db";
 import * as assignmentRepo from "@/server/repositories/assignment.repository";
 import * as conversionRepo from "@/server/repositories/conversion.repository";
 import * as eventRepo from "@/server/repositories/event.repository";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
+import * as pageVisitorDayRepo from "@/server/repositories/page-visitor-day.repository";
+import * as visitorDayRepo from "@/server/repositories/visitor-day.repository";
 import * as visitorRepo from "@/server/repositories/visitor.repository";
+import * as websiteRepo from "@/server/repositories/website.repository";
 import * as websiteService from "@/server/services/website.service";
-import { clampClientTimestamp, eventBatchSchema } from "@/validation/tracking";
+import { utcDayKey } from "@/lib/utc-day";
+import { clampClientTimestamp, eventBatchSchema, pageHitSchema } from "@/validation/tracking";
 
 /**
  * Ingestion of events reported by the tracking SDK.
@@ -61,9 +65,21 @@ export interface IngestResult {
    * in a request is an assertion, and the website is the fact it resolved to.
    */
   websiteId: string | null;
+  /**
+   * Experiments at least one event of this batch was recorded against — each re-checked against
+   * the website and ACTIVE by this service, never taken from the payload. The route hands them to
+   * the throttled RESULT_READY check (`server/jobs/result-ready.ts`) after responding.
+   */
+  experimentIds: string[];
 }
 
-const EMPTY: IngestResult = { accepted: 0, rejected: 0, deduplicated: 0, websiteId: null };
+const EMPTY: IngestResult = {
+  accepted: 0,
+  rejected: 0,
+  deduplicated: 0,
+  websiteId: null,
+  experimentIds: [],
+};
 
 export async function ingest(payload: unknown): Promise<IngestResult> {
   const parsed = eventBatchSchema.safeParse(payload);
@@ -82,6 +98,7 @@ export async function ingest(payload: unknown): Promise<IngestResult> {
     rejected: 0,
     deduplicated: 0,
     websiteId: website.id,
+    experimentIds: [],
   };
 
   // Experiments are resolved once per batch: a batch usually concerns one experiment, and this
@@ -135,9 +152,12 @@ export async function ingest(payload: unknown): Promise<IngestResult> {
     // this the URL is whatever the client says it is, and a crafted payload could book a
     // conversion from anywhere — the one event type where that directly moves the headline
     // number the customer makes decisions on.
+    // An ACTIVE experiment always has a goal (launch requires one); the null check only keeps a
+    // row that somehow lacks it from matching anything.
     if (
       event.type === "conversion" &&
-      !urlMatches(url, experiment.conversionUrl, experiment.conversionMatchType)
+      (experiment.conversionUrl === null ||
+        !urlMatches(url, experiment.conversionUrl, experiment.conversionMatchType))
     ) {
       result.rejected += 1;
       continue;
@@ -197,6 +217,7 @@ export async function ingest(payload: unknown): Promise<IngestResult> {
     });
 
     result.accepted += 1;
+    if (!result.experimentIds.includes(experiment.id)) result.experimentIds.push(experiment.id);
   }
 
   return result;
@@ -261,4 +282,79 @@ async function recordEvent(input: {
   }
 
   await eventRepo.createEvents([input], db);
+}
+
+/**
+ * How often a site-wide hit may move `Website.lastSeenAt`. Tracking status has a 24-hour
+ * threshold and shows "just now" below a minute, so a minute of staleness is invisible, and it
+ * turns a busy site's thousands of hits a minute into one write.
+ */
+export const LAST_SEEN_THROTTLE_MS = 60_000;
+
+export interface HitResult {
+  /** False when the payload was malformed or named a website that does not exist. */
+  recorded: boolean;
+  /** The website the hit resolved to, from the public site id. */
+  websiteId: string | null;
+  /** A new `website_visitor_days` row was written (first hit today from this browser). */
+  newVisitorDay: boolean;
+  /** A new `page_visitor_days` row was written (first hit on this page today from this browser). */
+  newPageDay: boolean;
+  /** This hit won the throttled `lastSeenAt` compare-and-set. */
+  touchedLastSeen: boolean;
+}
+
+const NO_HIT: HitResult = {
+  recorded: false,
+  websiteId: null,
+  newVisitorDay: false,
+  newPageDay: false,
+  touchedLastSeen: false,
+};
+
+/**
+ * Records one site-wide page hit (`POST /api/v1/hit`) — the same trust rules as `ingest`:
+ *
+ *  - The **website** comes from the public site id; nothing in the payload names a row.
+ *  - The **URL is normalised server-side** and must be on the website's own domain — a hit for a
+ *    page elsewhere is an assertion about somebody else's site and is dropped, so it can neither
+ *    inflate a baseline nor vouch for a tracking check here.
+ *  - The **day comes from the clamped timestamp**, so a browser whose clock is a week off still
+ *    counts towards (at most) yesterday or today, never an arbitrary date.
+ *  - Writes are **rows with ON CONFLICT DO NOTHING**, so a duplicated or replayed hit is a no-op
+ *    and the counts stay a pure `count(*)`.
+ *  - `lastSeenAt` moves through a throttled compare-and-set, never a read-then-write.
+ *
+ * Never throws for bad input; a database failure propagates to the route, which swallows it.
+ */
+export async function recordHit(payload: unknown, now: Date = new Date()): Promise<HitResult> {
+  const parsed = pageHitSchema.safeParse(payload);
+  if (!parsed.success) return NO_HIT;
+
+  const { siteId, anonymousId } = parsed.data;
+
+  const url = normalizeUrl(parsed.data.url);
+  if (!url) return NO_HIT;
+
+  const website = await websiteService.resolveWebsiteByPublicSiteId(siteId);
+  if (!website) return NO_HIT;
+
+  if (!isSameSite(url, website.domain)) return { ...NO_HIT, websiteId: website.id };
+
+  const occurredAt = clampClientTimestamp(parsed.data.ts, now.getTime());
+  const day = new Date(`${utcDayKey(occurredAt)}T00:00:00.000Z`);
+
+  const [newVisitorDay, newPageDay, touchedLastSeen] = await Promise.all([
+    visitorDayRepo.insertWebsiteVisitorDay({ websiteId: website.id, day, anonymousId }),
+    pageVisitorDayRepo.insertPageVisitorDay({
+      websiteId: website.id,
+      urlKey: url,
+      day,
+      anonymousId,
+    }),
+    // "Last seen" is the moment the server received evidence, not the browser's claim of when.
+    websiteRepo.touchLastSeen(website.id, now, LAST_SEEN_THROTTLE_MS),
+  ]);
+
+  return { recorded: true, websiteId: website.id, newVisitorDay, newPageDay, touchedLastSeen };
 }

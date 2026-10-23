@@ -47,7 +47,7 @@ export type SheetCell = string | number;
 /** One arm's figures for one day, as the analytics layer produces them. */
 export interface DailyArmFigures {
   experimentName: string;
-  /** "Control", or "Variant N" — see `armLabel`. */
+  /** "Control", or the variant's stored name — see `armLabel`. */
   variantLabel: string;
   assignedVisitors: number;
   conversions: number;
@@ -60,25 +60,38 @@ export function headerRow(): string[] {
   return [...SHEET_COLUMNS];
 }
 
+/** A configured variant, as `armLabel` needs it. */
+export interface LabelledVariant {
+  id: string;
+  /** `ExperimentVariant.name` ("Variant A" by default, editable for Split URL tests). */
+  name: string;
+}
+
 /**
- * The label for one arm of an experiment.
+ * The label for one arm of an experiment — the same name the experiment page shows.
  *
  * A NULL `variantId` is the control — control is deliberately not a row in `ExperimentVariant`
- * (see the schema header), so its absence from the id list *is* its identity.
+ * (see the schema header), so its absence from the list *is* its identity.
  *
- * Variants are numbered from their position in `orderedVariantIds`, which the caller must order
- * by `ExperimentVariant.position` ascending. That is the same ordering the dashboard renders, so
- * "Variant 2" means the same thing in the spreadsheet as it does on the experiment page — and
- * numbering them any other way would make the two disagree without either being wrong.
+ * A variant is labelled by its stored name, so "Variant A" (or a customer's own "Blue banner")
+ * reads the same in the spreadsheet as on the experiment page. A blank name falls back to the
+ * letter for its place in `orderedVariants` — ordered by `ExperimentVariant.position` ascending —
+ * exactly as `experiment-results.service.ts` does, so the two never disagree. The name is
+ * customer-controlled text and is returned verbatim; `valueInputOption=RAW` is what keeps a
+ * formula-shaped name inert (see the file header).
  *
  * An id that is not in the list belongs to a variant deleted since the data was collected. It
  * keeps a label rather than being dropped, because the visitors it counted were real.
  */
-export function armLabel(variantId: string | null, orderedVariantIds: readonly string[]): string {
+export function armLabel(
+  variantId: string | null,
+  orderedVariants: readonly LabelledVariant[],
+): string {
   if (variantId === null) return "Control";
 
-  const index = orderedVariantIds.indexOf(variantId);
-  return index === -1 ? "Removed variant" : `Variant ${index + 1}`;
+  const index = orderedVariants.findIndex((variant) => variant.id === variantId);
+  if (index === -1) return "Removed variant";
+  return orderedVariants[index]!.name.trim() || `Variant ${String.fromCharCode(65 + index)}`;
 }
 
 /**

@@ -50,7 +50,12 @@ export class AppError extends Error {
 export const unauthenticated = (message = "You must be signed in.") =>
   new AppError("UNAUTHENTICATED", message);
 
-export const forbidden = (message = "You do not have access to this resource.") =>
+/**
+ * A **member** of the workspace lacks the role for this action. Only ever thrown after membership
+ * has been established — a non-member gets `notFound`, so an id cannot be probed for existence.
+ * Saying "forbidden" to a member leaks nothing: they can already see the record.
+ */
+export const forbidden = (message = "You don’t have permission to do that.") =>
   new AppError("FORBIDDEN", message);
 
 export const notFound = (message = "That resource does not exist.") =>

@@ -1,25 +1,26 @@
 import "server-only";
 
-import type { Prisma, WebsiteSheetTarget } from "@/generated/prisma/client";
+import type { MemberRole, Prisma, WebsiteSheetTarget } from "@/generated/prisma/client";
 import { type DbClient, db } from "@/server/db";
+import { websiteAccess } from "@/server/repositories/access";
 
 /**
  * Data access for a website's Google Sheets destination.
  *
- * Ownership is expressed one level up, as `website: { userId }` — the same shape
- * `experiment.repository.ts` uses, and for the same reason: a target has no owner of its own, so
- * the tenant filter has to reach through the website. Every function that a customer can reach
- * takes `userId` and folds it into the `where`, and the writes use `updateMany`/`deleteMany` so
- * that filter participates in the write rather than relying on a prior read.
+ * Tenancy is expressed through the website, as `website: websiteAccess(userId)` — the same shape
+ * `experiment.repository.ts` uses, and for the same reason: a target has no tenant of its own, so
+ * the filter has to reach through the website's workspace. Every function that a customer can
+ * reach takes `userId` and folds it into the `where`, and the writes use `updateMany`/`deleteMany`
+ * so that filter participates in the write rather than relying on a prior read.
  */
 
 /** A target together with the website it belongs to — what the sweep and the UI both need. */
 export type TargetWithWebsite = Prisma.WebsiteSheetTargetGetPayload<{
-  include: { website: { select: { id: true; userId: true; name: true; domain: true } } };
+  include: { website: { select: { id: true; workspaceId: true; name: true; domain: true } } };
 }>;
 
 const WEBSITE_INCLUDE = {
-  website: { select: { id: true, userId: true, name: true, domain: true } },
+  website: { select: { id: true, workspaceId: true, name: true, domain: true } },
 } satisfies Prisma.WebsiteSheetTargetInclude;
 
 export function findTargetForWebsite(
@@ -28,18 +29,19 @@ export function findTargetForWebsite(
   client: DbClient = db,
 ): Promise<TargetWithWebsite | null> {
   return client.websiteSheetTarget.findFirst({
-    where: { websiteId, website: { userId } },
+    where: { websiteId, website: websiteAccess(userId) },
     include: WEBSITE_INCLUDE,
   });
 }
 
-/** Every destination the actor owns, for the integrations page. */
-export function listTargetsForUser(
+/** Every destination in one workspace, for the integrations page. */
+export function listTargetsInWorkspace(
+  workspaceId: string,
   userId: string,
   client: DbClient = db,
 ): Promise<TargetWithWebsite[]> {
   return client.websiteSheetTarget.findMany({
-    where: { website: { userId } },
+    where: { website: websiteAccess(userId, { workspaceId }) },
     include: WEBSITE_INCLUDE,
     orderBy: { attachedAt: "asc" },
   });
@@ -53,8 +55,8 @@ export function listTargetsForUser(
  * header gets it back.
  *
  * Not an `upsert` on `websiteId` alone — that would write to a website the actor may not own. The
- * caller resolves the website through `website.repository.findWebsiteForUser` first, which is where
- * the ownership check lives.
+ * caller resolves the website through `website.repository.findWebsiteAccess` first, which is where
+ * the membership and role check lives.
  */
 export function attachTarget(
   websiteId: string,
@@ -71,8 +73,23 @@ export function attachTarget(
     where: { websiteId },
     // rowCount resets because a new tab holds nothing yet; leaving a stale count would make the
     // next refresh pad blank rows over cells it never wrote.
-    create: { websiteId, ...data, rowCount: 0, refreshedAt: null, lastError: null },
-    update: { ...data, rowCount: 0, refreshedAt: null, lastError: null, attachedAt: new Date() },
+    // A new destination starts with a clean slate, including the failure-notification latch.
+    create: {
+      websiteId,
+      ...data,
+      rowCount: 0,
+      refreshedAt: null,
+      lastError: null,
+      errorNotifiedAt: null,
+    },
+    update: {
+      ...data,
+      rowCount: 0,
+      refreshedAt: null,
+      lastError: null,
+      errorNotifiedAt: null,
+      attachedAt: new Date(),
+    },
   });
 }
 
@@ -80,24 +97,25 @@ export function attachTarget(
 export function detachTarget(
   websiteId: string,
   userId: string,
+  roles: readonly MemberRole[],
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
   return client.websiteSheetTarget.deleteMany({
-    where: { websiteId, website: { userId } },
+    where: { websiteId, website: websiteAccess(userId, { roles }) },
   });
 }
 
 /**
  * Every destination the daily sweep should visit.
  *
- * No `userId`: the sweep acts for every account, like the ingestion-path repository functions. Only
- * targets whose owner holds a working Google grant are returned — a website whose customer has
+ * No `userId`: the sweep acts for every workspace, like the ingestion-path repository functions.
+ * Only targets whose workspace holds a working Google grant are returned — a website whose customer has
  * revoked access is excluded here rather than fetched and skipped, so the sweep's counts describe
  * work it could actually have done.
  */
 export function listSyncableTargets(client: DbClient = db): Promise<TargetWithWebsite[]> {
   return client.websiteSheetTarget.findMany({
-    where: { website: { user: { sheetsConnection: { status: "CONNECTED" } } } },
+    where: { website: { workspace: { sheetsConnection: { status: "CONNECTED" } } } },
     include: WEBSITE_INCLUDE,
     orderBy: { attachedAt: "asc" },
   });
@@ -139,7 +157,12 @@ export async function claimRefresh(
   return claimed.count === 1 ? target : null;
 }
 
-/** Records what the tab now holds, so the next refresh can blank rows it no longer needs. */
+/**
+ * Records what the tab now holds, so the next refresh can blank rows it no longer needs.
+ *
+ * A success also clears the failure and re-arms the SHEETS_SYNC_FAILED latch, so the *next*
+ * failure is announced again.
+ */
 export function recordWrite(
   targetId: string,
   data: { sheetId: number; sheetTitle: string; rowCount: number },
@@ -147,8 +170,31 @@ export function recordWrite(
 ): Promise<Prisma.BatchPayload> {
   return client.websiteSheetTarget.updateMany({
     where: { id: targetId },
-    data: { ...data, lastError: null },
+    data: { ...data, lastError: null, errorNotifiedAt: null },
   });
+}
+
+/**
+ * Claims the right to announce a failing sync — once per failure streak.
+ *
+ * A compare-and-set, like `claimRefresh`: the `errorNotifiedAt: null` in the `where` means exactly
+ * one caller wins however many refreshes fail concurrently (beacons on several instances, the cron
+ * and a "Sync now" at once). `recordWrite` clears the column on the next success, which re-arms it.
+ * `lastError: { not: null }` keeps a claim from landing after a success that raced it.
+ *
+ * True when this caller won and must send the notification; false otherwise.
+ */
+export async function claimErrorNotification(
+  targetId: string,
+  now: Date = new Date(),
+  client: DbClient = db,
+): Promise<boolean> {
+  const claimed = await client.websiteSheetTarget.updateMany({
+    where: { id: targetId, errorNotifiedAt: null, lastError: { not: null } },
+    data: { errorNotifiedAt: now },
+  });
+
+  return claimed.count === 1;
 }
 
 /** Records why the last refresh failed, so the UI can say so instead of showing stale numbers. */

@@ -7,13 +7,13 @@ import { Loader2, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IDLE, type FormState } from "@/lib/form-state";
 
-type Status = "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED";
+type Status = "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED";
 
 /**
  * The single most useful lifecycle action for a given status, as a compact list control.
  *
  * A draft or a paused experiment publishes; a running one pauses; an archived one offers
- * nothing, because ARCHIVED is terminal. Anything more (archiving, going back to draft) lives
+ * nothing, because COMPLETED is terminal. Anything more (archiving, going back to draft) lives
  * on the experiment's own page — a list row is the wrong place to make a decision that needs
  * context.
  *
@@ -33,7 +33,7 @@ export function PublishPauseButton({
   const [state, formAction, isPending] = useActionState(action, IDLE);
   useFormToast(state);
 
-  if (status === "ARCHIVED") return null;
+  if (status === "COMPLETED") return null;
 
   const publishing = status !== "ACTIVE";
   const Icon = publishing ? Play : Pause;

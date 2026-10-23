@@ -2,6 +2,7 @@ import { after, type NextRequest } from "next/server";
 
 import { isBot } from "@/server/http/bot-filter";
 import { clientAddress, rateLimit } from "@/server/http/rate-limit";
+import { scheduleResultReadyCheck } from "@/server/jobs/result-ready";
 import { ingest } from "@/server/services/ingest.service";
 import { refreshSheet } from "@/server/services/sheets-sync.service";
 
@@ -134,6 +135,15 @@ export async function POST(request: NextRequest) {
     if (result.websiteId && result.accepted > 0) {
       const websiteId = result.websiteId;
       after(() => refreshSheet(websiteId));
+
+      /*
+       * "A result is ready" (spec §5.5), by the same rules: the counting and the email happen
+       * after the response, and never fail it. Throttled per experiment in memory — at most one
+       * check a minute per process — so on the request path this is a map lookup per experiment;
+       * the `resultReadyAt` compare-and-set makes it one email however many checks race. The
+       * daily cron is the backstop for anything the throttle defers.
+       */
+      scheduleResultReadyCheck(result.experimentIds);
     }
   } catch (error) {
     // A failure here must never surface on a customer's page.

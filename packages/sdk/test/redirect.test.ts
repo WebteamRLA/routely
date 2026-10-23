@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import type { ExperimentConfig } from "../src/contract";
 import { createMemoryStore } from "../src/env";
-import { countRedirects, decide, findExperimentForUrl, recordRedirect } from "../src/redirect";
+import {
+  carryParams,
+  isRedirectPending,
+  markLanded,
+  REDIRECT_PENDING_MS,
+  redirectedKey,
+  decide,
+  findExperimentForUrl,
+  recordRedirect,
+} from "../src/redirect";
 import { readHandoff, stripHandoff, withHandoff } from "../src/url";
 
 const CONTROL = "https://acme.test/pricing";
@@ -106,15 +115,49 @@ describe("redirect loop prevention", () => {
     expect(decision?.action).toBe("skip");
   });
 
-  it("refuses a second redirect in the same session", () => {
-    // Guard 3: even if every other guard were bypassed, the counter stops a bounce.
+  it("refuses to redirect again while a redirect is still on its way (a bounce-back loop)", () => {
+    // Guard 3: the variant sent the visitor straight back, so the redirect never landed.
     const session = createMemoryStore();
     recordRedirect("exp_1", session);
 
     const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx(session));
     expect(decision?.action).toBe("skip");
     expect(decision?.action === "skip" && decision.reason).toBe("already-redirected");
-    expect(countRedirects("exp_1", session)).toBe(1);
+    expect(isRedirectPending("exp_1", session)).toBe(true);
+  });
+
+  it("redirects a returning visitor again once the earlier redirect landed", () => {
+    const session = createMemoryStore();
+    recordRedirect("exp_1", session);
+    // The variant page loads with this experiment's handoff: the redirect landed.
+    const landed = withHandoff(VARIANT, {
+      visitorId: "v-123",
+      experimentId: "exp_1",
+      variant: VARIANT_ID,
+    });
+    markLanded(landed, [EXPERIMENT], session);
+    expect(isRedirectPending("exp_1", session)).toBe(false);
+
+    const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx(session));
+    expect(decision?.action).toBe("redirect");
+  });
+
+  it("treats a pending redirect older than the window, or an old counter value, as expired", () => {
+    const session = createMemoryStore();
+    recordRedirect("exp_1", session, 1_000);
+    expect(isRedirectPending("exp_1", session, 1_000 + REDIRECT_PENDING_MS - 1)).toBe(true);
+    expect(isRedirectPending("exp_1", session, 1_000 + REDIRECT_PENDING_MS)).toBe(false);
+    session.setItem(redirectedKey("exp_1"), "1"); // what the old counter stored
+    expect(isRedirectPending("exp_1", session)).toBe(false);
+  });
+
+  it("only clears the marker on that experiment's own variant", () => {
+    const session = createMemoryStore();
+    recordRedirect("exp_1", session);
+    markLanded("https://acme.test/elsewhere", [EXPERIMENT], session);
+    expect(isRedirectPending("exp_1", session)).toBe(true);
+    markLanded(VARIANT, [EXPERIMENT], session);
+    expect(isRedirectPending("exp_1", session)).toBe(false);
   });
 
   it("never navigates to the page already displayed", () => {
@@ -201,5 +244,66 @@ describe("traffic allocation", () => {
   it("includes a visitor `includedFor` approves", () => {
     const decision = decide(CONTROL, [EXPERIMENT], always(VARIANT_ID), ctx(), () => true);
     expect(decision?.action).toBe("redirect");
+  });
+});
+
+describe("keepParams", () => {
+  const KEEP: ExperimentConfig = { ...EXPERIMENT, keepParams: true };
+
+  it("carries campaign parameters and the fragment from an EXACT control", () => {
+    // Under EXACT matching only parameters normalisation ignores (utm_*, gclid, …) can be on
+    // the control page at all; any other parameter makes it a different page.
+    const decision = decide(
+      `${CONTROL}?utm_source=ads&gclid=g1#faq`,
+      [KEEP],
+      always(VARIANT_ID),
+      ctx(),
+    );
+    expect(decision?.action).toBe("redirect");
+    const target = new URL(decision?.action === "redirect" ? decision.target : "");
+    expect(target.searchParams.get("utm_source")).toBe("ads");
+    expect(target.searchParams.get("gclid")).toBe("g1");
+    expect(target.searchParams.get("_rt_v")).toBe(VARIANT_ID);
+    expect(target.hash).toBe("#faq");
+  });
+
+  it("carries any parameter from a PREFIX control", () => {
+    const prefix: ExperimentConfig = { ...KEEP, control: { url: CONTROL, match: "PREFIX" } };
+    const decision = decide(`${CONTROL}?plan=pro`, [prefix], always(VARIANT_ID), ctx());
+    const target = new URL(decision?.action === "redirect" ? decision.target : "");
+    expect(target.searchParams.get("plan")).toBe("pro");
+  });
+
+  it("drops them without keepParams, as before", () => {
+    const decision = decide(`${CONTROL}?utm_source=ads`, [EXPERIMENT], always(VARIANT_ID), ctx());
+    const target = new URL(decision?.action === "redirect" ? decision.target : "");
+    expect(target.searchParams.get("utm_source")).toBeNull();
+  });
+
+  it("lets the variant's own parameters win, and never carries handoff parameters", () => {
+    expect(carryParams("https://acme.test/v2?plan=basic", "https://acme.test/p?plan=pro&x=1")).toBe(
+      "https://acme.test/v2?plan=basic&x=1",
+    );
+    expect(
+      carryParams("https://acme.test/v2", "https://acme.test/p?_rt_vid=abc&_rt_e=e&_rt_v=v"),
+    ).toBe("https://acme.test/v2");
+    expect(carryParams("https://acme.test/v2#top", "https://acme.test/p#faq")).toBe(
+      "https://acme.test/v2#top",
+    );
+  });
+
+  it("returns the target unchanged when either URL does not parse", () => {
+    expect(carryParams("not a url", CONTROL)).toBe("not a url");
+    expect(carryParams(VARIANT, "not a url")).toBe(VARIANT);
+  });
+
+  it("recognises a variant nested under a PREFIX control with carried parameters", () => {
+    const nested: ExperimentConfig = {
+      ...KEEP,
+      control: { url: CONTROL, match: "PREFIX" },
+      variants: [{ id: VARIANT_ID, url: `${CONTROL}/v2`, weight: 50 }],
+    };
+    const decision = decide(`${CONTROL}/v2?plan=pro`, [nested], always(VARIANT_ID), ctx());
+    expect(decision).toMatchObject({ action: "skip", reason: "already-on-variant" });
   });
 });

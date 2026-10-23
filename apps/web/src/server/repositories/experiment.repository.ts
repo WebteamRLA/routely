@@ -1,13 +1,15 @@
 import "server-only";
 
-import type { Experiment, ExperimentStatus, Prisma } from "@/generated/prisma/client";
+import type { Experiment, ExperimentStatus, MemberRole, Prisma } from "@/generated/prisma/client";
 import { type DbClient, db } from "@/server/db";
+import { actorMembershipSelect, experimentAccess } from "@/server/repositories/access";
 
 /**
  * Data access for experiments.
  *
- * Ownership is expressed one level up, through the parent website: `website: { userId }`
- * scopes a query to the signed-in user without the experiment table needing a userId column.
+ * Tenancy is expressed two levels up, through the website's workspace: `experimentAccess(userId)`
+ * matches only experiments in a workspace the user is a member of, without the experiment table
+ * needing a tenant column of its own. Writes also take the roles allowed to make them.
  */
 
 const VARIANTS_INCLUDE = {
@@ -28,20 +30,45 @@ export function listExperimentsForWebsite(
   client: DbClient = db,
 ): Promise<Experiment[]> {
   return client.experiment.findMany({
-    where: { websiteId, website: { userId } },
+    where: { websiteId, ...experimentAccess(userId) },
     orderBy: { createdAt: "desc" },
   });
 }
 
+/** An experiment in any workspace the user belongs to. */
 export function findExperimentForUser(
   experimentId: string,
   userId: string,
   client: DbClient = db,
 ): Promise<ExperimentWithWebsite | null> {
   return client.experiment.findFirst({
-    where: { id: experimentId, website: { userId } },
+    where: { id: experimentId, ...experimentAccess(userId) },
     include: { website: true, ...VARIANTS_INCLUDE },
   });
+}
+
+/**
+ * An experiment the user can see, with the role they hold in its workspace — so the service can
+ * tell NOT_FOUND (not a member) from FORBIDDEN (a member without the role).
+ */
+export async function findExperimentAccess(
+  experimentId: string,
+  userId: string,
+  client: DbClient = db,
+): Promise<{ experiment: ExperimentWithWebsite; role: MemberRole } | null> {
+  const row = await client.experiment.findFirst({
+    where: { id: experimentId, ...experimentAccess(userId) },
+    include: {
+      website: { include: { workspace: { select: actorMembershipSelect(userId) } } },
+      ...VARIANTS_INCLUDE,
+    },
+  });
+
+  const role = row?.website.workspace.memberships[0]?.role;
+  if (!row || !role) return null;
+
+  const { workspace: _workspace, ...website } = row.website;
+  return { experiment: { ...row, website }, role };
 }
 
 /**
@@ -118,20 +145,22 @@ export interface ExperimentQuery {
 }
 
 /**
- * Every experiment the user owns, across all their websites, newest first.
+ * Every experiment in one workspace, across all its websites, newest first — only if `userId` is a
+ * member of it.
  *
  * Filtering happens in the query rather than in memory: a customer with many experiments
  * should not transfer all of them to render a filtered list, and the `[websiteId, createdAt]`
  * index keeps the ordering cheap.
  */
-export function listExperimentsForUser(
+export function listExperimentsInWorkspace(
+  workspaceId: string,
   userId: string,
   query: ExperimentQuery = {},
   client: DbClient = db,
 ): Promise<ExperimentWithWebsite[]> {
   return client.experiment.findMany({
     where: {
-      website: { userId },
+      ...experimentAccess(userId, { workspaceId }),
       ...(query.status ? { status: query.status } : {}),
       ...(query.search ? { name: { contains: query.search, mode: "insensitive" as const } } : {}),
     },
@@ -140,14 +169,15 @@ export function listExperimentsForUser(
   });
 }
 
-/** How many experiments the user has in each status, for the tab counts. */
+/** How many experiments the workspace has in each status, for the tab counts. */
 export async function countExperimentsByStatus(
+  workspaceId: string,
   userId: string,
   client: DbClient = db,
 ): Promise<Record<ExperimentStatus, number>> {
   const rows = await client.experiment.groupBy({
     by: ["status"],
-    where: { website: { userId } },
+    where: experimentAccess(userId, { workspaceId }),
     _count: { _all: true },
   });
 
@@ -155,7 +185,7 @@ export async function countExperimentsByStatus(
     DRAFT: 0,
     ACTIVE: 0,
     PAUSED: 0,
-    ARCHIVED: 0,
+    COMPLETED: 0,
   };
   for (const row of rows) {
     totals[row.status] = row._count._all;
@@ -171,12 +201,13 @@ export async function countExperimentsByStatus(
  * account has.
  */
 export async function countExperimentsByWebsite(
+  workspaceId: string,
   userId: string,
   client: DbClient = db,
 ): Promise<Map<string, { total: number; active: number }>> {
   const rows = await client.experiment.groupBy({
     by: ["websiteId", "status"],
-    where: { website: { userId } },
+    where: experimentAccess(userId, { workspaceId }),
     _count: { _all: true },
   });
 
@@ -202,11 +233,12 @@ export function createExperiment(
 export function updateExperiment(
   experimentId: string,
   userId: string,
-  data: Prisma.ExperimentUpdateInput,
+  roles: readonly MemberRole[],
+  data: Prisma.ExperimentUpdateManyMutationInput,
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
   return client.experiment.updateMany({
-    where: { id: experimentId, website: { userId } },
+    where: { id: experimentId, ...experimentAccess(userId, { roles }) },
     data,
   });
 }
@@ -227,7 +259,7 @@ export async function replaceVariants(
 ): Promise<void> {
   const existing = await client.experimentVariant.findMany({
     where: { experimentId },
-    select: { id: true },
+    select: { id: true, colorIndex: true },
   });
   const submittedIds = new Set(variants.flatMap((variant) => (variant.id ? [variant.id] : [])));
   const toDelete = existing.map((row) => row.id).filter((id) => !submittedIds.has(id));
@@ -235,6 +267,11 @@ export async function replaceVariants(
   if (toDelete.length > 0) {
     await client.experimentVariant.deleteMany({ where: { id: { in: toDelete } } });
   }
+
+  // Kept variants keep their colour and name; a new one takes the first free slot.
+  const usedSlots = new Set(
+    existing.filter((row) => submittedIds.has(row.id)).map((row) => row.colorIndex),
+  );
 
   for (const [index, variant] of variants.entries()) {
     const position = index + 1;
@@ -244,19 +281,55 @@ export async function replaceVariants(
         data: { url: variant.url, weight: variant.weight, position },
       });
     } else {
+      const slot = firstFreeSlot(usedSlots, position);
+      usedSlots.add(slot);
       await client.experimentVariant.create({
-        data: { experimentId, url: variant.url, weight: variant.weight, position },
+        data: {
+          experimentId,
+          url: variant.url,
+          weight: variant.weight,
+          position,
+          colorIndex: slot,
+          name: defaultVariantName(slot),
+        },
       });
     }
   }
 }
 
+/** Colour slots run 1–4 — one per variant the product allows. */
+const VARIANT_SLOTS = 4;
+
+/** The lowest colour slot not taken, or a position-derived one past the four the UI offers. */
+export function firstFreeSlot(used: ReadonlySet<number>, position: number): number {
+  for (let slot = 1; slot <= VARIANT_SLOTS; slot += 1) {
+    if (!used.has(slot)) return slot;
+  }
+  return ((position - 1) % VARIANT_SLOTS) + 1;
+}
+
+/** "Variant A" for slot 1, "Variant B" for slot 2, … */
+export function defaultVariantName(slot: number): string {
+  return `Variant ${String.fromCharCode(64 + Math.min(Math.max(slot, 1), 26))}`;
+}
+
+/**
+ * Deletes an experiment. `status` is the status the caller's role decision was made for: it joins
+ * the filter, so an Editor allowed to delete a *draft* matches nothing if the experiment was
+ * launched in the meantime.
+ */
 export function deleteExperiment(
   experimentId: string,
   userId: string,
+  roles: readonly MemberRole[],
+  status?: ExperimentStatus,
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
   return client.experiment.deleteMany({
-    where: { id: experimentId, website: { userId } },
+    where: {
+      id: experimentId,
+      ...(status ? { status } : {}),
+      ...experimentAccess(userId, { roles }),
+    },
   });
 }

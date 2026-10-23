@@ -1,7 +1,9 @@
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { unverifiedReturnTo } from "@/lib/google-oauth-state";
 import { routes } from "@/lib/routes";
+import { type SheetsOutcomeReason, outcomeQuery } from "@/lib/sheets-card";
 import { getSession } from "@/server/auth/session";
 import { isAppError } from "@/server/errors";
 import * as googleOAuth from "@/server/services/google-oauth.service";
@@ -13,17 +15,15 @@ export const runtime = "nodejs";
 /**
  * Completes the Google Sheets consent flow.
  *
- * Every outcome ends as a redirect back to `/integrations` carrying a short code, which the page
- * turns into a message. Nothing is rendered here: this URL is reached by a redirect from Google
- * and its content would be discarded anyway, and a redirect means the authorization code does not
- * linger in the address bar.
+ * Every outcome ends as a redirect to the state's `returnTo` — the Integrations page or the project
+ * dashboard the flow began on — carrying a short **code** (`?sheets=connected`, or
+ * `?sheets=error&reason=…`), which the page turns into a message. Only codes travel in the URL, never
+ * a message, so nobody can craft a link that makes our page say something we did not write.
+ *
+ * Nothing is rendered here: this URL is reached by a redirect from Google, and a redirect means the
+ * authorization code does not linger in the address bar.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const back = (outcome: string): NextResponse =>
-    NextResponse.redirect(new URL(`${routes.integrations}?${outcome}`, request.url), {
-      status: 303,
-    });
-
   const session = await getSession();
   if (!session) return NextResponse.redirect(new URL(routes.login, request.url), { status: 303 });
 
@@ -34,39 +34,49 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   store.delete({ name: googleOAuth.STATE_COOKIE, path: "/api/integrations/google" });
 
   const params = request.nextUrl.searchParams;
-  const error = params.get("error");
-
-  // The customer pressed Cancel on Google's screen. Not a failure worth an alarming message.
-  if (error === "access_denied") return back("error=denied");
-  if (error) return back("error=google");
-
-  const code = params.get("code");
   const state = params.get("state");
-
-  if (!code || !state) return back("error=invalid");
 
   /*
    * The state check is bound to the *current session's* user id as well as to the cookie. The
-   * signature proves the state came from us and the cookie proves it came back through the browser
-   * that started the flow; binding the user id is what stops an attacker starting a flow, handing
-   * the URL to a victim, and having the victim's Google account attached to the attacker's account.
+   * signature proves the state (including its workspace and returnTo) came from us and the cookie
+   * proves it came back through the browser that started the flow; binding the user id is what
+   * stops an attacker starting a flow, handing the URL to a victim, and having the victim's Google
+   * account attached to the attacker's workspace.
    */
-  if (!googleOAuth.verifyState(state, cookieNonce, session.user.id)) {
-    return back("error=state");
-  }
+  const verified = state ? googleOAuth.verifyState(state, cookieNonce, session.user.id) : null;
+
+  // Before verification, only the allow-listed path from the payload is used — at worst a forged
+  // state picks which of our own two pages shows the error.
+  const returnTo = verified?.returnTo ?? unverifiedReturnTo(state);
+  const back = (outcome: "connected" | SheetsOutcomeReason): NextResponse =>
+    NextResponse.redirect(new URL(`${returnTo}?${outcomeQuery(outcome)}`, request.url), {
+      status: 303,
+    });
+
+  const error = params.get("error");
+
+  // The customer pressed Cancel on Google's screen. Not a failure worth an alarming message.
+  if (error === "access_denied") return back("denied");
+  if (error) return back("google");
+
+  const code = params.get("code");
+  if (!code || !state) return back("invalid");
+  if (!verified) return back("state");
 
   try {
-    await completeConnection(session.user.id, code);
+    await completeConnection(session.user.id, verified.workspaceId, code);
   } catch (caught) {
-    // The message is shown to the customer, so only AppError messages — which are written for
-    // them — are passed through. Anything else becomes a generic failure and is logged.
     if (isAppError(caught)) {
-      return back(`error=connect&detail=${encodeURIComponent(caught.message)}`);
+      if (caught.code === "FORBIDDEN" || caught.code === "NOT_FOUND") return back("forbidden");
+      if (caught.cause === "missing_scope") return back("scope");
+      if (caught.cause === "no_refresh_token") return back("refresh");
+      console.error("[routely] google sheets connect failed:", caught.message);
+      return back("connect");
     }
 
     console.error("[routely] google sheets connect failed:", caught);
-    return back("error=connect");
+    return back("connect");
   }
 
-  return back("connected=1");
+  return back("connected");
 }

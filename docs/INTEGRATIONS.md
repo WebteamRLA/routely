@@ -9,23 +9,30 @@ website**, refreshed within seconds of a visit or a conversion. One row per expe
 | 2026-09-28 | Pricing redesign | Variant 1 | 408 | 41 | 10 |
 
 Routely creates and owns **one tab**, called `Routely`, inside the spreadsheet the customer chooses.
-Nothing else in that file is read or touched.
-Routely never deletes a row it wrote — including for an experiment that has since been deleted.
+Nothing else in that file is read or touched. The tab is rewritten from the database on every
+refresh (§5b), so it always matches the dashboard — and rows for an experiment that has since been
+deleted disappear with its data on the next refresh. The sheet is a view, not an archive.
+
+The grant belongs to a **workspace** and the spreadsheet to a **project** (a website), as the
+redesigned UI calls it. Configured from a project's dashboard (Google Sheets card) and from
+`/integrations`.
 
 ---
 
-## 1. The shape: one grant, many destinations
+## 1. The shape: one grant per workspace, many destinations
 
 Two separate things, deliberately:
 
 | | Scope | Table |
 | --- | --- | --- |
-| **The Google authorisation** | one per Routely account | `sheets_connections` |
-| **The spreadsheet** | one per website | `website_sheet_targets` |
+| **The Google authorisation** | one per **workspace** (`workspaceId` unique) | `sheets_connections` |
+| **The spreadsheet** | one per website (project) | `website_sheet_targets` |
 
-The customer authorises Google **once**. Each website then points at its own spreadsheet, which is
+The workspace authorises Google **once**. Each website then points at its own spreadsheet, which is
 what someone running several sites — an agency especially — actually needs, since each client's
-numbers belong in a sheet that client can be given.
+numbers belong in a sheet that client can be given. Until the workspace migration
+(`20261019120000`) the grant was per *user*; the migration moved each existing grant into its
+owner's new workspace and recorded that user as `connectedById`.
 
 Splitting them is not tidiness. Attaching a sheet to a website needs no consent screen, because the
 grant already exists; a grant per website would mean a consent screen every time, and Google caps
@@ -35,9 +42,36 @@ refresh tokens at roughly **100 per account per OAuth client**, silently invalid
 website never depends on Google being reachable, and a customer who does not want Sheets is never
 blocked by it.
 
-`sheets_sync_runs` is keyed on the **website**, not the grant — so disconnecting and reconnecting
-Google does not lose the record of which days were already written, which would otherwise re-send
-every one of them.
+### Who may do what
+
+| Action | Minimum role (`lib/permissions.ts`) |
+| --- | --- |
+| Connect or disconnect Google; attach, create or detach a project's spreadsheet | ADMIN (`sheets.manage`) |
+| "Sync now" on a project | EDITOR (`sheets.sync`) |
+| See the card and its status | any member |
+
+A non-member asking about a website gets "not found"; a member without the role gets FORBIDDEN.
+
+### Only the connector can open the Picker
+
+The Google Picker runs on the grant's **access token, in the browser** (§4). That token is the
+connecting person's — it browses *their* Drive. Handing it to another Admin would let them look
+through someone else's Drive, so `getPickerToken` refuses everyone but
+`SheetsConnection.connectedById` with FORBIDDEN, and the UI says "Only <email> can browse their Google
+Drive. Create a new Google Sheet instead, or ask them to pick one." Creating a sheet needs no
+browsing, so any Admin can do that. To pick from their own Drive, another Admin reconnects with
+their own Google account, which replaces the workspace's grant.
+
+### Where the consent flow returns to
+
+`/api/integrations/google/start` (POST only) signs a state that carries the **workspace** the grant
+will be stored on and a **`returnTo`** path; the session user id is part of the HMAC but not the
+payload, so it must match on both ends. `returnTo` is an allow-list of exactly two shapes —
+`/integrations` and `/projects/<id>` — so the callback cannot be bent into an open redirect, and a
+customer who connected from a project's Sheets dialog lands back on that project. The outcome
+arrives as `?sheets=<code>`, a fixed vocabulary; free text from Google never travels in the URL.
+(`lib/google-oauth-state.ts` is the pure half; `google-oauth.service.ts` supplies `AUTH_SECRET` and
+the clock.)
 
 ---
 
@@ -148,19 +182,27 @@ no invocations.
 
 ## 4. Choosing a spreadsheet
 
-Two ways, both on the website's page and in the add-website dialog:
+Two ways, both in the project dashboard's **Google Sheets** dialog (the `/integrations` card connects
+and disconnects the grant and reports its state):
 
-- **Choose existing sheet** opens the Google Picker. The customer browses their whole Drive in
-  Google's window; Google grants Routely access to the one file they tap. If the spreadsheet has more
-  than one tab, Routely then asks which tab to append to — with exactly one tab, it does not ask.
-- **Create new sheet** makes a spreadsheet named `Routely — <website name>` in their Drive, with a
-  tab called `Routely daily`. It is theirs immediately: they can rename, move or share it and the
-  sync keeps working, because Routely addresses it by id.
+- **Choose existing sheet** opens the Google Picker — for the connecting member only (§1). They
+  browse their whole Drive in Google's window; Google grants Routely access to the one file they
+  tap. They choose a **spreadsheet**, not a tab: Routely creates its own tab, `Routely`, inside it.
+- **Create new sheet** makes a spreadsheet in the connector's Drive, named by the customer (the
+  dialog offers `Routely results — <project name>`, at most 100 characters), with the `Routely` tab.
+  It is theirs immediately: they can rename, move or share it and the refresh keeps working, because
+  Routely addresses it by id.
+
+Either way the tab is written immediately (a forced refresh), so the customer sees data rather than
+an empty tab. **Disconnect** on a project detaches its spreadsheet (the file and its contents are
+left alone); disconnecting Google on `/integrations` revokes the grant at Google and removes every
+project's destination with it.
 
 The spreadsheet's name and the tab's title are always read back from **Google**, never taken from the
 form. A Server Action is a public HTTP endpoint, and the stored tab title is what builds the A1 range
-every nightly write targets — accepting it from the client would let a tampered submission aim the
-write at a different tab.
+every write targets — accepting it from the client would let a tampered submission aim the write at
+a different tab. (The title is also re-resolved from the tab's numeric id before each write, so a
+tab the customer renamed is still found.)
 
 ### Why the Picker gets an access token in the browser
 
@@ -181,8 +223,13 @@ here:
 **The conversion rate is conversions ÷ *assigned* visitors**, identical to the dashboard. The query
 lives in `analytics.service.ts` beside `armStats` precisely so the two cannot drift: a customer who
 compares the spreadsheet against the experiment page and finds a different rate has found a bug.
-Verified against real data — an experiment showing `10.0%` and `17.5%` on its page writes `10` and
-`17.5` to the sheet.
+Verified against real data before the new design — an experiment showing `10.0%` and `17.5%` on its
+page writes `10` and `17.5` to the sheet. (The redesigned results pages compute their figures in
+`lib/verdict.ts`; the definition is the same, but the two have not been re-compared since.)
+
+**Arms are labelled `Control`, `Variant 1`, `Variant 2` …** by position (`armLabel`), not by the
+variant names the redesigned UI shows ("Variant A"). An arm whose variant was deleted is
+`Removed variant`.
 
 It is written as a one-decimal percentage, matching `formatPercent`. Full float precision would let
 the two disagree in the third decimal, which reads as a bug rather than as rounding — and nothing is
@@ -193,19 +240,22 @@ average into a customer's column as a real zero.
 
 ### Scope of a day's rows
 
-- **Only the experiments of that website.** `getDailyArmRows` takes a `websiteId` *alongside* the
-  owner's id, never instead of it — a website id is caller-supplied, and on its own it would be an id
-  to probe. Verified: asking for a website with the wrong owner's id returns nothing.
-- **Status is ignored** — DRAFT, ACTIVE, PAUSED and ARCHIVED all contribute. An experiment paused
+- **Only the experiments of that website.** `getDailyArmRows` (the CLI's dry run) takes a
+  `websiteId` *alongside* the actor's membership filter, never instead of it — a website id is
+  caller-supplied, and on its own it would be an id to probe. (Verified before workspaces with the
+  wrong owner's id; the filter is now `experimentAccess`, i.e. membership.) The refresh itself runs
+  without a user and reads by the website id of a target row that already exists.
+- **Status is ignored** — DRAFT, ACTIVE, PAUSED and COMPLETED all contribute. An experiment paused
   this morning still collected real data yesterday, and filtering on today's status would make
-  yesterday's numbers depend on when the sync ran.
-- **An experiment with no activity that day produces no rows.** The sheet is an append-only log;
-  emitting every arm of every experiment every day would grow it without bound and bury the signal,
-  and a spreadsheet treats a missing row and a zero row identically when summing. It also means a
-  quiet day costs no Google API calls at all.
+  yesterday's numbers depend on when the refresh ran.
+- **An experiment with no activity on a day produces no rows for that day.** Emitting every arm of
+  every experiment for every day would bury the signal, and a spreadsheet treats a missing row and a
+  zero row identically when summing.
 - **Every arm of an experiment that *did* see activity is written, including arms with zero** —
   otherwise a variant that got no traffic yesterday vanishes and control looks like the whole test.
-- **No lift column, and no significance claim**, consistent with the results UI.
+- **No lift column and no chance-to-beat column.** Those are gated judgements (`lib/verdict.ts`:
+  1,000 visitors and 100 conversions per arm, with a "not proof" note) that belong beside their
+  caveat on the results pages; the sheet carries raw counts a customer can recompute.
 
 ### Formula injection
 
@@ -269,6 +319,34 @@ Traffic keeps a busy website current on its own, so the cron exists for the quie
 site with no visitors would keep showing whatever it last showed and the window would never roll
 forward onto the new day.
 
+The design's copy said the full refresh happens at "00:00". The cron runs at **00:20 UTC** (§9), so
+one of the two had to move, and the schedule is shared with the platform's cron configuration. The
+copy moved — `SHEETS_COPY.refreshSchedule` in `lib/sheets-card.ts`:
+
+> Updates within seconds of new visits and conversions, plus a full refresh every day shortly after
+> midnight UTC.
+
+Change that string if the schedule in `vercel.json` changes.
+
+### When a refresh fails
+
+`refreshSheet` records the failure on the target (`lastError`, in words meant for the customer) and
+swallows it. The UI shows it, with the right next step:
+
+| State (`lib/sheets-card.ts`) | Shown when | Copy |
+| --- | --- | --- |
+| `not_configured` | `GOOGLE_CLIENT_*` or `TOKEN_ENCRYPTION_KEY` missing | "Google Sheets isn’t available yet" — "An administrator needs to finish setting up the Google integration." |
+| `needs_reconnect` | Google refused the refresh token, or Drive access was not granted | "Google needs you to reconnect" |
+| `sync_stopped` | connected, but a project's last write failed (`lastError`) | the stored error |
+
+**A failure streak sends one email.** The first failure after a success takes a compare-and-set
+latch on `WebsiteSheetTarget.errorNotifiedAt` and only then calls
+`notify("SHEETS_SYNC_FAILED", …, { minRole: "ADMIN" })` — Owners and Admins, because only they can
+reconnect or re-pick, and only those whose preference for "Google Sheets sync fails" is on (it is by
+default). Concurrent failures — beacons on several instances, the cron and a "Sync now" at once —
+send one email between them. The next successful write clears both `lastError` and the latch, which
+re-arms it for the next streak.
+
 ---
 
 ## 6. Days are UTC
@@ -313,7 +391,7 @@ access. It is encrypted with AES-256-GCM (`lib/secret-box.ts`, keyed by `server/
 
 GCM rather than a cipher without authentication, because the plaintext is fed straight to Google:
 unauthenticated, an attacker with database write access could swap in their own refresh token and
-have the nightly sync write one customer's data into another customer's spreadsheet. Every value is
+have the sync write one customer's data into another customer's spreadsheet. Every value is
 also bound to a `purpose` as additional authenticated data, so a ciphertext cannot be moved from the
 refresh-token column into the access-token column and still decrypt.
 
@@ -343,45 +421,46 @@ both sides (so the comparison cannot leak the expected length through timing or 
 `CRON_SECRET` unset it **refuses every request** and logs why: an open endpoint here would let anyone
 make Routely write to customers' spreadsheets, repeatedly.
 
-It returns **200 with counts even when some websites failed**. Each failure is recorded on its own run
-row and retried by the next sweep; a 500 would tell the scheduler the whole job failed, obscuring
-which customers *were* written and inviting a retry of work already done. Only a sweep that could not
-start at all is an error.
+It returns **200 with counts even when some websites failed**. Each failure is recorded on its own
+target (`lastError`) and the next refresh — traffic or the next sweep — tries again; a 500 would tell
+the scheduler the whole job failed, obscuring which customers *were* written. Only a sweep that could
+not start at all is an error.
 
-The sweep holds a wall-clock budget below the function's `maxDuration` and stops claiming new work
-rather than being killed mid-append — being killed mid-append is exactly what produces an `UNKNOWN`
-run. One grant usually covers several websites, so tokens are cached per sweep rather than refreshed
-per website.
+The sweep holds a wall-clock budget (45 s) below the function's `maxDuration` and stops starting new
+websites rather than being killed mid-write; a website it did not reach is simply refreshed next time.
+
+A second daily cron, `/api/cron/notifications` at `40 0 * * *`, is unrelated to Sheets (result-ready,
+tracking-stopped and retention) but follows the same rules: bearer `CRON_SECRET`, fails closed, 200
+with per-job summaries.
 
 **Check your platform's current limits.** The number of cron jobs allowed, the precision with which a
 daily job fires, and the `maxDuration` ceiling all differ by Vercel plan and have changed more than
-once. The design is deliberately insensitive to the answer: the claim row makes a late, early or
-duplicated invocation harmless.
+once. On Hobby a cron runs at most once a day and fires somewhere within its hour. The design is
+deliberately insensitive to the answer: the tab is overwritten from source, so a late, early or
+duplicated invocation is harmless.
 
 ### Running it by hand
 
 ```bash
-npm run sheets:sync -- --dry-run --day 2026-09-28 --user <userId> --website <websiteId>
-npm run sheets:sync -- --day 2026-09-28 --user <userId> --website <websiteId>
-npm run sheets:sync                                                  # the full sweep
+npm run sheets:sync -- --dry-run --day 2026-09-28 --user <userId> [--website <websiteId>]
+npm run sheets:sync -- --website <websiteId>                      # refresh one website now
+npm run sheets:sync                                                # the full sweep
 ```
 
-`--dry-run` prints the rows that *would* be appended and touches Google not at all. It is the only
-way to check the numbers against the dashboard before trusting a write.
+`--dry-run` prints the rows for one day that a refresh would include and touches Google not at all.
+`--user` is any member of the website's workspace — rows are read through that user's memberships.
+It is the only way to check the numbers against the dashboard before trusting a write.
 
-The same thing is available in the UI: each website's card has a **day chooser** defaulting to
-yesterday, capped at today. That default is not the interesting part — being able to pick *today* is.
-A website set up this morning has no data for yesterday, so a button hard-wired to yesterday can only
-ever report "nothing to write", which reads exactly like a broken integration rather than a working
-one with nothing to say.
+The same thing is available in the UI: **Sync now** in the project's Google Sheets dialog (EDITOR and
+above) forces a refresh, ignoring the throttle, and reports the failure if there is one.
 
 The script runs under `tsx --conditions=react-server`. Every module under `src/server` begins
 `import "server-only"`, whose job is to throw outside a React Server Component bundler; Node resolves
 that package's `react-server` condition to a no-op, which is what makes a service importable from a
 script. (`prisma/seed.ts` and `prisma/verify.ts` sidestep this by building their own Prisma client and
 importing nothing from `src/` — not an option when the point is to run the real service.) The script
-is a convenience, not the load-bearing path: the "Sync yesterday now" button drives the same service
-through the real app.
+is a convenience, not the load-bearing path: the **Sync now** button drives the same service through
+the real app.
 
 ---
 
@@ -394,10 +473,16 @@ through the real app.
    local day.
 3. **A refresh only happens when traffic arrives, or on the schedule.** Between those, the tab is as
    stale as the gap. For a busy site that is seconds; for a quiet one, until the next scheduled run.
-4. **One Google account per Routely account.** Every website's spreadsheet lives in the same Drive.
+4. **One Google account per workspace.** Every website's spreadsheet lives in the connector's Drive.
    Handing website A's sheet to client A means *sharing* that spreadsheet, not connecting a different
    Google account. Per-website grants were rejected: a consent screen per website, against Google's
    ~100-refresh-token cap.
+
+   **Only the connector can browse.** Other Admins can create sheets but not pick existing ones (§1).
+   If another Admin reconnects with their own Google account, the grant is replaced and every
+   destination is kept — but `drive.file` access is per Google account, so a spreadsheet the
+   previous connector picked may no longer be writable until it is re-picked or shared. (Follows
+   from Google's scope model; not exercised against Google.)
 5. **Routely cannot list a customer's spreadsheets** — by design, see §2. Choosing an existing one
    needs the Picker and its two `NEXT_PUBLIC_GOOGLE_*` variables; without them only "create a new
    sheet" is offered.
@@ -412,9 +497,17 @@ through the real app.
 9. **Refresh tokens expire after 7 days while the OAuth app's publishing status is "Testing"**, and
    changing the app's scopes or publishing status revokes existing grants outright. Both surface as a
    clear "reconnect" state rather than silent failure.
-10. **The refresh throttle is per-process**, the same limitation `rateLimit()` already carries.
-    Multiple instances multiply the effective write rate, which matters only against Google's quota.
-11. **The 30-day window is bucketed in memory.** `getArmRowsByDay` fetches the window's assignments
+10. **The refresh throttle is shared, the rate limits around it are not.** `claimRefresh` is a
+    compare-and-set on `refreshedAt` in the database, so the 10-second cap holds across any number of
+    instances (an earlier revision of this list said otherwise). The ingestion rate limit in front of
+    it is per-process, like every `rateLimit()`.
+11. **Google name and picture are not shown.** The grant's scopes do not include `profile`, so the ID
+    token carries no name or picture; `googleName`/`googlePicture` stay null and the card shows
+    initials from the email. Adding `userinfo.profile` (non-sensitive) would fix it and needs the
+    user's decision.
+12. **Arm labels differ from the UI** — `Variant 1` in the sheet, `Variant A` (or a custom name) on
+    the results pages (§5).
+13. **The 30-day window is bucketed in memory.** `getArmRowsByDay` fetches the window's assignments
     and conversions and groups them in JS, because Prisma cannot group by a date-truncated column.
     `overview.service.ts` does the same and carries the same caveat: this becomes raw SQL if one
     website's traffic over 30 days ever outgrows memory.

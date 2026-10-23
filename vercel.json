@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/sheets-sync",
       "schedule": "20 0 * * *"
+    },
+    {
+      "path": "/api/cron/notifications",
+      "schedule": "40 0 * * *"
     }
   ]
 }

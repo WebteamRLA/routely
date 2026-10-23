@@ -1,12 +1,15 @@
 import "server-only";
 
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 import { env } from "@/env";
+import { type MemberRole, hasRole } from "@/lib/permissions";
 import { routes } from "@/lib/routes";
 import { db } from "@/server/db";
-import { unauthenticated } from "@/server/errors";
+import { forbidden, unauthenticated } from "@/server/errors";
 import { auth } from "@/server/auth";
+import { resolveActiveMembership } from "@/server/auth/workspace";
 
 /**
  * The session seam.
@@ -18,6 +21,10 @@ import { auth } from "@/server/auth";
  * from Postgres. Reading the request that way is also what marks every protected route as
  * dynamically rendered — without it Next.js would try to prerender per-user pages at build
  * time, where no session exists.
+ *
+ * It also decides which **workspace** the request acts in and the actor's role there. Membership is
+ * re-read on every request (one indexed lookup), never cached in the cookie, so removing a member
+ * or changing their role takes effect on their very next request.
  */
 
 export interface SessionUser {
@@ -25,6 +32,12 @@ export interface SessionUser {
   name: string | null;
   email: string;
   image: string | null;
+  /** The `sessions` row behind this request. Null under the development bypass, which has none. */
+  sessionId: string | null;
+  /** The active workspace: `User.currentWorkspaceId`, or the oldest membership. */
+  workspaceId: string;
+  /** The actor's role in `workspaceId`. A record in another workspace carries its own role. */
+  role: MemberRole;
 }
 
 export interface Session {
@@ -45,9 +58,9 @@ const DEV_USER_EMAIL = "dev@routely.local";
  * id would let the dashboard render and then fail on the first write. The promise is cached
  * at module scope so this costs one query per server process rather than one per request.
  */
-let devUser: Promise<SessionUser> | null = null;
+let devUser: Promise<Omit<SessionUser, "workspaceId" | "role">> | null = null;
 
-function resolveDevUser(): Promise<SessionUser> {
+function resolveDevUser(): Promise<Omit<SessionUser, "workspaceId" | "role">> {
   devUser ??= db.user
     .upsert({
       where: { email: DEV_USER_EMAIL },
@@ -59,6 +72,7 @@ function resolveDevUser(): Promise<SessionUser> {
       name: user.name,
       email: user.email,
       image: user.image,
+      sessionId: null,
     }))
     .catch((error) => {
       // Do not cache a failure — the database may simply not be running yet.
@@ -69,10 +83,26 @@ function resolveDevUser(): Promise<SessionUser> {
   return devUser;
 }
 
-/** Returns the current session, or `null` when the request is anonymous. */
-export async function getSession(): Promise<Session | null> {
+/**
+ * Returns the current session, or `null` when the request is anonymous.
+ *
+ * Memoised per request with React's `cache`, so a layout and the page beneath it share one session
+ * read and one membership lookup.
+ */
+export const getSession = cache(async (): Promise<Session | null> => {
   if (env.AUTH_DEV_BYPASS) {
-    return { user: await resolveDevUser() };
+    const user = await resolveDevUser();
+    // The bypass identity's workspace is resolved per request like anyone else's, so it follows a
+    // workspace switch and survives its membership being removed.
+    const fresh = await db.user.findUnique({
+      where: { id: user.id },
+      select: { currentWorkspaceId: true },
+    });
+    const membership = await resolveActiveMembership({
+      ...user,
+      currentWorkspaceId: fresh?.currentWorkspaceId ?? null,
+    });
+    return { user: { ...user, workspaceId: membership.workspaceId, role: membership.role } };
   }
 
   const session = await auth();
@@ -80,9 +110,16 @@ export async function getSession(): Promise<Session | null> {
   // A session row can outlive its user — `email` is non-nullable in the schema, but the
   // Auth.js Session type allows it to be absent, so an incomplete session is treated as no
   // session rather than being coerced into a half-populated user.
-  if (!session?.user?.id || !session.user.email) {
+  if (!session?.user?.id || !session.user.email || !session.sessionId) {
     return null;
   }
+
+  const membership = await resolveActiveMembership({
+    id: session.user.id,
+    name: session.user.name ?? null,
+    email: session.user.email,
+    currentWorkspaceId: session.currentWorkspaceId ?? null,
+  });
 
   return {
     user: {
@@ -90,9 +127,12 @@ export async function getSession(): Promise<Session | null> {
       name: session.user.name ?? null,
       email: session.user.email,
       image: session.user.image ?? null,
+      sessionId: session.sessionId,
+      workspaceId: membership.workspaceId,
+      role: membership.role,
     },
   };
-}
+});
 
 /**
  * Session accessor for pages and layouts: redirects anonymous visitors to the login screen,
@@ -123,6 +163,23 @@ export async function requireUser(): Promise<SessionUser> {
   }
 
   return session.user;
+}
+
+/**
+ * Session accessor that also requires a minimum role **in the active workspace**.
+ *
+ * For actions on the workspace itself (team, settings). An action on a particular record must
+ * check the role the actor holds in *that record's* workspace instead, which the service does —
+ * the record may live in a workspace other than the active one.
+ */
+export async function requireRole(min: MemberRole): Promise<SessionUser> {
+  const user = await requireUser();
+
+  if (!hasRole(user.role, min)) {
+    throw forbidden();
+  }
+
+  return user;
 }
 
 /** True when Google sign-in is configured. Drives the login screen's fallback messaging. */

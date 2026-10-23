@@ -44,21 +44,21 @@ const STATUS_ACCENT: Record<ExperimentStatus, string> = {
   ACTIVE: "bg-emerald-500",
   DRAFT: "bg-amber-500",
   PAUSED: "bg-slate-400",
-  ARCHIVED: "bg-slate-300",
+  COMPLETED: "bg-slate-300",
 };
 
 const STATUS_DOT: Record<ExperimentStatus, string> = {
   ACTIVE: "bg-emerald-500",
   DRAFT: "bg-amber-500",
   PAUSED: "bg-slate-400",
-  ARCHIVED: "bg-slate-300",
+  COMPLETED: "bg-slate-300",
 };
 
 const STATUS_LABEL: Record<ExperimentStatus, string> = {
   ACTIVE: "Running",
   DRAFT: "Draft",
   PAUSED: "Paused",
-  ARCHIVED: "Archived",
+  COMPLETED: "Completed",
 };
 
 /**
@@ -75,8 +75,8 @@ function needsAction(
   if (status === "DRAFT") {
     return { headline: "Not launched", detail: "built but never started", urgent: true };
   }
-  if (status === "ARCHIVED") {
-    return { headline: "Archived", detail: "kept for its results", urgent: false };
+  if (status === "COMPLETED") {
+    return { headline: "Completed", detail: "kept for its results", urgent: false };
   }
   if (status === "PAUSED") {
     return { headline: "Paused", detail: "no new visitors are assigned", urgent: true };

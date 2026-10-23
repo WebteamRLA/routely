@@ -104,6 +104,50 @@ const serverSchema = z.object({
    * running unauthenticated.
    */
   CRON_SECRET: z.string().min(16, "must be at least 16 characters").optional(),
+
+  /**
+   * Resend API key (`re_…`). Email goes out through one `fetch` to Resend's REST API — see
+   * `src/server/email/resend.ts` — rather than an SDK dependency.
+   *
+   * Unset, nothing is sent: in development each email, links included, is printed to the server
+   * console so sign-up, reset and invite flows can be completed locally. In production a missing
+   * key is logged as a warning per email *without* the body, because those links carry
+   * single-use tokens that would otherwise sit in the platform's logs.
+   */
+  RESEND_API_KEY: z.string().min(1).optional(),
+
+  /**
+   * The From header, e.g. `Routely <notifications@mail.example.com>`. The domain must be
+   * verified in Resend. The default is Resend's shared test sender, which can only deliver to the
+   * address that owns the Resend account — fine for development, useless in production.
+   */
+  EMAIL_FROM: z.string().min(3).default("Routely <onboarding@resend.dev>"),
+
+  /** Where "contact support" points: the login footer and security emails. Optional. */
+  SUPPORT_EMAIL: z.email().optional(),
+
+  /**
+   * Signs the visual editor's short-lived session tokens (`lib/editor-token.ts`). Generate with
+   * `openssl rand -base64 32`.
+   *
+   * Optional: unset, the key is derived from `AUTH_SECRET` under a fixed label (HMAC), so the two
+   * are never the same key; with neither (local development only — production requires
+   * `AUTH_SECRET`) a random per-process key is used and tokens die with the process. A token only
+   * lets the editor open a page — saving goes through the authenticated autosave — so rotating
+   * this costs nothing but the editor sessions open at that moment.
+   */
+  EDITOR_TOKEN_SECRET: z.string().min(32, "must be at least 32 characters").optional(),
+
+  /**
+   * Where the visual editor's page proxy is served (`/api/editor/proxy`), for sites that forbid
+   * being framed. Must be a **different origin** from `NEXT_PUBLIC_APP_URL` pointing at this same
+   * deployment (e.g. `https://editor-proxy.routely.app`): the proxied page runs the customer's own
+   * scripts, which must never share an origin with the dashboard.
+   *
+   * Optional: unset in development, the app's host is swapped between `localhost` and `127.0.0.1`;
+   * unset in production, the proxy is off and such sites open in a popup instead.
+   */
+  EDITOR_PROXY_ORIGIN: z.url().optional(),
 });
 
 const clientSchema = z.object({

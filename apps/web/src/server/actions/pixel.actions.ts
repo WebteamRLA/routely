@@ -47,9 +47,13 @@ export async function checkInstallOnPageAction(input: {
     return { ok: false, message: result.state.message ?? "We couldn't check that page." };
   }
 
+  if (!result.data.pageLoaded) {
+    return { ok: false, message: result.data.loadError ?? "We couldn't load that page." };
+  }
+
   return {
     ok: true,
-    snippetFound: result.data.snippetFound,
+    snippetFound: result.data.scriptFound,
     wrongSiteId: result.data.wrongSiteId,
   };
 }
@@ -71,9 +75,16 @@ export async function verifyPixelAction(
     return result.state;
   }
 
-  const { snippetFound, wrongSiteId, receivingData } = result.data;
+  const { pageLoaded, loadError, scriptFound, wrongSiteId, lastSeenAt } = result.data;
 
-  if (!snippetFound) {
+  if (!pageLoaded) {
+    return {
+      status: "error",
+      message: `${loadError ?? "We couldn't load that page."} We need a page we can load to check it.`,
+    };
+  }
+
+  if (!scriptFound) {
     return {
       status: "error",
       message: wrongSiteId
@@ -86,8 +97,8 @@ export async function verifyPixelAction(
 
   return {
     status: "success",
-    message: receivingData
+    message: lastSeenAt
       ? "Snippet found, and we're receiving tracking data."
-      : "Snippet found. No tracking data yet — that's expected until an experiment is running on this page.",
+      : "Snippet found. No page views reported yet — they arrive as soon as someone visits a page with the snippet.",
   };
 }

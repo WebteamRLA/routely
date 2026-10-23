@@ -1,13 +1,12 @@
 import "server-only";
 
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
-
 import { env } from "@/env";
-import { isPrivateAddress } from "@/lib/private-address";
+import { can, rolesWith } from "@/lib/permissions";
+import { detectSnippet } from "@/lib/snippet-detect";
 import { isSameSite } from "@/lib/url";
-import { notFound, validationFailed } from "@/server/errors";
-import * as eventRepo from "@/server/repositories/event.repository";
+import { forbidden, notFound, rateLimited, validationFailed } from "@/server/errors";
+import { rateLimit } from "@/server/http/rate-limit";
+import { type SafeFetchResult, safeFetch } from "@/server/http/safe-fetch";
 import * as websiteRepo from "@/server/repositories/website.repository";
 import { parseOrThrow } from "@/server/validate";
 import { verifyInstallationSchema } from "@/validation/website";
@@ -16,158 +15,109 @@ import { verifyInstallationSchema } from "@/validation/website";
  * Checking whether the tracking snippet is actually on a customer's page.
  *
  * This fetches a URL the customer supplies, which makes it a server-side request forgery
- * vector by construction: without limits it is a general-purpose "make the Routely server
- * request this for me" endpoint, reachable from any signed-in account. Four constraints keep
- * it narrow, and each covers something the others do not:
- *
- *  1. **Same-site.** The URL must be on the website's own registered domain, reusing the same
- *     `isSameSite` rule experiments are held to. That alone limits an attacker to hosts they
- *     have already claimed as theirs.
- *  2. **No private address space** (production only). A domain is just a name, and
- *     `169.254.169.254` or an internal host is perfectly registrable — so the resolved address
- *     is checked, not the name. Skipped in development because local testing runs against
- *     hosts like `mysite.local` that resolve to loopback by design.
- *  3. **Redirects are followed manually**, re-validating every hop. Following automatically
- *     would let a compliant first response bounce the request somewhere the checks above just
- *     rejected.
- *  4. **Bounded time and size**, so a slow or enormous response cannot tie up the server.
+ * vector by construction. The URL must be on the website's own domain (the same `isSameSite`
+ * rule experiments are held to, re-applied to every redirect), and the fetch itself goes through
+ * `server/http/safe-fetch.ts`: http(s) only, no private address space (checked on the address
+ * actually connected to), at most 3 redirects, 5 s and 2 MB. The private-address guard is
+ * relaxed outside production only, because local testing targets hosts like `mysite.local` that
+ * resolve to loopback by design.
  */
 
-/** Long enough for a slow origin, short enough that the form does not appear to hang. */
-const FETCH_TIMEOUT_MS = 8_000;
-
-/** The snippet belongs in `<head>`, so the opening bytes are always enough to find it. */
-const MAX_BYTES = 512 * 1024;
-
-/** Enough to cover http→https and apex→www, without becoming a redirect crawler. */
-const MAX_REDIRECTS = 3;
+/** Per user. A check is an outbound fetch on the customer's behalf. */
+const VERIFY_RATE_LIMIT = 10;
+const VERIFY_RATE_WINDOW_MS = 60_000;
 
 export interface InstallationCheck {
-  /** The snippet was found carrying this website's public site id. */
-  snippetFound: boolean;
+  /** The page answered with a non-error status (after redirects). */
+  pageLoaded: boolean;
+  /** The final response's status, or null when nothing answered (network error, timeout). */
+  httpStatus: number | null;
+  /** Why the page did not load, safe to show; null when it loaded. */
+  loadError: string | null;
+  /** This website's snippet (its site id) is in the page. */
+  scriptFound: boolean;
+  /** The anti-flicker block (`__routelyReveal`) is in the page. */
+  antiFlickerFound: boolean;
   /** A Routely snippet is present, but for a different website. */
   wrongSiteId: boolean;
-  /** Whether the ingestion endpoint has ever recorded an event for this website. */
-  receivingData: boolean;
+  /**
+   * The website's real `lastSeenAt` — when the SDK last reported a page hit. A server-side
+   * fetch cannot itself produce an event, so the dialog's "Event received {when}" row shows this
+   * and never a fabricated "just now". Null when nothing has reported yet.
+   */
+  lastSeenAt: Date | null;
   /** Where the check ended up, after any redirects. */
   finalUrl: string;
 }
 
-/** Rejects a URL whose host resolves into address space this endpoint must not reach. */
-async function assertPublicHost(url: URL): Promise<void> {
-  // Local development legitimately targets hosts that resolve to loopback — a WordPress site
-  // at `mysite.local`, for instance — so the address check would make the feature untestable.
-  if (env.NODE_ENV !== "production") return;
-
-  const literal = isIP(url.hostname);
-  const address = literal
-    ? url.hostname
-    : await lookup(url.hostname).then(
-        (result) => result.address,
-        () => null,
-      );
-
-  if (!address) {
-    throw validationFailed(`We couldn't resolve ${url.hostname}. Check the address and try again.`);
-  }
-
-  if (isPrivateAddress(address)) {
-    throw validationFailed(
-      `${url.hostname} resolves to a private address, so we can't reach it from here.`,
-    );
-  }
+/** Same-site policy for every hop, worded for the install dialog. */
+export function sameSitePolicy(domain: string): (url: URL) => string | null {
+  return (url) =>
+    isSameSite(url.href, domain)
+      ? null
+      : `That URL leads to ${url.hostname}, which is outside ${domain}.`;
 }
 
-/** Fetches up to `MAX_BYTES` of a response body, so an enormous page cannot exhaust memory. */
-async function readCapped(response: Response): Promise<string> {
-  const body = response.body;
-  if (!body) return "";
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  const chunks: string[] = [];
-  let total = 0;
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      chunks.push(decoder.decode(value, { stream: true }));
-      if (total >= MAX_BYTES) break;
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-  }
-
-  return chunks.join("");
+/** Private address space is reachable only outside production (local development). */
+export function allowPrivateFetch(): boolean {
+  return env.NODE_ENV !== "production";
 }
 
 /**
- * Follows redirects by hand so each hop is re-validated. `redirect: "manual"` is what makes
- * that possible — the automatic mode would resolve the chain internally and only hand back the
- * final response, by which point an off-limits host has already been contacted.
+ * The customer-facing reading of a fetch: whether the page loaded, and why not.
+ * Refusals caused by the URL itself (`blocked_*`, `invalid_url`) are returned as `refused` so
+ * the caller can report them as an input error rather than as a site that is down.
  */
-async function fetchHtml(startUrl: URL, domain: string): Promise<{ html: string; finalUrl: URL }> {
-  let url = startUrl;
-
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    await assertPublicHost(url);
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        headers: {
-          // Some hosts serve a different document, or none at all, without these.
-          "User-Agent": "RoutelyInstallCheck/1 (+https://routely.app)",
-          Accept: "text/html,application/xhtml+xml",
-        },
-      });
-    } catch {
-      throw validationFailed(
-        `We couldn't load ${url.href}. Check the site is running and reachable from this machine.`,
-      );
-    }
-
-    const location = response.headers.get("location");
-    if (response.status >= 300 && response.status < 400 && location) {
-      const next = new URL(location, url);
-
-      if (next.protocol !== "http:" && next.protocol !== "https:") {
-        throw validationFailed("That URL redirects somewhere we can't follow.");
-      }
-      // A redirect off the website's own domain is where a benign-looking URL would otherwise
-      // become a request to anywhere at all.
-      if (!isSameSite(next.href, domain)) {
-        throw validationFailed(
-          `That URL redirects to ${next.hostname}, which is outside ${domain}.`,
-        );
-      }
-
-      url = next;
-      continue;
-    }
-
-    if (!response.ok) {
-      throw validationFailed(
-        `${url.href} returned HTTP ${response.status}. We need a page we can load to check it.`,
-      );
-    }
-
-    return { html: await readCapped(response), finalUrl: url };
+export function readFetch(result: SafeFetchResult): {
+  pageLoaded: boolean;
+  httpStatus: number | null;
+  loadError: string | null;
+  refused: string | null;
+  html: string;
+  finalUrl: string;
+} {
+  if (!result.ok) {
+    const refused =
+      result.reason === "blocked_url" ||
+      result.reason === "blocked_address" ||
+      result.reason === "invalid_url"
+        ? result.message
+        : null;
+    return {
+      pageLoaded: false,
+      httpStatus: null,
+      loadError: result.message,
+      refused,
+      html: "",
+      finalUrl: result.url,
+    };
   }
-
-  throw validationFailed("That URL redirects too many times.");
+  if (result.status >= 400) {
+    return {
+      pageLoaded: false,
+      httpStatus: result.status,
+      loadError: `${result.finalUrl} returned HTTP ${result.status}.`,
+      refused: null,
+      html: "",
+      finalUrl: result.finalUrl,
+    };
+  }
+  return {
+    pageLoaded: true,
+    httpStatus: result.status,
+    loadError: null,
+    refused: null,
+    html: result.body,
+    finalUrl: result.finalUrl,
+  };
 }
 
 /**
  * Checks whether a page carries this website's snippet.
  *
- * Deliberately looks for the **site id**, not the script URL: the id is what actually binds a
- * page to this website, and it is present however the tag was written — hand-pasted, injected
- * by a plugin, or reformatted by a minifier.
+ * A page that fails to load is a result (`pageLoaded: false` with `loadError`), not an error; a
+ * URL that is off the website's domain, or resolves to private address space, is refused as a
+ * validation error. On success `pixelVerifiedAt` is stamped.
  */
 export async function verifyInstallation(
   actorUserId: string,
@@ -179,10 +129,15 @@ export async function verifyInstallation(
     "Check the URL you entered.",
   );
 
-  const website = await websiteRepo.findWebsiteForUser(websiteId, actorUserId);
-  if (!website) {
+  const access = await websiteRepo.findWebsiteAccess(websiteId, actorUserId);
+  if (!access) {
     throw notFound("That website does not exist.");
   }
+  // An outbound fetch on the customer's behalf: Editors and up, not Viewers.
+  if (!can(access.role, "pixel.verify")) {
+    throw forbidden();
+  }
+  const { website } = access;
 
   if (!isSameSite(url, website.domain)) {
     throw validationFailed(
@@ -191,25 +146,44 @@ export async function verifyInstallation(
     );
   }
 
-  const { html, finalUrl } = await fetchHtml(new URL(url), website.domain);
+  if (!rateLimit(`pixel-verify:${actorUserId}`, VERIFY_RATE_LIMIT, VERIFY_RATE_WINDOW_MS).allowed) {
+    throw rateLimited("Too many checks in a minute. Wait a moment and try again.");
+  }
 
-  const snippetFound = html.includes(website.publicSiteId);
-  // A page carrying some other site's id is the most common install mistake worth naming:
-  // the snippet was copied from a different website in the same account.
-  const wrongSiteId = !snippetFound && /data-site-id\s*=\s*["']rt_/i.test(html);
+  const fetched = readFetch(
+    await safeFetch(url, {
+      allowUrl: sameSitePolicy(website.domain),
+      allowPrivate: allowPrivateFetch(),
+    }),
+  );
+
+  if (fetched.refused) {
+    throw validationFailed(fetched.refused, { url: [fetched.refused] });
+  }
+
+  const detection = fetched.pageLoaded
+    ? detectSnippet(fetched.html, website.publicSiteId)
+    : { scriptFound: false, antiFlickerFound: false, wrongSiteId: false, otherSiteIds: [] };
 
   // Recorded so the answer survives the dialog being closed. Only a success is written: a
   // failed check may mean the snippet is missing, but it may equally mean the page was slow,
   // behind a login, or cached — none of which is evidence that a previously confirmed
   // installation has gone away, so a failure must not erase one.
-  if (snippetFound) {
-    await websiteRepo.markPixelVerified(website.id, actorUserId, new Date());
+  if (detection.scriptFound) {
+    await websiteRepo.markPixelVerified(
+      website.id,
+      actorUserId,
+      rolesWith("pixel.verify"),
+      new Date(),
+    );
   }
 
   return {
-    snippetFound,
-    wrongSiteId,
-    receivingData: await eventRepo.hasEvents(website.id),
-    finalUrl: finalUrl.href,
+    pageLoaded: fetched.pageLoaded,
+    httpStatus: fetched.httpStatus,
+    loadError: fetched.loadError,
+    ...detection,
+    lastSeenAt: website.lastSeenAt,
+    finalUrl: fetched.finalUrl,
   };
 }

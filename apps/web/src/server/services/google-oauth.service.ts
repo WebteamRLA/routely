@@ -1,8 +1,14 @@
 import "server-only";
 
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import { env } from "@/env";
+import {
+  type StatePayload,
+  readIdTokenClaims,
+  signState,
+  verifyState as verifySignedState,
+} from "@/lib/google-oauth-state";
 import { SECRET_PURPOSES, decryptSecret, encryptSecret } from "@/server/crypto";
 import { AppError, validationFailed } from "@/server/errors";
 import * as connectionRepo from "@/server/repositories/sheets-connection.repository";
@@ -132,66 +138,51 @@ export function redirectUri(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * A signed, expiring, user-bound state value.
+ * A signed, expiring, user-bound state value that also carries the target workspace and where to
+ * return afterwards (see `lib/google-oauth-state.ts` for the format).
  *
  * Three properties, each closing a different hole:
  *
- * - **Signed** with `AUTH_SECRET`, so state cannot be forged. `AUTH_SECRET` is the right key here
- *   rather than `TOKEN_ENCRYPTION_KEY`: this signs a ten-minute value, and the consequence of
- *   rotating it — in-flight consent flows fail and are retried — is harmless. Rotating the token
- *   key, by contrast, is an outage, which is why the two are separate.
+ * - **Signed** with `AUTH_SECRET`, so state cannot be forged — including its workspace and
+ *   `returnTo`. `AUTH_SECRET` is the right key here rather than `TOKEN_ENCRYPTION_KEY`: this signs a
+ *   ten-minute value, and the consequence of rotating it — in-flight consent flows fail and are
+ *   retried — is harmless. Rotating the token key, by contrast, is an outage.
  * - **Expiring**, so a state captured from a browser's history cannot be replayed later.
  * - **Bound to the user id**, so a state minted for one account cannot be completed by another.
  *   Without this, an attacker could start a flow, hand the URL to a victim, and have the victim's
- *   Google account connected to the attacker's Routely account.
+ *   Google account connected to the attacker's workspace.
  *
  * The nonce is *also* set as an httpOnly cookie and compared on return. The signature proves the
  * state came from us; the cookie proves it came back through the same browser that started it.
  */
-export function mintState(userId: string): { state: string; nonce: string } {
+export function mintState(userId: string, payload: StatePayload): { state: string; nonce: string } {
   const nonce = randomBytes(24).toString("base64url");
   const expiresAt = Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS;
 
-  return { state: `${nonce}.${expiresAt}.${signState(nonce, expiresAt, userId)}`, nonce };
+  return { state: signState({ secret: stateSecret(), nonce, expiresAt, userId, payload }), nonce };
 }
 
-function signState(nonce: string, expiresAt: number, userId: string): string {
+function stateSecret(): string {
   if (!env.AUTH_SECRET) {
     throw new AppError("INTERNAL", "AUTH_SECRET is required to start an integration flow.");
   }
 
-  return createHmac("sha256", env.AUTH_SECRET)
-    .update(`${nonce}.${expiresAt}.${userId}`)
-    .digest("base64url");
+  return env.AUTH_SECRET;
 }
 
-/**
- * Verifies a returned state against the signature, the clock, the session user and the cookie.
- *
- * Returns a plain boolean rather than throwing per-reason: distinguishing "bad signature" from
- * "expired" would only help somebody probing, and every failure has the same remedy — start again.
- */
+/** The state's workspace and `returnTo`, or null when it fails any check. */
 export function verifyState(
   state: string,
   cookieNonce: string | undefined,
   userId: string,
-): boolean {
-  const parts = state.split(".");
-  if (parts.length !== 3) return false;
-
-  const [nonce, expiresAtRaw, signature] = parts as [string, string, string];
-  const expiresAt = Number(expiresAtRaw);
-
-  if (!Number.isInteger(expiresAt) || expiresAt * 1000 < Date.now()) return false;
-  if (!cookieNonce || cookieNonce.length !== nonce.length) return false;
-
-  const nonceMatches = timingSafeEqual(Buffer.from(cookieNonce), Buffer.from(nonce));
-  if (!nonceMatches) return false;
-
-  const expected = Buffer.from(signState(nonce, expiresAt, userId));
-  const actual = Buffer.from(signature);
-
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
+): StatePayload | null {
+  return verifySignedState({
+    secret: stateSecret(),
+    state,
+    cookieNonce,
+    userId,
+    nowMs: Date.now(),
+  });
 }
 
 /** The URL to send the customer to in order to grant access. */
@@ -312,6 +303,8 @@ export interface ExchangedTokens {
   grantedScopes: string;
   email: string | null;
   subject: string | null;
+  name: string | null;
+  picture: string | null;
 }
 
 /** Exchanges the authorization code for tokens. */
@@ -341,12 +334,15 @@ export async function exchangeCode(code: string): Promise<ExchangedTokens> {
    * myaccount.google.com/permissions and start again.
    */
   if (!payload.refresh_token) {
-    throw validationFailed(
+    throw new AppError(
+      "VALIDATION",
       "Google did not grant long-lived access. Remove Routely at myaccount.google.com/permissions, then connect again.",
+      // The callback maps this to a fixed outcome code; free text never travels in the URL.
+      { cause: "no_refresh_token" },
     );
   }
 
-  const identity = readIdToken(payload.id_token);
+  const identity = readIdTokenClaims(payload.id_token);
 
   return {
     accessToken: payload.access_token,
@@ -357,38 +353,9 @@ export async function exchangeCode(code: string): Promise<ExchangedTokens> {
     grantedScopes: payload.scope ?? "",
     email: identity.email,
     subject: identity.subject,
+    name: identity.name,
+    picture: identity.picture,
   };
-}
-
-/**
- * Reads the display fields out of an ID token.
- *
- * The signature is deliberately **not** verified. This token arrived over TLS directly from
- * Google's token endpoint in response to our own authenticated request — it was not relayed
- * through the browser — so there is no untrusted party in the path. The values are used only to
- * show the customer which account they connected; nothing is authorized on the basis of them.
- * (An ID token received any other way would have to be verified.)
- */
-function readIdToken(idToken?: string): { email: string | null; subject: string | null } {
-  if (!idToken) return { email: null, subject: null };
-
-  try {
-    const payload = idToken.split(".")[1];
-    if (!payload) return { email: null, subject: null };
-
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
-      email?: unknown;
-      sub?: unknown;
-    };
-
-    return {
-      email: typeof claims.email === "string" ? claims.email : null,
-      subject: typeof claims.sub === "string" ? claims.sub : null,
-    };
-  } catch {
-    // A display string is not worth failing a connection over.
-    return { email: null, subject: null };
-  }
 }
 
 function expiryFrom(expiresInSeconds?: number): Date {

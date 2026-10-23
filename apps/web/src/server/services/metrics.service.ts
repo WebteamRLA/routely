@@ -1,7 +1,9 @@
 import "server-only";
 
 import type { ExperimentStatus, UrlMatchType } from "@/generated/prisma/enums";
+import { rolesAtLeast } from "@/lib/permissions";
 import { db } from "@/server/db";
+import { experimentAccess } from "@/server/repositories/access";
 
 /**
  * Conversion goals, presented as a list of measurable actions.
@@ -58,15 +60,20 @@ export interface MetricsQuery {
 }
 
 function stateOf(status: ExperimentStatus, conversionsTotal: number): MetricState {
-  if (status === "ARCHIVED") return "archived";
+  if (status === "COMPLETED") return "archived";
   if (status === "DRAFT") return "draft";
   if (status === "PAUSED") return "paused";
   return conversionsTotal > 0 ? "collecting" : "waiting";
 }
 
+/**
+ * Every goal in the actor's workspace (`workspaceId`, the session's active one). With
+ * `experimentId`, the one goal of that experiment in any workspace the actor belongs to.
+ */
 export async function listMetrics(
   actorUserId: string,
-  query: MetricsQuery = {},
+  workspaceId: string | null,
+  query: MetricsQuery & { experimentId?: string } = {},
   now: Date = new Date(),
 ): Promise<Metric[]> {
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
@@ -77,7 +84,10 @@ export async function listMetrics(
   // that reads a customer's data.
   const experiments = await db.experiment.findMany({
     where: {
-      website: { userId: actorUserId },
+      ...experimentAccess(actorUserId, workspaceId ? { workspaceId } : {}),
+      ...(query.experimentId ? { id: query.experimentId } : {}),
+      // A draft without a goal yet has no metric to list.
+      conversionUrl: { not: null },
       ...(matchType ? { conversionMatchType: matchType } : {}),
       ...(query.tab === "live" ? { status: "ACTIVE" } : {}),
       ...(search
@@ -141,7 +151,7 @@ export async function listMetrics(
       websiteName: experiment.website.name,
       kind: "PAGEVIEW",
       matchType: experiment.conversionMatchType,
-      url: experiment.conversionUrl,
+      url: experiment.conversionUrl ?? "",
       status: experiment.status,
       state: stateOf(experiment.status, conversionsTotal),
       urlEditable: experiment.status === "DRAFT",
@@ -182,8 +192,8 @@ export function countDuplicateGoals(metrics: Metric[]): number {
 
 /** One goal, for the setup page. `null` when the actor does not own it. */
 export async function getMetric(actorUserId: string, experimentId: string): Promise<Metric | null> {
-  const all = await listMetrics(actorUserId, {});
-  return all.find((candidate) => candidate.experimentId === experimentId) ?? null;
+  const [metric] = await listMetrics(actorUserId, null, { experimentId });
+  return metric ?? null;
 }
 
 /**
@@ -201,7 +211,15 @@ export async function deleteMetrics(actorUserId: string, experimentIds: string[]
   // the actor does not own deletes nothing instead of being caught by a check that could be
   // skipped.
   const result = await db.experiment.deleteMany({
-    where: { id: { in: experimentIds }, website: { userId: actorUserId } },
+    where: {
+      id: { in: experimentIds },
+      // Admins and the Owner may delete any experiment; an Editor only drafts. Folded into the
+      // delete itself, so an id the actor may not delete simply matches nothing.
+      OR: [
+        experimentAccess(actorUserId, { roles: rolesAtLeast("ADMIN") }),
+        { status: "DRAFT", ...experimentAccess(actorUserId, { roles: ["EDITOR"] }) },
+      ],
+    },
   });
 
   return result.count;

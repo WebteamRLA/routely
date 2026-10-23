@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import type { LaunchIssue } from "@/lib/launch-rules";
 import { routes } from "@/lib/routes";
 import { type FormState, runAction } from "@/server/actions/types";
 import { requireUser } from "@/server/auth/session";
+import { isAppError, toPublicError } from "@/server/errors";
 import * as experimentService from "@/server/services/experiment.service";
 
 /**
@@ -179,4 +181,185 @@ export async function deleteExperimentAction(
 
   revalidatePath(routes.websites.detail(websiteId));
   redirect(websiteId ? routes.websites.detail(websiteId) : routes.experiments.list);
+}
+
+// =============================================================================================
+// The new-design wizards and lifecycle.
+//
+// Called directly from client components with typed arguments (not through `useActionState`),
+// so each returns a plain, serialisable result instead of throwing: `{ ok: true, data }`, or
+// `{ ok: false, code, message }` plus, for a refused launch or resume, the step `issues` and/or
+// the `tracking` results the wizard renders where the design puts them. `code` is the AppError
+// code; `INTERNAL` is the only one that means "something went wrong on our side".
+//
+// The actor always comes from the session. Ids in the arguments only name records; the service
+// decides whether the actor may touch them (NOT_FOUND for a non-member, FORBIDDEN for a Viewer).
+// =============================================================================================
+
+export type ExperimentActionResult<T> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      fieldErrors?: Record<string, string[]>;
+      issues?: LaunchIssue[];
+      tracking?: experimentService.TrackingSummary;
+    };
+
+async function run<T>(operation: () => Promise<T>): Promise<ExperimentActionResult<T>> {
+  try {
+    return { ok: true, data: await operation() };
+  } catch (error) {
+    const { code, message } = toPublicError(error);
+    const extra =
+      error instanceof experimentService.LaunchBlockedError
+        ? {
+            ...(error.issues ? { issues: error.issues } : {}),
+            ...(error.tracking ? { tracking: error.tracking } : {}),
+          }
+        : {};
+    const fieldErrors = isAppError(error) ? error.fieldErrors : undefined;
+    return { ok: false, code, message, ...(fieldErrors ? { fieldErrors } : {}), ...extra };
+  }
+}
+
+/** Revalidates the screens a status change shows up on. */
+function revalidateLifecycle(result: experimentService.LifecycleResult): void {
+  revalidatePath(routes.experiments.list);
+  revalidatePath(routes.experiments.detail(result.experimentId));
+  revalidatePath(routes.projects.detail(result.websiteId));
+  revalidatePath(routes.dashboard);
+}
+
+/**
+ * Creates a draft in `websiteId` (an `AB_TEST` or `SPLIT_URL`). The wizards call it lazily on
+ * the first edit, passing that edit as `patch` so nothing is lost between create and save.
+ */
+export async function createDraftAction(
+  type: "AB_TEST" | "SPLIT_URL",
+  websiteId: string,
+  patch?: unknown,
+): Promise<ExperimentActionResult<experimentService.DraftSaveResult>> {
+  return run(async () => {
+    const user = await requireUser();
+    return experimentService.createDraft(user.id, { type, websiteId }, patch);
+  });
+}
+
+/** Autosave: any subset of a draft's fields (`validation/experiment.ts` `draftPatchSchema`). */
+export async function saveDraftAction(
+  experimentId: string,
+  patch: unknown,
+): Promise<ExperimentActionResult<experimentService.DraftSaveResult>> {
+  return run(async () => {
+    const user = await requireUser();
+    return experimentService.saveDraft(user.id, experimentId, patch);
+  });
+}
+
+/** The wizard's tracking check (rate-limited). `force` re-checks pages that passed recently. */
+export async function checkTrackingAction(
+  experimentId: string,
+  options: { force?: boolean } = {},
+): Promise<ExperimentActionResult<experimentService.TrackingSummary>> {
+  return run(async () => {
+    const user = await requireUser();
+    return experimentService.checkTracking(user.id, experimentId, {
+      force: options?.force === true,
+    });
+  });
+}
+
+/** DRAFT → ACTIVE. Refusals carry `issues` (steps 1–4, conflict) or `tracking`. */
+export async function launchExperimentAction(
+  experimentId: string,
+): Promise<ExperimentActionResult<experimentService.LifecycleResult>> {
+  const result = await run(async () => {
+    const user = await requireUser();
+    return experimentService.launchExperiment(user.id, experimentId);
+  });
+  if (result.ok) revalidateLifecycle(result.data);
+  return result;
+}
+
+/** ACTIVE → PAUSED. Emails members who opted in, never the person pausing. */
+export async function pauseExperimentAction(
+  experimentId: string,
+): Promise<ExperimentActionResult<experimentService.LifecycleResult>> {
+  const result = await run(async () => {
+    const user = await requireUser();
+    return experimentService.pauseExperiment(user.id, experimentId);
+  });
+  if (result.ok) revalidateLifecycle(result.data);
+  return result;
+}
+
+/**
+ * Deletes an experiment with its visitors, events and results (the rows cascade). Admins and the
+ * Owner may delete any experiment; an Editor only a draft (`lib/permissions.ts`) — FORBIDDEN
+ * otherwise, NOT_FOUND outside the workspace.
+ */
+export async function removeExperimentAction(
+  experimentId: string,
+): Promise<ExperimentActionResult<{ experimentId: string; websiteId: string }>> {
+  const result = await run(async () => {
+    const user = await requireUser();
+    return experimentService.deleteExperiment(user.id, experimentId);
+  });
+  if (result.ok) {
+    revalidatePath(routes.experiments.list);
+    revalidatePath(routes.projects.detail(result.data.websiteId));
+    revalidatePath(routes.dashboard);
+  }
+  return result;
+}
+
+/** PAUSED → ACTIVE. Refused with an `issues` entry if another test now runs on the page. */
+export async function resumeExperimentAction(
+  experimentId: string,
+): Promise<ExperimentActionResult<experimentService.LifecycleResult>> {
+  const result = await run(async () => {
+    const user = await requireUser();
+    return experimentService.resumeExperiment(user.id, experimentId);
+  });
+  if (result.ok) revalidateLifecycle(result.data);
+  return result;
+}
+
+/** ACTIVE or PAUSED → COMPLETED (D5). */
+export async function endExperimentAction(
+  experimentId: string,
+): Promise<ExperimentActionResult<experimentService.LifecycleResult>> {
+  const result = await run(async () => {
+    const user = await requireUser();
+    return experimentService.endExperiment(user.id, experimentId);
+  });
+  if (result.ok) revalidateLifecycle(result.data);
+  return result;
+}
+
+/** While PAUSED: the name and/or `trafficAllocation`, nothing else (D7). */
+export async function updatePausedExperimentAction(
+  experimentId: string,
+  changes: { name?: string; trafficAllocation?: number },
+): Promise<
+  ExperimentActionResult<{
+    experimentId: string;
+    websiteId: string;
+    name: string;
+    trafficAllocation: number;
+  }>
+> {
+  const result = await run(async () => {
+    const user = await requireUser();
+    return experimentService.updatePausedExperiment(user.id, experimentId, changes);
+  });
+  if (result.ok) {
+    revalidatePath(routes.experiments.list);
+    revalidatePath(routes.experiments.detail(experimentId));
+    revalidatePath(routes.projects.detail(result.data.websiteId));
+    revalidatePath(routes.dashboard);
+  }
+  return result;
 }

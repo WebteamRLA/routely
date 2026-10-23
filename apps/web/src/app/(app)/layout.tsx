@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { requireSession } from "@/server/auth/session";
+import { needsEmailVerification } from "@/server/services/account.service";
 
 /**
  * The authorization boundary for the entire dashboard.
@@ -12,6 +13,11 @@ import { requireSession } from "@/server/auth/session";
  */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await requireSession();
+  const verifyEmail = await needsEmailVerification(session.user.id);
 
-  return <AppShell user={session.user}>{children}</AppShell>;
+  return (
+    <AppShell user={session.user} verifyEmail={verifyEmail}>
+      {children}
+    </AppShell>
+  );
 }

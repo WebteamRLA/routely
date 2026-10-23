@@ -1,8 +1,9 @@
 /**
  * Data-model verification.
  *
- * Exercises the guarantees the schema is supposed to provide — tenant isolation, assignment
- * consistency, conversion idempotency and the dashboard aggregation paths — against a real
+ * Exercises the guarantees the schema is supposed to provide — tenant isolation, one owner per
+ * workspace, pending-invite uniqueness, visitor-day idempotency, assignment consistency,
+ * conversion idempotency and the dashboard aggregation paths — against a real
  * Postgres instance, then removes everything it created.
  *
  *   npm run db:verify --workspace @routely/web
@@ -44,9 +45,22 @@ async function main() {
     db.user.create({ data: { email: `stranger-${suffix}@routely.test`, name: "Stranger" } }),
   ]);
 
+  // Each user gets their own workspace, as the app does at sign-up.
+  const [ownerSpace, strangerSpace] = await Promise.all(
+    [owner, stranger].map((user) =>
+      db.workspace.create({
+        data: {
+          name: `${user.name}\u2019s workspace`,
+          memberships: { create: { userId: user.id, role: "OWNER" } },
+        },
+      }),
+    ),
+  );
+
   const website = await db.website.create({
     data: {
-      userId: owner.id,
+      workspaceId: ownerSpace!.id,
+      createdById: owner.id,
       name: "Verify Co",
       domain: "verify.test",
       publicSiteId: `rt_${suffix.replace(/-/g, "")}${"0".repeat(24)}`.slice(0, 35),
@@ -60,25 +74,129 @@ async function main() {
       controlUrl: "https://verify.test/a",
       conversionUrl: "https://verify.test/done",
       status: "ACTIVE",
-      variants: { create: [{ position: 1, url: "https://verify.test/b" }] },
+      variants: { create: [{ position: 1, name: "Variant A", url: "https://verify.test/b" }] },
     },
     include: { variants: true },
   });
   const variant = experiment.variants[0]!;
 
+  // The same shape as `src/server/repositories/access.ts`, which this script cannot import.
+  const member = (userId: string, roles?: ("OWNER" | "ADMIN" | "EDITOR" | "VIEWER")[]) => ({
+    workspace: { memberships: { some: { userId, ...(roles ? { role: { in: roles } } : {}) } } },
+  });
+
   console.log("\nTenant isolation");
   {
-    const asOwner = await db.website.findFirst({ where: { id: website.id, userId: owner.id } });
+    const asOwner = await db.website.findFirst({ where: { id: website.id, ...member(owner.id) } });
     const asStranger = await db.website.findFirst({
-      where: { id: website.id, userId: stranger.id },
+      where: { id: website.id, ...member(stranger.id) },
     });
-    check("owner reads their own website", asOwner !== null);
-    check("another user cannot read it by id", asStranger === null);
+    check("a member reads their workspace's website", asOwner !== null);
+    check("a non-member cannot read it by id", asStranger === null);
 
     const nested = await db.experiment.findFirst({
-      where: { id: experiment.id, website: { userId: stranger.id } },
+      where: { id: experiment.id, website: member(stranger.id) },
     });
-    check("experiment is not reachable through another user's tenant filter", nested === null);
+    check("experiment is not reachable through another workspace's filter", nested === null);
+
+    // A viewer is a member — they can read — but a write filtered to editors matches nothing.
+    await db.membership.create({
+      data: { workspaceId: ownerSpace!.id, userId: stranger.id, role: "VIEWER" },
+    });
+    const viewerReads = await db.website.findFirst({
+      where: { id: website.id, ...member(stranger.id) },
+    });
+    const viewerWrite = await db.experiment.updateMany({
+      where: { id: experiment.id, website: member(stranger.id, ["OWNER", "ADMIN", "EDITOR"]) },
+      data: { name: "renamed by a viewer" },
+    });
+    check("a viewer can read the workspace's website", viewerReads !== null);
+    check("a role-filtered write by a viewer changes nothing", viewerWrite.count === 0);
+    await db.membership.deleteMany({ where: { workspaceId: ownerSpace!.id, userId: stranger.id } });
+  }
+
+  console.log("\nWorkspace ownership");
+  {
+    let secondOwnerRejected = false;
+    try {
+      await db.membership.create({
+        data: { workspaceId: ownerSpace!.id, userId: stranger.id, role: "OWNER" },
+      });
+    } catch {
+      secondOwnerRejected = true;
+    }
+    check("a workspace cannot have a second OWNER", secondOwnerRejected);
+
+    const admin = await db.membership.create({
+      data: { workspaceId: ownerSpace!.id, userId: stranger.id, role: "ADMIN" },
+    });
+    check("a non-owner member can be added alongside the owner", admin.role === "ADMIN");
+    await db.membership.delete({ where: { id: admin.id } });
+
+    const owners = await db.membership.count({
+      where: { workspaceId: ownerSpace!.id, role: "OWNER" },
+    });
+    check("exactly one owner per workspace", owners === 1, `found ${owners}`);
+  }
+
+  console.log("\nInvites");
+  {
+    const invite = (tokenHash: string) =>
+      db.workspaceInvite.create({
+        data: {
+          workspaceId: ownerSpace!.id,
+          email: `invitee-${suffix}@routely.test`,
+          role: "EDITOR",
+          tokenHash,
+          invitedById: owner.id,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+    const first = await invite(`hash-1-${suffix}`);
+    let duplicateRejected = false;
+    try {
+      await invite(`hash-2-${suffix}`);
+    } catch {
+      duplicateRejected = true;
+    }
+    check("a second pending invite for the same address is rejected", duplicateRejected);
+
+    await db.workspaceInvite.update({ where: { id: first.id }, data: { revokedAt: new Date() } });
+    const reissued = await invite(`hash-3-${suffix}`);
+    check("a revoked invite does not block a new one", reissued.id !== first.id);
+  }
+
+  console.log("\nVisitor days");
+  {
+    const day = new Date(Date.UTC(2026, 9, 19));
+    const row = { websiteId: website.id, day, anonymousId: "anon-day" };
+    const first = await db.websiteVisitorDay.createMany({ data: [row], skipDuplicates: true });
+    const again = await db.websiteVisitorDay.createMany({ data: [row], skipDuplicates: true });
+    const pageRow = { ...row, urlKey: "https://verify.test/a" };
+    const pageFirst = await db.pageVisitorDay.createMany({ data: [pageRow], skipDuplicates: true });
+    const pageAgain = await db.pageVisitorDay.createMany({ data: [pageRow], skipDuplicates: true });
+    const total = await db.websiteVisitorDay.count({ where: { websiteId: website.id } });
+
+    check("a browser counts once per website per day", first.count === 1 && again.count === 0);
+    check("a browser counts once per page per day", pageFirst.count === 1 && pageAgain.count === 0);
+    check("exactly one visitor-day row exists", total === 1, `found ${total}`);
+  }
+
+  console.log("\nActivity");
+  {
+    await db.experimentActivity.create({
+      data: { experimentId: experiment.id, type: "RESULT_READY" },
+    });
+    let secondRejected = false;
+    try {
+      await db.experimentActivity.create({
+        data: { experimentId: experiment.id, type: "RESULT_READY" },
+      });
+    } catch {
+      secondRejected = true;
+    }
+    check("RESULT_READY is recorded at most once per experiment", secondRejected);
   }
 
   console.log("\nVisitor identity");
@@ -241,6 +359,8 @@ async function main() {
     );
   }
 
+  // Workspaces are not owned by a user row, so they are removed explicitly (invites cascade).
+  await db.workspace.deleteMany({ where: { id: { in: [ownerSpace!.id, strangerSpace!.id] } } });
   await db.user.deleteMany({ where: { id: { in: [owner.id, stranger.id] } } });
 
   console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);

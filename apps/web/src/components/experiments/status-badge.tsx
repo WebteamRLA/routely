@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 
-type Status = "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED";
+type Status = "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED";
 
 /** Wording and emphasis for each lifecycle state, so status reads the same everywhere. */
 const PRESENTATION: Record<
@@ -10,7 +10,7 @@ const PRESENTATION: Record<
   DRAFT: { label: "Draft", variant: "outline" },
   ACTIVE: { label: "Running", variant: "default" },
   PAUSED: { label: "Paused", variant: "secondary" },
-  ARCHIVED: { label: "Archived", variant: "outline" },
+  COMPLETED: { label: "Completed", variant: "outline" },
 };
 
 export function ExperimentStatusBadge({ status }: { status: Status }) {

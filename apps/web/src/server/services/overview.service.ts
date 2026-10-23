@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db } from "@/server/db";
+import { experimentAccess, websiteAccess } from "@/server/repositories/access";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
 
 /**
@@ -107,16 +108,18 @@ function dayKey(date: Date): string {
  */
 export async function getOverviewCharts(
   actorUserId: string,
+  workspaceId: string,
   now: Date = new Date(),
 ): Promise<OverviewCharts> {
-  const ownedExperiment = { experiment: { website: { userId: actorUserId } } };
+  const scope = experimentAccess(actorUserId, { workspaceId });
+  const ownedExperiment = { experiment: scope };
   const yearStart = startOfYear(now);
   // Inclusive of today, so 30 days means today plus the 29 before it.
   const trendStart = startOfDay(now, VISITOR_TREND_DAYS - 1);
 
   const [running, conversionRows, assignmentRows] = await Promise.all([
     db.experiment.findMany({
-      where: { status: "ACTIVE", website: { userId: actorUserId } },
+      where: { status: "ACTIVE", ...scope },
       select: { id: true, name: true },
       orderBy: { createdAt: "asc" },
     }),
@@ -180,13 +183,14 @@ export async function getOverviewCharts(
 
 export async function getOverviewStats(
   actorUserId: string,
+  workspaceId: string,
   now: Date = new Date(),
 ): Promise<OverviewStats> {
   // Conversions and assignments reach their owner through the experiment, never directly:
   // neither table carries a websiteId. Scoping the aggregation this way is what enforces
   // ownership — an experiment the actor does not own contributes no rows rather than being
   // filtered out afterwards.
-  const ownedExperiment = { experiment: { website: { userId: actorUserId } } };
+  const ownedExperiment = { experiment: experimentAccess(actorUserId, { workspaceId }) };
   const monthStart = startOfMonth(now);
   const yearStart = startOfYear(now);
 
@@ -195,9 +199,12 @@ export async function getOverviewStats(
     // this cycle. Counting by last activity would re-count a returning visitor every month and
     // make the figure grow without anyone new arriving.
     db.visitor.count({
-      where: { website: { userId: actorUserId }, firstSeenAt: { gte: monthStart } },
+      where: {
+        website: websiteAccess(actorUserId, { workspaceId }),
+        firstSeenAt: { gte: monthStart },
+      },
     }),
-    experimentRepo.countExperimentsByStatus(actorUserId),
+    experimentRepo.countExperimentsByStatus(workspaceId, actorUserId),
     db.conversion.count({ where: { ...ownedExperiment, occurredAt: { gte: yearStart } } }),
     // Grouped by arm so the uplift can be computed per experiment; a plain count would give
     // the totals but lose the control/variant split that a comparison needs.

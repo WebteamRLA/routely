@@ -3,32 +3,30 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { NAV_ITEMS, isNavItemActive } from "@/components/layout/nav-items";
+import { isNavItemActive, type NavItem } from "@/components/layout/nav-items";
 import { cn } from "@/lib/utils";
 
 /**
- * Primary navigation. Shared between the desktop sidebar and the mobile drawer; `onNavigate`
- * lets the drawer close itself after a link is followed. `collapsed` drops the label down to a
- * `title` attribute — used only by the desktop sidebar, never the drawer.
+ * Primary navigation. The rows grow from 36px to 44px below 1200px, where the sidebar becomes a
+ * touch drawer and 36px is under a comfortable tap target.
  *
- * The icon stays left-aligned in both states rather than re-centering when collapsed:
- * `justify-content` can't be interpolated by a CSS transition (it snaps partway through), so
- * animating it alongside the sidebar's width made the icon visibly jump mid-collapse.
+ * Hover is an inset shadow rather than a background colour so it darkens whatever the row sits
+ * on by the same amount, and so it can never be confused with the active row's fill.
  */
 export function SidebarNav({
-  onNavigate,
-  collapsed = false,
+  items,
+  label,
   className,
 }: {
-  onNavigate?: () => void;
-  collapsed?: boolean;
+  items: NavItem[];
+  label: string;
   className?: string;
 }) {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Main" className={cn("flex flex-col gap-1", className)}>
-      {NAV_ITEMS.map((item) => {
+    <nav aria-label={label} className={cn("flex flex-col gap-0.5", className)}>
+      {items.map((item) => {
         const active = isNavItemActive(item, pathname);
         const Icon = item.icon;
 
@@ -36,28 +34,17 @@ export function SidebarNav({
           <Link
             key={item.href}
             href={item.href}
-            onClick={onNavigate}
             aria-current={active ? "page" : undefined}
-            title={collapsed ? item.label : undefined}
             className={cn(
-              "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium",
-              "transition-[background-color,color] duration-300 ease-in-out",
-              "outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm no-underline max-[1200px]:h-11",
+              "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]",
               active
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                ? "bg-[#F1F3F5] font-semibold text-[#111827]"
+                : "font-medium text-[#374151] hover:shadow-[inset_0_0_0_999px_rgba(17,24,39,.05)]",
             )}
           >
-            <Icon className="size-4 shrink-0" aria-hidden />
-            {/* Always rendered so the collapse animates as a width/opacity fade instead of a snap. */}
-            <span
-              className={cn(
-                "overflow-hidden whitespace-nowrap transition-[max-width,opacity] duration-300 ease-in-out",
-                collapsed ? "max-w-0 opacity-0" : "max-w-[160px] opacity-100",
-              )}
-            >
-              {item.label}
-            </span>
+            <Icon className={cn("shrink-0", !active && "stroke-[#6B7280]")} />
+            {item.label}
           </Link>
         );
       })}

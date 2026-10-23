@@ -104,7 +104,14 @@ export async function validateGoalAction(
 
   const check = result.data;
 
-  if (check.snippetFound) {
+  if (!check.pageLoaded) {
+    return {
+      status: "error",
+      message: `${check.loadError ?? "We couldn't load that page."} We need a goal page we can load to check it.`,
+    };
+  }
+
+  if (check.scriptFound) {
     return { status: "success", message: "Goal page loads and the snippet is on it." };
   }
 

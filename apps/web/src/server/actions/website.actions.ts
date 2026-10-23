@@ -4,9 +4,13 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import type { SiteProtocol } from "@/generated/prisma/enums";
+import type { Project } from "@/lib/projects";
 import { routes } from "@/lib/routes";
 import { type FormState, runAction } from "@/server/actions/types";
 import { requireUser } from "@/server/auth/session";
+import { isAppError, toPublicError } from "@/server/errors";
+import * as pixelService from "@/server/services/pixel.service";
+import * as projectService from "@/server/services/project.service";
 import * as websiteService from "@/server/services/website.service";
 
 /**
@@ -25,7 +29,7 @@ export async function createWebsiteAction(
   const user = await requireUser();
 
   const result = await runAction(() =>
-    websiteService.createWebsite(user.id, {
+    websiteService.createWebsite(user.id, user.workspaceId, {
       name: formData.get("name"),
       domain: formData.get("domain"),
       protocol: formData.get("protocol") ?? undefined,
@@ -63,7 +67,7 @@ export async function createWebsiteInlineAction(
   const user = await requireUser();
 
   const result = await runAction(() =>
-    websiteService.createWebsite(user.id, {
+    websiteService.createWebsite(user.id, user.workspaceId, {
       name: formData.get("name"),
       domain: formData.get("domain"),
       // Absent means "not specified", which the schema turns into the https default. A null
@@ -187,4 +191,139 @@ export async function regenerateSiteIdAction(
     status: "success",
     message: "New public site id issued. Update the snippet on your website.",
   };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Projects — the new design's dialogs (Dashboard, Projects, Project dashboard)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Result of a project action. Plain data, because these are called directly from client
+ * components (not through `useActionState`) and a thrown `AppError` would cross the boundary as
+ * `{}`. `fieldErrors` carries the first message per field, keyed by the dialog's input names
+ * (`name`, `url`, `confirmName`).
+ */
+export type ProjectActionResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; code: string; message: string; fieldErrors?: Record<string, string> };
+
+async function runProjectAction<T>(operation: () => Promise<T>): Promise<ProjectActionResult<T>> {
+  try {
+    return { ok: true, data: await operation() };
+  } catch (error) {
+    const { code, message } = toPublicError(error);
+    const fieldErrors: Record<string, string> = {};
+    if (isAppError(error)) {
+      for (const [key, messages] of Object.entries(error.fieldErrors ?? {})) {
+        if (messages[0]) fieldErrors[key] = messages[0];
+      }
+    }
+    return {
+      ok: false,
+      code,
+      message,
+      ...(Object.keys(fieldErrors).length ? { fieldErrors } : {}),
+    };
+  }
+}
+
+/** Every screen that lists or shows projects. */
+function revalidateProjectViews(websiteId?: string): void {
+  revalidatePath(routes.dashboard);
+  revalidatePath(routes.projects.list);
+  if (websiteId) revalidatePath(routes.projects.detail(websiteId));
+}
+
+/**
+ * Creates a project in the actor's active workspace (Owner/Admin) and returns its Projects row,
+ * so the caller can open the pixel dialog for it straight away.
+ */
+export async function createProjectAction(input: {
+  name: string;
+  url: string;
+}): Promise<ProjectActionResult<Project>> {
+  const result = await runProjectAction(async () => {
+    const user = await requireUser();
+    const { id } = await websiteService.createProject(user.id, user.workspaceId, {
+      name: input?.name,
+      url: input?.url,
+    });
+    return projectService.getProjectRow(user.id, id);
+  });
+  if (result.ok) revalidateProjectViews(result.data.id);
+  return result;
+}
+
+/** Renames / re-addresses a project (Owner/Admin). Returns the refreshed row. */
+export async function updateProjectAction(input: {
+  websiteId: string;
+  name: string;
+  url: string;
+}): Promise<ProjectActionResult<Project>> {
+  const result = await runProjectAction(async () => {
+    const user = await requireUser();
+    const { id } = await websiteService.updateProject(user.id, {
+      websiteId: input?.websiteId,
+      name: input?.name,
+      url: input?.url,
+    });
+    return projectService.getProjectRow(user.id, id);
+  });
+  if (result.ok) revalidateProjectViews(result.data.id);
+  return result;
+}
+
+/** Deletes a project once its name has been typed to confirm (Owner/Admin). */
+export async function deleteProjectAction(input: {
+  websiteId: string;
+  confirmName: string;
+}): Promise<ProjectActionResult<{ name: string }>> {
+  const result = await runProjectAction(async () => {
+    const user = await requireUser();
+    return websiteService.deleteProject(user.id, {
+      websiteId: input?.websiteId,
+      confirmName: input?.confirmName,
+    });
+  });
+  if (result.ok) revalidateProjectViews();
+  return result;
+}
+
+/** What the pixel dialogs render from one install check. Dates as ISO strings. */
+export interface PixelCheckData {
+  pageLoaded: boolean;
+  loadError: string | null;
+  scriptFound: boolean;
+  antiFlickerFound: boolean;
+  wrongSiteId: boolean;
+  /** The project's real last hit — never a fabricated "just now" (spec §8 row 10). */
+  lastSeenAt: string | null;
+}
+
+/**
+ * Runs the install check for the pixel dialogs (Editor+, rate-limited). A page that fails to load
+ * is a result, not an error; an off-site URL or too many checks come back as `ok: false`.
+ */
+export async function verifyProjectPixelAction(input: {
+  websiteId: string;
+  url: string;
+}): Promise<ProjectActionResult<PixelCheckData>> {
+  const result = await runProjectAction(async () => {
+    const user = await requireUser();
+    const check = await pixelService.verifyInstallation(user.id, {
+      websiteId: input?.websiteId,
+      url: input?.url,
+    });
+    return {
+      pageLoaded: check.pageLoaded,
+      loadError: check.loadError,
+      scriptFound: check.scriptFound,
+      antiFlickerFound: check.antiFlickerFound,
+      wrongSiteId: check.wrongSiteId,
+      lastSeenAt: check.lastSeenAt ? check.lastSeenAt.toISOString() : null,
+    };
+  });
+  // A found snippet stamps pixelVerifiedAt, which moves the tracking badges.
+  if (result.ok && result.data.scriptFound) revalidateProjectViews(String(input?.websiteId ?? ""));
+  return result;
 }

@@ -1,19 +1,16 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { Checkbox as CheckboxPrimitive } from "radix-ui"
-import { CheckIcon, MinusIcon } from "lucide-react"
+import * as React from "react";
+import { Checkbox as CheckboxPrimitive } from "radix-ui";
+import { CheckIcon, MinusIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 /**
  * Supports an indeterminate state (`checked={"indeterminate"}`), which a "select all" header
  * box needs when only some rows beneath it are selected.
  */
-function Checkbox({
-  className,
-  ...props
-}: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
+function Checkbox({ className, ...props }: React.ComponentProps<typeof CheckboxPrimitive.Root>) {
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"
@@ -23,7 +20,7 @@ function Checkbox({
         "disabled:cursor-not-allowed disabled:opacity-50",
         "data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
         "data-[state=indeterminate]:border-primary data-[state=indeterminate]:bg-primary data-[state=indeterminate]:text-primary-foreground",
-        className
+        className,
       )}
       {...props}
     >
@@ -38,7 +35,7 @@ function Checkbox({
         )}
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
-  )
+  );
 }
 
-export { Checkbox }
+export { Checkbox };

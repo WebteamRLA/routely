@@ -40,6 +40,27 @@ describe("isPrivateAddress", () => {
     expect(isPrivateAddress("0.0.0.0")).toBe(true);
   });
 
+  it("unwraps the hex spelling of IPv4-mapped IPv6, which is what `new URL` produces", () => {
+    // new URL("http://[::ffff:127.0.0.1]/").hostname === "[::ffff:7f00:1]"
+    expect(isPrivateAddress("::ffff:7f00:1")).toBe(true);
+    expect(isPrivateAddress("::ffff:a9fe:a9fe")).toBe(true);
+    expect(isPrivateAddress("0:0:0:0:0:ffff:a00:1")).toBe(true);
+    expect(isPrivateAddress("::ffff:808:808")).toBe(false);
+  });
+
+  it("unwraps IPv4-compatible and NAT64 forms", () => {
+    expect(isPrivateAddress("::7f00:1")).toBe(true);
+    expect(isPrivateAddress("::127.0.0.1")).toBe(true);
+    expect(isPrivateAddress("64:ff9b::a9fe:a9fe")).toBe(true);
+    expect(isPrivateAddress("64:ff9b::808:808")).toBe(false);
+    expect(isPrivateAddress("0:0:0:0:0:0:0:1")).toBe(true);
+  });
+
+  it("rejects IPv6 multicast and allows ordinary global unicast", () => {
+    expect(isPrivateAddress("ff02::1")).toBe(true);
+    expect(isPrivateAddress("2606:4700:4700::1111")).toBe(false);
+  });
+
   it("unwraps IPv4-mapped IPv6 rather than reading it as an opaque v6 address", () => {
     expect(isPrivateAddress("::ffff:127.0.0.1")).toBe(true);
     expect(isPrivateAddress("::ffff:169.254.169.254")).toBe(true);

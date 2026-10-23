@@ -98,7 +98,7 @@ export function GoalSetupForm({
           hint={
             metric.urlEditable
               ? "Must be on this website's domain, and different from the control and variant pages."
-              : "Locked: this experiment has already started, and its visitors are bucketed against this goal. Archive it and create a new one to measure a different page."
+              : "Locked: this experiment has already started, and its visitors are bucketed against this goal. End it and create a new one to measure a different page."
           }
           errors={saveState.fieldErrors?.["conversionUrl"]}
           required={metric.urlEditable}

@@ -13,8 +13,12 @@ import { isSameUrl, readHandoff, urlMatches, withHandoff } from "./url";
 
 const REDIRECTED_PREFIX = "routely_r_";
 
-/** Ceiling on redirects for one experiment within a single tab session. */
-const MAX_REDIRECTS_PER_SESSION = 1;
+/**
+ * How long a redirect counts as "still on its way". A redirect that has not landed on its
+ * variant within this window — the variant URL bounced the visitor straight back to the control —
+ * is a loop, and the control page does not redirect again until the window passes.
+ */
+export const REDIRECT_PENDING_MS = 30_000;
 
 export type SkipReason =
   | "no-match"
@@ -33,23 +37,67 @@ export function redirectedKey(experimentId: string): string {
   return REDIRECTED_PREFIX + experimentId;
 }
 
-/** Session-scoped, because a new tab is a new chance to be redirected but a reload is not. */
-export function countRedirects(experimentId: string, store: KeyValueStore | null): number {
-  if (!store) return 0;
+/**
+ * A redirect for this experiment was issued and has not landed yet, within the last
+ * `REDIRECT_PENDING_MS`. Session-scoped (`sessionStorage`), so it is per tab.
+ *
+ * It used to be a plain counter capped at one redirect per tab session — which also stopped a
+ * visitor who had *landed* on their variant from being sent there again when they came back to
+ * the control page: they saw the control while every event was reported for their variant. Now
+ * only a redirect that never arrived blocks another. (A value from the old counter, e.g. `"1"`,
+ * reads as a timestamp in 1970 and so as long expired.)
+ */
+export function isRedirectPending(
+  experimentId: string,
+  store: KeyValueStore | null,
+  now: number = Date.now(),
+): boolean {
+  if (!store) return false;
   try {
-    return Number(store.getItem(redirectedKey(experimentId))) || 0;
+    const at = Number(store.getItem(redirectedKey(experimentId)));
+    return Number.isFinite(at) && at > 0 && now - at >= 0 && now - at < REDIRECT_PENDING_MS;
   } catch {
-    return 0;
+    return false;
   }
 }
 
-export function recordRedirect(experimentId: string, store: KeyValueStore | null): void {
+/** Marks a redirect as issued, before navigating. */
+export function recordRedirect(
+  experimentId: string,
+  store: KeyValueStore | null,
+  now: number = Date.now(),
+): void {
   if (!store) return;
   try {
-    const next = countRedirects(experimentId, store) + 1;
-    store.setItem(redirectedKey(experimentId), String(next));
+    store.setItem(redirectedKey(experimentId), String(now));
   } catch {
-    // Losing the counter costs a guard, not correctness — three others remain.
+    // Losing the marker costs a guard, not correctness — three others remain.
+  }
+}
+
+/**
+ * Clears the pending marker of every experiment whose variant this page is (or whose redirect
+ * brought the visitor here): the redirect landed, so a later visit to the control may redirect
+ * again. Only same-origin variants can clear it — storage is per origin — so a cross-origin
+ * variant blocks a revisit for at most `REDIRECT_PENDING_MS`.
+ */
+export function markLanded(
+  href: string,
+  experiments: ExperimentConfig[],
+  store: KeyValueStore | null,
+): void {
+  if (!store) return;
+  const handoff = readHandoff(href);
+  for (const experiment of experiments) {
+    const onVariant =
+      (handoff && handoff.experimentId === experiment.id) ||
+      experiment.variants.some((variant) => variant.url && isSameUrl(href, String(variant.url)));
+    if (!onVariant) continue;
+    try {
+      store.removeItem(redirectedKey(experiment.id));
+    } catch {
+      // Nothing to clear.
+    }
   }
 }
 
@@ -86,8 +134,10 @@ export function findExperimentForUrl(
  *  2. **Arrived by redirect.** The handoff parameters in the URL say this page load *is* the
  *     result of this experiment's redirect. Survives a reload of the variant page, and works
  *     across origins where storage does not.
- *  3. **Already redirected this session.** A counter in `sessionStorage`, incremented before
- *     the redirect is issued, so even a decision that somehow repeats cannot bounce twice.
+ *  3. **A redirect still pending.** A timestamp in `sessionStorage`, written before the redirect
+ *     is issued and cleared when the visitor lands on the variant (`markLanded`). Back on the
+ *     control page with it still set — within `REDIRECT_PENDING_MS` — the redirect never landed
+ *     (the variant bounced back), so it is not repeated.
  *  4. **Target equals current URL.** The last resort: whatever the configuration says, never
  *     navigate to the page already being displayed.
  */
@@ -105,7 +155,15 @@ export function decide(
     return { action: "skip", experiment, reason: "excluded" };
   }
 
-  if (experiment.variants.some((variant) => isSameUrl(href, variant.url))) {
+  if (
+    experiment.variants.some(
+      (variant) =>
+        isSameUrl(href, String(variant.url)) ||
+        // With `keepParams` the variant page carries the visitor's own parameters too, so it is
+        // compared as it would look after a redirect from here.
+        (experiment.keepParams === true && isSameUrl(href, carryParams(String(variant.url), href))),
+    )
+  ) {
     return { action: "skip", experiment, reason: "already-on-variant" };
   }
 
@@ -116,7 +174,7 @@ export function decide(
 
   const sessionStore =
     context.sessionStore === undefined ? getSessionStorage() : context.sessionStore;
-  if (countRedirects(experiment.id, sessionStore) >= MAX_REDIRECTS_PER_SESSION) {
+  if (isRedirectPending(experiment.id, sessionStore)) {
     return { action: "skip", experiment, reason: "already-redirected" };
   }
 
@@ -132,7 +190,8 @@ export function decide(
     return { action: "stay", experiment, variantId: null };
   }
 
-  const target = withHandoff(targetVariant.url, {
+  const destination = String(targetVariant.url);
+  const target = withHandoff(experiment.keepParams ? carryParams(destination, href) : destination, {
     visitorId: context.visitorId,
     experimentId: experiment.id,
     variant: targetVariant.id,
@@ -146,14 +205,41 @@ export function decide(
 }
 
 /**
+ * The variant URL with the visitor's own query parameters and fragment carried over.
+ *
+ * The target's own parameters win on a clash — the customer configured them, so they are part
+ * of what the variant *is* — and Routely's handoff parameters are never carried, because the
+ * redirect writes fresh ones. The fragment is carried only when the target has none.
+ *
+ * Without this, a visitor arriving on `/pricing?utm_source=ads&plan=pro` lands on
+ * `/pricing-v2` with the campaign attribution and the page state both gone.
+ */
+export function carryParams(target: string, current: string): string {
+  try {
+    const to = new URL(target);
+    const from = new URL(current);
+
+    from.searchParams.forEach((value, key) => {
+      if (key.indexOf("_rt_") !== 0 && !to.searchParams.has(key))
+        to.searchParams.append(key, value);
+    });
+    if (!to.hash && from.hash) to.hash = from.hash;
+
+    return to.toString();
+  } catch {
+    return target;
+  }
+}
+
+/**
  * Performs the navigation.
  *
  * `location.replace` rather than `assign`: the control page is removed from history, so the
  * browser's Back button returns the visitor to wherever they came from instead of landing them
  * on the control page and immediately redirecting them forward again.
  *
- * The session counter is incremented *before* navigating, so the guard is already in place if
- * the destination somehow re-enters this code.
+ * The pending marker is written *before* navigating, so the guard is already in place if the
+ * destination bounces straight back to this page.
  */
 export function performRedirect(
   target: string,

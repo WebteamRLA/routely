@@ -98,3 +98,20 @@ export const dayKeySchema = z
   .string()
   .trim()
   .refine(isUtcDayKey, "Must be a real date in YYYY-MM-DD form");
+
+/** Longest spreadsheet name Routely will create, per the design's "Use 100 characters or fewer." */
+export const SPREADSHEET_NAME_MAX = 100;
+
+/**
+ * The name of a spreadsheet Routely creates in the customer's Drive.
+ *
+ * Sent to Google as the file's title. Google itself accepts far longer names; the cap is the
+ * design's, so a name typed into the dialog cannot be silently cut short by anything downstream.
+ * Control characters are refused because a title is shown in Drive, in Sheets and back in Routely.
+ */
+export const spreadsheetNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Give the spreadsheet a name.")
+  .max(SPREADSHEET_NAME_MAX, `Use ${SPREADSHEET_NAME_MAX} characters or fewer.`)
+  .refine((value) => !/[\u0000-\u001F\u007F]/.test(value), "Use letters, numbers and punctuation.");

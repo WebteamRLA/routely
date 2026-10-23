@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
+import { ACCEPTED_PROTOCOL_VERSIONS, LEGACY_PROTOCOL_VERSION } from "@routely/sdk/contract";
 import { EventType } from "@/generated/prisma/enums";
 import { absoluteUrlSchema, idSchema, publicSiteIdSchema } from "@/validation/common";
 
@@ -67,16 +67,43 @@ export const eventBatchSchema = z.object({
    * when it breaks: a batch that fails this check is discarded silently by `ingest`, so a stale
    * literal drops every event with no error anywhere. Importing the constant makes a bump
    * update both ends at once.
+   *
+   * Every accepted version, not only the newest: the batch shape did not change in v4, and an
+   * installed v3 bundle (cached in a browser) must keep reporting until it refreshes.
    */
-  v: z.literal(SDK_PROTOCOL_VERSION),
+  v: z.literal(ACCEPTED_PROTOCOL_VERSIONS),
   siteId: publicSiteIdSchema,
   visitorId: anonymousIdSchema,
   events: z.array(trackedEventSchema).min(1).max(MAX_EVENTS_PER_BATCH),
 });
 
-/** Query parameters of the SDK config endpoint. */
+/**
+ * Body of `POST /api/v1/hit` — one site-wide page hit (`PageHit` in the SDK contract).
+ *
+ * `url` is checked for shape only; the service normalises it again and stores the server's
+ * spelling. `ts` is accepted for the contract's sake and clamped — the day a hit counts towards
+ * is decided by the server clock, not the browser's.
+ */
+export const pageHitSchema = z.object({
+  v: z.literal(ACCEPTED_PROTOCOL_VERSIONS),
+  siteId: publicSiteIdSchema,
+  anonymousId: anonymousIdSchema,
+  url: absoluteUrlSchema,
+  ts: z.number().int().positive(),
+});
+
+export type PageHitInput = z.infer<typeof pageHitSchema>;
+
+/**
+ * Query parameters of the SDK config endpoint.
+ *
+ * `v` is the protocol the caller understands. Absent (an installed v3 bundle never sent it) or
+ * unparseable reads as 3, the legacy shape — the safe default, since a v3 document omits every
+ * experiment an old bundle would mis-serve.
+ */
 export const configRequestSchema = z.object({
   siteId: publicSiteIdSchema,
+  v: z.coerce.number().int().catch(LEGACY_PROTOCOL_VERSION),
 });
 
 export type TrackedEventInput = z.infer<typeof trackedEventSchema>;

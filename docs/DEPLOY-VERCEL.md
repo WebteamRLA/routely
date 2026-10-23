@@ -285,13 +285,22 @@ version of the code still runs against the new schema. `DATABASE.md` covers the 
 
 ---
 
-## Scheduled jobs (Google Sheets daily sync)
+## Scheduled jobs (Google Sheets refresh, notifications)
 
-`vercel.json` registers one cron job:
+`vercel.json` registers two cron jobs, both daily and both behind the same `CRON_SECRET`:
 
 ```json
-"crons": [{ "path": "/api/cron/sheets-sync", "schedule": "20 0 * * *" }]
+"crons": [
+  { "path": "/api/cron/sheets-sync", "schedule": "20 0 * * *" },
+  { "path": "/api/cron/notifications", "schedule": "40 0 * * *" }
+]
 ```
+
+`/api/cron/notifications` sends the "result is ready" backstop and "tracking stopped" emails and
+prunes the visitor-day tables (400 days). It needs `RESEND_API_KEY` (and `EMAIL_FROM` on a domain
+verified in Resend) to send anything — without a key, production sends nothing and logs no body. On
+the first run after the workspace migration it announces every ACTIVE experiment that already passes
+the results gate, at once. On Hobby a cron runs at most once a day, somewhere within its hour.
 
 **Crons only register on a production deployment.** Until one happens the array does nothing at
 all — with no error and no warning, just no invocations. Confirm the job is listed under
@@ -315,9 +324,10 @@ start-up on the next deploy.
 
 **Check the current plan limits before relying on specifics.** The number of cron jobs allowed, the
 precision with which a daily job fires, and the `maxDuration` ceiling (`export const maxDuration =
-60` in the route) all differ by plan and Vercel has changed them more than once. The design is
-insensitive to the answer — a per-day claim row makes a late, early or duplicated invocation
-harmless — but a `maxDuration` above the plan's ceiling is rejected at deploy time.
+60` in each cron route) all differ by plan and Vercel has changed them more than once. The design is
+insensitive to the answer — the Sheets tab is overwritten from source and every notification is
+latched by a compare-and-set, so a late, early or duplicated invocation is harmless — but a
+`maxDuration` above the plan's ceiling is rejected at deploy time.
 
 The Google Cloud Console also needs, on the existing OAuth client:
 

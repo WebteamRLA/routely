@@ -29,6 +29,8 @@ import {
   resolveAssignment,
   resolveAssignmentStores,
 } from "./assignment";
+import { applyChanges } from "./apply";
+import type { ApplyResult } from "./apply";
 import { revealPage } from "./cloak";
 import { claimConversion, findGoalMatches } from "./conversion";
 import { loadConfig } from "./config";
@@ -40,10 +42,14 @@ import {
   createEngagementTimer,
 } from "./engagement";
 import { SDK_PROTOCOL_VERSION } from "./contract";
-import type { ConfigResponse } from "./contract";
+import type { ConfigResponse, ExperimentConfig } from "./contract";
+import { currentDevice, deviceAllowed } from "./device";
+import { getSessionStorage } from "./env";
+import { readEditorToken, startEditorBridge } from "./editor-bridge";
+import { sendHit } from "./hit";
 import { type Identity, resolveIdentity } from "./identity";
 import { resolveInclusion } from "./inclusion";
-import { decide, performRedirect } from "./redirect";
+import { decide, findExperimentForUrl, markLanded, performRedirect } from "./redirect";
 import { sendConversion, sendPageEvents, sendTimeOnPage } from "./track";
 import { DEFAULT_TIMEOUT_MS } from "./transport";
 import { normalizeUrl, readHandoff, stripHandoff } from "./url";
@@ -89,8 +95,12 @@ export interface RoutelyState {
   degraded: boolean;
   /** The experiment claiming this page, and the arm the visitor is in (`null` is control). */
   assignment: { experimentId: string; variantId: string | null } | null;
-  /** What the SDK did on this page load. */
-  action: "none" | "stay" | "redirect" | "skip";
+  /** What the SDK did on this page load. `apply`: an A/B variant's visual changes. */
+  action: "none" | "stay" | "redirect" | "skip" | "apply";
+  /** The device class used for targeting (decided in the browser; see `device.ts`). */
+  device: ReturnType<typeof currentDevice>;
+  /** How many of an A/B variant's changes were applied, once known. */
+  applied?: ApplyResult;
   /** True when this page load handed events to the browser for delivery. */
   reported: boolean;
   /** The visible-time accumulator, exposed for debugging an installation. */
@@ -154,6 +164,16 @@ export async function boot(): Promise<RoutelyState | null> {
       (...args: unknown[]) => console.info("[routely]", ...args)
     : () => {};
 
+  // Opened by the Routely visual editor: hand over to the bridge and do nothing else — no hit,
+  // no configuration, no assignment, no events. The editor session is not a visitor. A fragment
+  // with no editor on the other end (no parent, no opener) is ignored and the SDK runs normally.
+  const editToken = readEditorToken(window.location.href);
+  if (editToken && startEditorBridge(editToken, options.apiBase)) {
+    log("visual editor mode");
+    revealPage();
+    return null;
+  }
+
   // The handoff is read before anything else: it may carry the visitor id from the origin
   // that redirected here, and identity must be resolved with that in hand.
   const href = window.location.href;
@@ -169,7 +189,12 @@ export async function boot(): Promise<RoutelyState | null> {
   // customer's own analytics as though they were campaign parameters.
   cleanUrl(href);
 
-  const config = await loadConfig(options.apiBase, options.siteId, options.timeoutMs);
+  // The request goes first; the site-wide hit is queued while it is in flight. The hit does not
+  // depend on the configuration, so a site with no running experiment still reports that the
+  // snippet is installed.
+  const pending = loadConfig(options.apiBase, options.siteId, options.timeoutMs);
+  sendHit(options.apiBase, options.siteId, identity.id, href);
+  const config = await pending;
 
   const state: RoutelyState = {
     version: SDK_VERSION,
@@ -181,6 +206,7 @@ export async function boot(): Promise<RoutelyState | null> {
     degraded: config === null,
     assignment: null,
     action: "none",
+    device: currentDevice(),
     reported: false,
     conversions: [],
   };
@@ -190,7 +216,8 @@ export async function boot(): Promise<RoutelyState | null> {
     // exception is a redirect: the page is being replaced, and revealing the control page for
     // the duration of that navigation is the flash the anti-flickering script exists to
     // remove. That script's own timeout still lifts the overlay if the navigation stalls.
-    if (state.action !== "redirect") revealPage();
+    // An A/B variant is the other: its overlay lifts when its changes are in place.
+    if (state.action !== "redirect" && state.action !== "apply") revealPage();
 
     if (typeof window !== "undefined") window.routely = state;
     return state;
@@ -205,6 +232,10 @@ export async function boot(): Promise<RoutelyState | null> {
 
   const stores = resolveAssignmentStores();
 
+  // On a variant page this tab was redirected to: the redirect landed, so the control page may
+  // send the visitor here again on a later visit (redirect.ts, loop guard 3).
+  markLanded(href, state.experiments, getSessionStorage());
+
   // Checked before the redirect decision: a redirect ends this page load, and a page that is
   // a conversion goal is never also a control page — the server refuses to create an
   // experiment where those URLs coincide — so the two cannot compete.
@@ -216,9 +247,28 @@ export async function boot(): Promise<RoutelyState | null> {
   const forcedVariantId = (experiment: { id: string }): string | null | undefined =>
     handoff && handoff.experimentId === experiment.id ? handoff.variant : undefined;
 
+  const experiment = findExperimentForUrl(href, state.experiments);
+  if (!experiment) {
+    log("no experiment matches this page");
+    return publish();
+  }
+
+  // Before inclusion and the draw: a visitor on an untargeted device is never entered, so they
+  // consume no draw and nothing is reported for them.
+  if (!deviceAllowed(experiment.devices, state.device)) {
+    log(`skipping ${experiment.id}: not targeted on ${state.device}`);
+    state.action = "skip";
+    return publish();
+  }
+
+  if (experiment.kind === "ab_test") {
+    runVisual(options, state, stores, href, experiment, log);
+    return publish();
+  }
+
   const decision = decide(
     href,
-    state.experiments,
+    [experiment],
     (experiment) =>
       // `resolveAssignment` applies `forced` only when nothing is stored, so a query string
       // can never move an existing visitor.
@@ -269,6 +319,51 @@ export async function boot(): Promise<RoutelyState | null> {
   log(`staying on the control page (${decision.variantId ?? "control"})`);
   trackEngagement(options, state, href);
   return publish();
+}
+
+/**
+ * An A/B test: the visitor stays on the tested page, and a variant visitor sees its changes.
+ *
+ * None of the redirect loop guards apply — nothing navigates. Assignment, reporting, visible
+ * time and conversions work exactly as for a split-URL test on its control page.
+ */
+function runVisual(
+  options: RoutelyOptions,
+  state: RoutelyState,
+  stores: ReturnType<typeof resolveAssignmentStores>,
+  href: string,
+  experiment: ExperimentConfig,
+  log: (...args: unknown[]) => void,
+): void {
+  if (!resolveInclusion(experiment.id, experiment.trafficAllocation, stores).included) {
+    log(`skipping ${experiment.id}: excluded`);
+    state.action = "skip";
+    return;
+  }
+
+  const { variantId } = resolveAssignment(experiment, stores);
+  // An id not in this experiment's list is a stale assignment: treated as control, as a
+  // split-URL test does, rather than applying nothing under a variant's name.
+  const variant = experiment.variants.find((v) => v.id === variantId);
+  state.assignment = { experimentId: experiment.id, variantId: variant ? variant.id : null };
+  report(options, state, stores, href);
+  trackEngagement(options, state, href);
+
+  const changes = (variant && variant.changes) || [];
+  if (changes.length === 0) {
+    log(`A/B test ${experiment.id}: ${variant ? "variant with no changes" : "control"}`);
+    state.action = "stay";
+    return;
+  }
+
+  // The anti-flicker overlay is held until the changes are in place, so the visitor never sees
+  // the original first. The snippet's own timeout still bounds the wait.
+  state.action = "apply";
+  applyChanges(changes, (result) => {
+    state.applied = result;
+    log(`applied ${result.applied}/${result.total} change(s) for ${experiment.id}`);
+    revealPage();
+  });
 }
 
 /**

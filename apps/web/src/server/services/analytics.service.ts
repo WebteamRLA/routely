@@ -1,7 +1,9 @@
 import "server-only";
 
 import { armLabel } from "@/lib/sheet-rows";
+import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/server/db";
+import { experimentAccess } from "@/server/repositories/access";
 import { notFound } from "@/server/errors";
 import * as assignmentRepo from "@/server/repositories/assignment.repository";
 import * as conversionRepo from "@/server/repositories/conversion.repository";
@@ -240,7 +242,7 @@ export async function getExperimentSummaries(
 
   // Ownership is enforced by scoping the aggregation itself, not by trusting the caller to
   // have filtered the ids: an id the actor does not own simply contributes no rows.
-  const owned = { website: { userId: actorUserId } };
+  const owned: Prisma.ExperimentWhereInput = experimentAccess(actorUserId);
 
   const [assignments, conversions] = await Promise.all([
     db.assignment.groupBy({
@@ -333,10 +335,10 @@ export async function getExperimentSummaries(
  *
  * ## What is and is not included
  *
- * - **Status is ignored.** DRAFT, ACTIVE, PAUSED and ARCHIVED all contribute. An experiment
+ * - **Status is ignored.** DRAFT, ACTIVE, PAUSED and COMPLETED all contribute. An experiment
  *   paused this morning still collected real data yesterday, and filtering on today's status
  *   would make yesterday's numbers depend on when the sync happened to run. In practice this
- *   only reaches PAUSED and ARCHIVED, because only ACTIVE experiments accept events at all.
+ *   only reaches PAUSED and COMPLETED, because only ACTIVE experiments accept events at all.
  * - **An experiment with no activity in the window contributes no rows**, rather than a row of
  *   zeroes per arm. The sheet is an append-only daily log; emitting every arm of every
  *   experiment every day would grow it without bound and bury the signal, and a spreadsheet
@@ -350,7 +352,7 @@ export interface DailyArmRow {
   experimentName: string;
   /** Null for control — control is not a row in `ExperimentVariant`. */
   variantId: string | null;
-  /** "Control", or "Variant N" by position — the same label the dashboard renders. */
+  /** "Control", or the variant's stored name — the same label the experiment page renders. */
   variantLabel: string;
   assignedVisitors: number;
   conversions: number;
@@ -376,15 +378,51 @@ export interface DatedArmRow extends DailyArmRow {
   day: string;
 }
 
-export async function getArmRowsByDay(
+export function getArmRowsByDay(
   actorUserId: string,
   range: DateRange,
   websiteId?: string,
+  /** Restricts the rows to one experiment — the results page's cumulative chart. */
+  experimentId?: string,
 ): Promise<DatedArmRow[]> {
-  const owned = {
-    website: { userId: actorUserId, ...(websiteId ? { id: websiteId } : {}) },
-  };
+  return armRowsByDay(
+    {
+      ...experimentAccess(actorUserId),
+      ...(websiteId ? { websiteId } : {}),
+      ...(experimentId ? { id: experimentId } : {}),
+    },
+    range,
+  );
+}
 
+/**
+ * The same rows for one experiment reached through a public share token — no actor, because the
+ * token is the authorization and the caller has already resolved it. A separately named entry
+ * point for the same reason as `getSharedExperimentStats`.
+ */
+export function getSharedExperimentArmRowsByDay(
+  experimentId: string,
+  range: DateRange,
+): Promise<DatedArmRow[]> {
+  return armRowsByDay({ id: experimentId }, range);
+}
+
+/**
+ * The same rows for one website, with no actor — for the Sheets refresh, which runs after an
+ * ingestion response or from the cron and acts for the website itself. The website id here comes
+ * from a claimed `WebsiteSheetTarget` row, never from a request.
+ */
+export function getWebsiteArmRowsByDay(
+  websiteId: string,
+  range: DateRange,
+): Promise<DatedArmRow[]> {
+  return armRowsByDay({ websiteId }, range);
+}
+
+async function armRowsByDay(
+  owned: Prisma.ExperimentWhereInput,
+  range: DateRange,
+): Promise<DatedArmRow[]> {
   const [assignments, conversions] = await Promise.all([
     db.assignment.findMany({
       where: { experiment: owned, assignedAt: { gte: range.from, lte: range.to } },
@@ -410,7 +448,7 @@ export async function getArmRowsByDay(
     select: {
       id: true,
       name: true,
-      variants: { select: { id: true }, orderBy: { position: "asc" } },
+      variants: { select: { id: true, name: true }, orderBy: { position: "asc" } },
     },
     orderBy: { name: "asc" },
   });
@@ -467,7 +505,7 @@ export async function getArmRowsByDay(
           experimentId: experiment.id,
           experimentName: experiment.name,
           variantId,
-          variantLabel: armLabel(variantId, orderedVariantIds),
+          variantLabel: armLabel(variantId, experiment.variants),
           assignedVisitors,
           conversions: conversionCount,
           // Identical to `armStats` — assigned visitors, not visitors who loaded a page.
@@ -493,8 +531,9 @@ export async function getDailyArmRows(
    * another website's spreadsheet. It is applied *alongside* the user filter rather than instead of
    * it — a website id is a caller-supplied value, and on its own it would be an id to probe.
    */
-  const owned = {
-    website: { userId: actorUserId, ...(websiteId ? { id: websiteId } : {}) },
+  const owned: Prisma.ExperimentWhereInput = {
+    ...experimentAccess(actorUserId),
+    ...(websiteId ? { websiteId } : {}),
   };
 
   const [assignments, conversions] = await Promise.all([
@@ -527,15 +566,15 @@ export async function getDailyArmRows(
 
   if (touchedIds.length === 0) return [];
 
-  // The label depends on variant *position*, which neither aggregation carries. Scoped by
-  // ownership again rather than trusting ids derived from the queries above — cheap, and it
-  // means this query is correct in isolation.
+  // The label is the variant's stored name (its position, for a blank one), which neither
+  // aggregation carries. Scoped by ownership again rather than trusting ids derived from the
+  // queries above — cheap, and it means this query is correct in isolation.
   const experiments = await db.experiment.findMany({
     where: { id: { in: touchedIds }, ...owned },
     select: {
       id: true,
       name: true,
-      variants: { select: { id: true }, orderBy: { position: "asc" } },
+      variants: { select: { id: true, name: true }, orderBy: { position: "asc" } },
     },
     orderBy: { name: "asc" },
   });
@@ -579,7 +618,7 @@ export async function getDailyArmRows(
         experimentId: experiment.id,
         experimentName: experiment.name,
         variantId,
-        variantLabel: armLabel(variantId, orderedVariantIds),
+        variantLabel: armLabel(variantId, experiment.variants),
         assignedVisitors,
         conversions: conversionCount,
         // Identical to `armStats` — assigned visitors, not visitors who loaded a page. See the

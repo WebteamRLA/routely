@@ -67,7 +67,7 @@ export function DeleteExperimentDialog({
             <AlertDialogTitle>Delete “{experimentName}”?</AlertDialogTitle>
             <AlertDialogDescription>
               {hasResults
-                ? "This permanently deletes the experiment and every visitor, event and conversion it recorded. If you only want it to stop running, archive it instead — that keeps the results."
+                ? "This permanently deletes the experiment and every visitor, event and conversion it recorded. If you only want it to stop running, end it instead — that keeps the results."
                 : "This permanently deletes the experiment. It has recorded nothing, so no results are lost."}{" "}
               It cannot be undone.
             </AlertDialogDescription>

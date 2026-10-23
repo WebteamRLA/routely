@@ -8,12 +8,32 @@
 export const routes = {
   home: "/",
   login: "/login",
+  /** Email + password sign-up. `?invite=<token>` joins the inviting workspace instead. */
+  signup: "/signup",
+  forgotPassword: "/forgot-password",
+  /** Links in emails — the raw token only ever travels here. */
+  resetPassword: (token: string) => `/reset-password/${encodeURIComponent(token)}`,
+  verifyEmail: (token: string) => `/verify-email/${encodeURIComponent(token)}`,
+  /** Consumes an email-change link, then lands on Settings. Needs no session: the token is proof. */
+  confirmEmail: (token: string) => `/settings/email/confirm?token=${encodeURIComponent(token)}`,
+  /** The design's Dashboard: every project at a glance. */
+  dashboard: "/dashboard",
+  /** Profile & security, Team, Notifications — the tab is the `?view=` state. */
+  settings: "/settings",
+  /** Pre-design onboarding page. Kept reachable by URL until its backend moves to `/dashboard`;
+   * no longer in the navigation. */
   getStarted: "/get-started",
 
   websites: {
     /** No standalone create page — a website is created from an `AddWebsiteDialog` popup
      * wherever one is needed, not by navigating anywhere. */
     detail: (websiteId: string) => `/websites/${encodeURIComponent(websiteId)}`,
+  },
+
+  projects: {
+    list: "/projects",
+    /** A project's dashboard: tracking pixel, integrations and its experiments. */
+    detail: (projectId: string) => `/projects/${encodeURIComponent(projectId)}`,
   },
 
   /** Public, token-addressed results page. Deliberately outside the protected prefixes. */
@@ -42,6 +62,15 @@ export const routes = {
         ? `/experiments/new?websiteId=${encodeURIComponent(websiteId)}`
         : "/experiments/new",
     detail: (experimentId: string) => `/experiments/${encodeURIComponent(experimentId)}`,
+    /** The design's two creation wizards, reached from the "New experiment" split button. */
+    newAbTest: "/experiments/new/ab-test",
+    newSplitUrl: "/experiments/new/split-url",
+    /** A wizard for a new draft in one project (`projectId`), or reopening draft `id`. */
+    wizard: (type: "AB_TEST" | "SPLIT_URL", id?: string, projectId?: string) => {
+      const base = type === "AB_TEST" ? "/experiments/new/ab-test" : "/experiments/new/split-url";
+      if (id) return `${base}?id=${encodeURIComponent(id)}`;
+      return projectId ? `${base}?project=${encodeURIComponent(projectId)}` : base;
+    },
   },
 } as const;
 
@@ -55,11 +84,14 @@ export const routes = {
  * An explicit `?callbackUrl=` still wins: someone who was stopped on the way to a specific page
  * should be returned there, not deposited on the landing page having forgotten why they came.
  */
-export const AFTER_SIGN_IN: string = routes.getStarted;
+export const AFTER_SIGN_IN: string = routes.dashboard;
 
 /** Route prefixes that require an authenticated session. */
 export const PROTECTED_PREFIXES = [
   "/get-started",
+  "/dashboard",
+  "/projects",
+  "/settings",
   "/websites",
   "/experiments",
   "/metrics",

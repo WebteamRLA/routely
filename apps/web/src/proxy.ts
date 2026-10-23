@@ -30,7 +30,18 @@ function hasSessionCookie(request: NextRequest): boolean {
   return SESSION_COOKIE_NAMES.some((name) => Boolean(request.cookies.get(name)?.value));
 }
 
+/**
+ * Paths under a protected prefix that must stay reachable without a session. The email-change
+ * link proves inbox control by its token alone and is often opened on a device that was never
+ * signed in.
+ */
+const PUBLIC_PATHS = ["/settings/email/confirm"];
+
 export function proxy(request: NextRequest) {
+  if (PUBLIC_PATHS.includes(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
   // The development bypass grants a session with no cookie at all; skipping the check keeps
   // proxy from redirecting away from pages the layout would happily render.
   if (process.env["AUTH_DEV_BYPASS"] === "true" && process.env.NODE_ENV !== "production") {
@@ -50,5 +61,15 @@ export function proxy(request: NextRequest) {
 export const config = {
   // Only the protected areas. Auth.js routes, static assets and the public SDK bundle must
   // never be intercepted — redirecting the OAuth callback would break sign-in entirely.
-  matcher: ["/get-started/:path*", "/websites/:path*", "/experiments/:path*"],
+  // Must be a literal (Next reads it statically), so it repeats `PROTECTED_PREFIXES`.
+  matcher: [
+    "/dashboard/:path*",
+    "/projects/:path*",
+    "/experiments/:path*",
+    "/integrations/:path*",
+    "/settings/:path*",
+    "/get-started/:path*",
+    "/websites/:path*",
+    "/metrics/:path*",
+  ],
 };

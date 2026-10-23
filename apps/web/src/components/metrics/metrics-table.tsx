@@ -50,8 +50,8 @@ const STATE: Record<MetricState, { label: string; hint: string; tone: string }> 
     tone: "bg-muted text-muted-foreground ring-border",
   },
   archived: {
-    label: "Archived",
-    hint: "Its experiment is archived",
+    label: "Completed",
+    hint: "Its experiment has ended",
     tone: "bg-muted text-muted-foreground ring-border",
   },
 };

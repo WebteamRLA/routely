@@ -33,21 +33,40 @@ describe("headerRow", () => {
 });
 
 describe("armLabel", () => {
-  const variants = ["v-alpha", "v-beta", "v-gamma"];
+  const variants = [
+    { id: "v-alpha", name: "Variant A" },
+    { id: "v-beta", name: "Variant B" },
+    { id: "v-gamma", name: "Blue banner" },
+  ];
 
   it("calls a null variant id the control", () => {
     // NULL variantId *is* the control — it is deliberately not a row in ExperimentVariant.
     expect(armLabel(null, variants)).toBe("Control");
   });
 
-  it("numbers variants from their position, matching the dashboard", () => {
-    expect(armLabel("v-alpha", variants)).toBe("Variant 1");
-    expect(armLabel("v-beta", variants)).toBe("Variant 2");
-    expect(armLabel("v-gamma", variants)).toBe("Variant 3");
+  it("uses the variant's stored name, as the experiment page does", () => {
+    expect(armLabel("v-alpha", variants)).toBe("Variant A");
+    expect(armLabel("v-beta", variants)).toBe("Variant B");
+    expect(armLabel("v-gamma", variants)).toBe("Blue banner");
   });
 
-  it("numbers by list order, not by id", () => {
-    expect(armLabel("v-gamma", ["v-gamma", "v-alpha"])).toBe("Variant 1");
+  it("labels by id, not by list position", () => {
+    expect(armLabel("v-gamma", [variants[2]!, variants[0]!])).toBe("Blue banner");
+  });
+
+  it("falls back to the position's letter for a blank name, as the results page does", () => {
+    const blank = [
+      { id: "v-alpha", name: "Variant A" },
+      { id: "v-beta", name: "   " },
+    ];
+    expect(armLabel("v-beta", blank)).toBe("Variant B");
+  });
+
+  it("returns a formula-shaped name verbatim — RAW writes are the defence", () => {
+    // Same reasoning as the experiment-name test below: escaping here would show up in the
+    // customer's sheet and make nothing safer.
+    const hostile = `=HYPERLINK("http://attacker.test","x")`;
+    expect(armLabel("v-x", [{ id: "v-x", name: hostile }])).toBe(hostile);
   });
 
   it("still labels an arm whose variant has since been deleted", () => {
@@ -91,7 +110,7 @@ describe("buildSheetRows", () => {
       },
       {
         experimentName: "Pricing page redesign",
-        variantLabel: "Variant 1",
+        variantLabel: "Variant A",
         assignedVisitors: 408,
         conversions: 41,
         conversionRate: 41 / 408,
@@ -100,7 +119,7 @@ describe("buildSheetRows", () => {
 
     expect(rows).toEqual([
       ["2026-09-28", "Pricing page redesign", "Control", 412, 30, 7.3],
-      ["2026-09-28", "Pricing page redesign", "Variant 1", 408, 41, 10],
+      ["2026-09-28", "Pricing page redesign", "Variant A", 408, 41, 10],
     ]);
   });
 
@@ -128,14 +147,14 @@ describe("buildSheetRows", () => {
     const rows = buildSheetRows("2026-09-28", [
       {
         experimentName: "Checkout",
-        variantLabel: "Variant 2",
+        variantLabel: "Variant B",
         assignedVisitors: 0,
         conversions: 0,
         conversionRate: null,
       },
     ]);
 
-    expect(rows).toEqual([["2026-09-28", "Checkout", "Variant 2", 0, 0, ""]]);
+    expect(rows).toEqual([["2026-09-28", "Checkout", "Variant B", 0, 0, ""]]);
   });
 
   it("passes a name that looks like a formula through untouched", () => {

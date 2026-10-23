@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-import { ExperimentStatus, PrimaryMetric, UrlMatchType } from "@/generated/prisma/enums";
+import {
+  DeviceType,
+  ExperimentStatus,
+  ExperimentType,
+  PrimaryMetric,
+  UrlMatchType,
+} from "@/generated/prisma/enums";
+import { MAX_VARIANTS, NAME_MAX, URL_MAX } from "@/lib/launch-rules";
 import { isSameUrl } from "@/lib/url";
 import {
   absoluteUrlSchema,
@@ -8,9 +15,12 @@ import {
   idSchema,
   trafficAllocationSchema,
 } from "@/validation/common";
+import { visualChangesSchema } from "@/validation/visual-change";
 
 export const urlMatchTypeSchema = z.enum(UrlMatchType);
 export const experimentStatusSchema = z.enum(ExperimentStatus);
+export const experimentTypeSchema = z.enum(ExperimentType);
+export const deviceTypeSchema = z.enum(DeviceType);
 export const primaryMetricSchema = z.enum(PrimaryMetric);
 
 /**
@@ -146,3 +156,91 @@ export type ExperimentVariantInput = z.infer<typeof experimentVariantSchema>;
 export type CreateExperimentInput = z.infer<typeof createExperimentSchema>;
 export type UpdateExperimentInput = z.infer<typeof updateExperimentSchema>;
 export type ChangeExperimentStatusInput = z.infer<typeof changeExperimentStatusSchema>;
+
+// ---------------------------------------------------------------------------------------------
+// The new-design wizards: lenient drafts, a strict launch, and the paused-edit limits.
+//
+// A draft is saved as the customer types (spec §3.6), so its schema rejects only shape and caps —
+// a name up to 120 characters, URLs up to 2,048, at most four variants — and stores everything
+// else as it stands: an empty name, a half-typed URL, a split that adds up to 90. Whether the
+// result can go live is decided at launch by `lib/launch-rules.ts` (`setupIssues`, the design's
+// verbatim messages) plus the database rules in `experiment.service`.
+// ---------------------------------------------------------------------------------------------
+
+const draftNameSchema = z.string().max(NAME_MAX, `Use ${NAME_MAX} characters or fewer.`);
+const draftUrlSchema = z.string().max(URL_MAX, `Use a URL of ${URL_MAX} characters or fewer.`);
+/** A typed percentage. Three digits is all the inputs accept; launch requires the real range. */
+const draftPercentSchema = z.number().int("Must be a whole number").min(0).max(999);
+
+/**
+ * One variant row as the wizard holds it. `key` is the wizard's own id for the row, echoed back
+ * with the stored id so a row added in the browser can be matched to the row created for it.
+ * `id` names an existing variant — the service only accepts ids of this experiment's variants.
+ */
+export const draftVariantSchema = z.strictObject({
+  id: idSchema.optional(),
+  key: z.string().trim().min(1).max(64),
+  name: draftNameSchema,
+  /** SPLIT_URL only; ignored for an A/B test. */
+  url: draftUrlSchema.nullable().optional(),
+  weight: draftPercentSchema,
+  colorIndex: z.number().int().min(1).max(MAX_VARIANTS).optional(),
+  /** AB_TEST only; ignored for a Split URL test. Replaces the variant's whole change set. */
+  changes: visualChangesSchema.optional(),
+});
+
+/** Any subset of a draft's fields. Absent = unchanged. */
+export const draftPatchSchema = z.strictObject({
+  name: draftNameSchema.optional(),
+  controlUrl: draftUrlSchema.nullable().optional(),
+  conversionUrl: draftUrlSchema.nullable().optional(),
+  keepQueryParams: z.boolean().optional(),
+  trafficAllocation: draftPercentSchema.optional(),
+  controlWeight: draftPercentSchema.optional(),
+  /** Empty = every device; the service normalises all three to empty. */
+  targetDevices: z.array(deviceTypeSchema).max(3).optional(),
+  wizardStep: z.number().int().min(1).max(5).optional(),
+  /** The complete variant list, in display order: rows left out are deleted. */
+  variants: z
+    .array(draftVariantSchema)
+    .min(1, "Keep at least one variant.")
+    .max(MAX_VARIANTS, `Add up to ${MAX_VARIANTS} variants.`)
+    .optional(),
+});
+
+export const createDraftSchema = z.object({
+  type: experimentTypeSchema,
+  websiteId: idSchema,
+});
+
+/**
+ * What may change once an experiment has started (D7): the name and the share of visitors
+ * included. URLs, arms, changes, devices, goal and weights stay as launched — visitors are
+ * already bucketed against them.
+ */
+export const PAUSED_EDIT_LOCKED_MESSAGE =
+  "Only the name and the traffic included can change once an experiment has started.";
+
+export const pausedEditSchema = z.strictObject(
+  {
+    name: z
+      .string()
+      .trim()
+      .min(1, "Give your experiment a name.")
+      .max(NAME_MAX, `Use ${NAME_MAX} characters or fewer.`)
+      .optional(),
+    trafficAllocation: z
+      .number("Enter a percentage between 1 and 100.")
+      .int("Enter a percentage between 1 and 100.")
+      .min(1, "Enter a percentage between 1 and 100.")
+      .max(100, "Enter a percentage between 1 and 100.")
+      .optional(),
+  },
+  {
+    error: (issue) => (issue.code === "unrecognized_keys" ? PAUSED_EDIT_LOCKED_MESSAGE : undefined),
+  },
+);
+
+export type DraftPatch = z.infer<typeof draftPatchSchema>;
+export type DraftVariantInput = z.infer<typeof draftVariantSchema>;
+export type PausedEdit = z.infer<typeof pausedEditSchema>;

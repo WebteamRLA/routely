@@ -16,6 +16,16 @@
  * only as long as the decision took, and the snippet's timeout is a backstop rather than the
  * mechanism.
  *
+ * When the overlay lifts depends on what the visitor gets:
+ *
+ *  - **Control, excluded, untargeted device, or no matching experiment** — immediately, once
+ *    the decision is known.
+ *  - **Split-URL variant** — never by the SDK: the page is being replaced, and lifting the
+ *    overlay would flash the control page during the navigation.
+ *  - **A/B variant** — once its visual changes are applied (`apply.ts`), or when the SDK stops
+ *    waiting for elements that have not appeared. The snippet's own `routelyTimeout` bounds the
+ *    wait either way: the SDK can only lift the overlay earlier, never hold it longer.
+ *
  * If the customer has not installed the anti-flickering script, the global is absent and this
  * does nothing at all. That is a supported installation: they get the tracking, and they get
  * the flicker.
