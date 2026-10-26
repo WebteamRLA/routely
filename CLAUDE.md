@@ -534,7 +534,7 @@ In `<head>`, no `async`/`defer`, so the redirect decision precedes first paint.
 | `assignment.ts` | Stored arm, else the server's (`POST /api/v1/assign`), persisted so it is asked once; never guessed in the browser |
 | `device.ts` | Desktop / mobile / tablet from the user agent, for device targeting |
 | `redirect.ts` | The split-URL decision, four independent loop guards, `keepParams` carry-over |
-| `apply.ts` | Applies an A/B variant's visual changes — text, background colour, image src/alt — bounded, never `innerHTML` |
+| `apply.ts` | Applies an A/B variant's visual changes — text, image src/alt, text and background colour, font size/weight, alignment, padding, margin (each one `setProperty(…, "important")`, values from an allow-listed character set), and hiding — bounded, never `innerHTML` |
 | `hit.ts` | Site-wide page hit, at most once per normalised URL per UTC day per browser |
 | `editor-bridge.ts` | `#_rt_edit=<token>` handshake with the Routely visual editor (below) |
 | `conversion.ts` | Goal matching and once-per-assignment claiming |
@@ -575,8 +575,11 @@ and posts `routely:hello` to the parent/opener **addressed to the app origin**. 
 pointing, selecting and previewing. The token grants no data access; changes are saved through the
 signed-in draft autosave.
 
-**`packages/sdk/src/editor-agent.ts`** (written 2026-10-22 with the user's go-ahead; ~3.3 kB gzip)
-picks the element under the pointer (button-like → image → heading → text with its own text),
+**`packages/sdk/src/editor-agent.ts`** (written 2026-10-22 with the user's go-ahead; ~3.9 kB gzip)
+picks the element under the pointer (button-like → image → heading → text with its own text →
+otherwise the element itself as a `block`, 2026-10-26: the Gutenberg-style editor), reports its
+ancestors as a breadcrumb (`crumbs`) that `routely:select-parent` climbs, and its computed styles
+as `current`;
 builds a selector (`#id` for a hand-written unique id, else a stable-id ancestor or `body` plus a
 `tag:nth-of-type(n)` chain, kept only if it resolves back), blocks clicks/submits so the session can't
 navigate away, and previews by restoring snapshots then running the visitors' `applyChange`. It

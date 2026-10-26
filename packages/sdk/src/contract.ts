@@ -70,7 +70,8 @@ export type ExperimentKind = "split_url" | "ab_test";
 export type DeviceType = "desktop" | "mobile" | "tablet";
 
 /** The kind of element a visual change targets, as classified by the editor. */
-export type ElementKind = "heading" | "text" | "button" | "image";
+/** `block`: any other element — a section, a group, a list — for its styles and visibility. */
+export type ElementKind = "heading" | "text" | "button" | "image" | "block";
 
 /**
  * The values a visual change sets. At least one is present. Each is validated again in the
@@ -80,12 +81,26 @@ export type ElementKind = "heading" | "text" | "button" | "image";
  * - `backgroundColor` — `#rgb`, `#rrggbb`, `rgb(…)` or `rgba(…)`.
  * - `src` — an absolute `http:`/`https:` image URL.
  * - `alt` — plain text.
+ * - `color` — the text colour, in the same forms as `backgroundColor`.
+ * - `fontSize`, `fontWeight`, `textAlign`, `padding`, `margin` — CSS values made only of letters,
+ *   digits, spaces, `.`, `%`, `#` and `-` (`24px`, `700`, `center`, `16px 24px`, `0 auto`); the
+ *   server is stricter. Each is set as one property, so it can never reach another.
+ * - `hidden` — `true` hides the element in this variant.
+ *
+ * Every style is applied with `!important`, so the page's own stylesheet cannot override it.
  */
 export interface VisualChangeSet {
   text?: string;
   backgroundColor?: string;
   src?: string;
   alt?: string;
+  color?: string;
+  fontSize?: string;
+  fontWeight?: string;
+  textAlign?: string;
+  padding?: string;
+  margin?: string;
+  hidden?: boolean;
 }
 
 /**
@@ -251,6 +266,9 @@ export interface ElementDescriptor {
   /** False when the element holds more than text (an icon, nested blocks): replacing its text
    * would remove them, so the editor should not offer a text change. */
   textEditable: boolean;
+  /** The element's ancestors, nearest first (at most 5, `body` excluded), as short labels —
+   * "Section", "Group", "List" — for a breadcrumb; `routely:select-parent` climbs them. */
+  crumbs?: string[];
 }
 
 /** Messages the page (SDK, then agent) sends to the app. */
@@ -277,4 +295,6 @@ export type EditorAppMessage =
   /** `edit`: hover outlines and click-to-select. `preview`: neither (read-only versions). */
   | { type: "routely:mode"; token: string; mode: "edit" | "preview" }
   /** Outline an element from the changes list, or clear the selection with `null`. */
-  | { type: "routely:highlight"; token: string; selector: string | null };
+  | { type: "routely:highlight"; token: string; selector: string | null }
+  /** Select the selected element's `depth`-th ancestor (1 = its parent); answered with `select`. */
+  | { type: "routely:select-parent"; token: string; depth: number };

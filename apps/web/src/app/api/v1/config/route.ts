@@ -121,8 +121,19 @@ export async function GET(request: NextRequest) {
 
 const DEVICE_COUNT = 3;
 const MAX_CHANGES = 50;
-const ELEMENT_KINDS: ReadonlySet<string> = new Set(["heading", "text", "button", "image"]);
-const SET_KEYS = ["text", "backgroundColor", "src", "alt"] as const;
+const ELEMENT_KINDS: ReadonlySet<string> = new Set(["heading", "text", "button", "image", "block"]);
+const SET_KEYS = [
+  "text",
+  "backgroundColor",
+  "src",
+  "alt",
+  "color",
+  "fontSize",
+  "fontWeight",
+  "textAlign",
+  "padding",
+  "margin",
+] as const;
 
 /**
  * One ACTIVE experiment as a v4 `ExperimentConfig`, or null when the row cannot be served.
@@ -220,6 +231,7 @@ function projectChanges(stored: unknown): VisualChange[] {
       const value = set[key];
       if (typeof value === "string") values[key] = value;
     }
+    if (set["hidden"] === true) values.hidden = true;
     if (Object.keys(values).length === 0) continue;
 
     const change: VisualChange = { selector, kind: kind as VisualChange["kind"], set: values };

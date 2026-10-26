@@ -309,3 +309,85 @@ describe("applyChanges", () => {
     ).not.toThrow();
   });
 });
+
+describe("styles and hiding (block changes)", () => {
+  const style = (set: VisualChange["set"], tag = "section"): VisualChange => ({
+    selector: "#hero",
+    kind: "block",
+    fingerprint: { tag },
+    set,
+  });
+
+  it("sets every style key as its own CSS property, !important, and hides with display:none", () => {
+    const el = new FakeElement("section");
+    const change = style({
+      backgroundColor: "#1F3D2B",
+      color: "rgb(255, 255, 255)",
+      fontSize: "24px",
+      fontWeight: "700",
+      textAlign: "center",
+      padding: "16px 24px",
+      margin: "0 auto",
+      hidden: true,
+    });
+    expect(applyChange(asElement(el), change)).toBe(true);
+    const names = [
+      "background-color",
+      "color",
+      "font-size",
+      "font-weight",
+      "text-align",
+      "padding",
+      "margin",
+      "display",
+    ];
+    const props = Object.fromEntries(
+      names.map((name) => [
+        name,
+        el.style.getPropertyValue(name) + (el.style.getPropertyPriority(name) ? " !" : ""),
+      ]),
+    );
+    expect(props).toEqual({
+      "background-color": "#1F3D2B !",
+      color: "rgb(255, 255, 255) !",
+      "font-size": "24px !",
+      "font-weight": "700 !",
+      "text-align": "center !",
+      padding: "16px 24px !",
+      margin: "0 auto !",
+      display: "none !",
+    });
+    expect(isApplied(asElement(el), change)).toBe(true);
+  });
+
+  it("notices when the page drops a style it set, so it can re-apply", () => {
+    const el = new FakeElement("section");
+    const change = style({ fontSize: "24px" });
+    applyChange(asElement(el), change);
+    el.style.setProperty("font-size", "12px"); // the page's own script, without !important
+    expect(isApplied(asElement(el), change)).toBe(false);
+  });
+
+  it("refuses the whole change when any style value could reach beyond its property", () => {
+    for (const bad of [
+      { padding: "1px; background:url(https://evil.test/x)" },
+      { margin: "expression(alert(1))" },
+      { fontSize: "12px !important" },
+      { textAlign: 'center"' },
+      { color: "red" },
+      { fontWeight: "x".repeat(65) },
+    ] as VisualChange["set"][]) {
+      const el = new FakeElement("section");
+      expect(isValidChange(style({ ...bad, fontSize: bad.fontSize ?? "24px" }))).toBe(false);
+      expect(applyChange(asElement(el), style({ ...bad, fontSize: bad.fontSize ?? "24px" }))).toBe(
+        false,
+      );
+      expect(el.style.getPropertyValue("font-size")).toBe("");
+    }
+  });
+
+  it("accepts a change that only hides, and nothing but `true` for hidden", () => {
+    expect(isValidChange(style({ hidden: true }))).toBe(true);
+    expect(isValidChange(style({ hidden: false } as unknown as VisualChange["set"]))).toBe(false);
+  });
+});

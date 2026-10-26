@@ -1,4 +1,4 @@
-import type { VisualChange } from "./contract";
+import type { VisualChange, VisualChangeSet } from "./contract";
 
 /**
  * Applying an A/B test's visual changes to the page.
@@ -21,7 +21,9 @@ import type { VisualChange } from "./contract";
  *
  *  - text is set with `textContent` (or `value` on an `<input>`), **never** `innerHTML`, so a
  *    change can only ever be text;
- *  - a colour must be `#rgb`, `#rrggbb`, `rgb()` or `rgba()`, so nothing else can reach a style;
+ *  - a colour must be `#rgb`, `#rrggbb`, `rgb()` or `rgba()`, and every other style value only
+ *    letters, digits, spaces, `.`, `%`, `#` and `-` — no `(`, `;`, `:` or quotes, so no `url()`,
+ *    no second declaration — each set as one property with `setProperty`;
  *  - an image must be an absolute `http:`/`https:` URL, so no `javascript:` or `data:` source;
  *  - a selector that does not parse, or resolves to a different tag than the change was made
  *    against, simply does not match;
@@ -58,6 +60,26 @@ export function isSafeImageUrl(value: unknown): value is string {
   }
 }
 
+/** The style keys a change may set, and the CSS property each one sets (`!important`). */
+export const STYLE_PROPS: [keyof VisualChangeSet, string][] = [
+  ["backgroundColor", "background-color"],
+  ["color", "color"],
+  ["fontSize", "font-size"],
+  ["fontWeight", "font-weight"],
+  ["textAlign", "text-align"],
+  ["padding", "padding"],
+  ["margin", "margin"],
+];
+
+const CSS_VALUE = /^[\w\s.%#-]{1,64}$/;
+
+/** A colour for the two colour keys; otherwise a value from the allow-listed characters. */
+export function isSafeStyle(key: keyof VisualChangeSet, value: unknown): boolean {
+  return key === "color" || key === "backgroundColor"
+    ? isSafeColor(value)
+    : typeof value === "string" && CSS_VALUE.test(value);
+}
+
 function isText(value: unknown, max: number): boolean {
   return value === undefined || (typeof value === "string" && value.length <= max);
 }
@@ -65,14 +87,18 @@ function isText(value: unknown, max: number): boolean {
 /** True when every value a change sets is acceptable, and it sets at least one. */
 export function isValidChange(change: VisualChange): boolean {
   const set = change.set || {};
+  let any =
+    set.text !== undefined || set.src !== undefined || set.alt !== undefined || set.hidden === true;
+  for (const [key] of STYLE_PROPS) {
+    if (set[key] === undefined) continue;
+    if (!isSafeStyle(key, set[key])) return false;
+    any = true;
+  }
   return (
-    (set.text !== undefined ||
-      set.backgroundColor !== undefined ||
-      set.src !== undefined ||
-      set.alt !== undefined) &&
+    any &&
+    (set.hidden === undefined || set.hidden === true) &&
     isText(set.text, MAX_TEXT) &&
     isText(set.alt, MAX_ALT) &&
-    (set.backgroundColor === undefined || isSafeColor(set.backgroundColor)) &&
     (set.src === undefined || isSafeImageUrl(set.src))
   );
 }
@@ -108,9 +134,11 @@ export function applyChange(el: Element, change: VisualChange): boolean {
       else if (el.textContent !== set.text) el.textContent = set.text;
     }
 
-    if (set.backgroundColor !== undefined) {
-      (el as HTMLElement).style.setProperty("background-color", set.backgroundColor, "important");
+    const style = (el as HTMLElement).style;
+    for (const [key, prop] of STYLE_PROPS) {
+      if (set[key] !== undefined) style.setProperty(prop, set[key] as string, "important");
     }
+    if (set.hidden) style.setProperty("display", "none", "important");
 
     if (set.src !== undefined || set.alt !== undefined) {
       const img = imageOf(el);
@@ -144,12 +172,11 @@ export function isApplied(el: Element, change: VisualChange): boolean {
       const current = tagOf(el) === "input" ? (el as HTMLInputElement).value : el.textContent;
       if (current !== set.text) return false;
     }
-    if (
-      set.backgroundColor !== undefined &&
-      (el as HTMLElement).style.getPropertyPriority("background-color") !== "important"
-    ) {
-      return false;
+    const style = (el as HTMLElement).style;
+    for (const [key, prop] of STYLE_PROPS) {
+      if (set[key] !== undefined && style.getPropertyPriority(prop) !== "important") return false;
     }
+    if (set.hidden && style.getPropertyPriority("display") !== "important") return false;
     if (set.src !== undefined || set.alt !== undefined) {
       const img = imageOf(el);
       if (!img) return false;

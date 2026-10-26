@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isBoxValue, isFontSize, isFontWeight, isTextAlign } from "@/lib/style-values";
+
 /**
  * A/B test visual changes — what the visual editor saves into `ExperimentVariant.changes`
  * (spec §4.4), stored as `{ schemaVersion: 1, changes: VisualChange[] }`.
@@ -31,7 +33,7 @@ const MAX_SRC = 2_048;
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const RGB = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)$/i;
 
-export const elementKindSchema = z.enum(["heading", "text", "button", "image"]);
+export const elementKindSchema = z.enum(["heading", "text", "button", "image", "block"]);
 
 const colorSchema = z
   .string()
@@ -54,12 +56,28 @@ const imageUrlSchema = z
   }, "Use an https:// image URL.");
 
 /** The values a change sets. At least one, each valid. */
+const styleValue = (check: (value: string) => boolean, message: string) =>
+  z.string().trim().max(64).refine(check, message);
+
 export const visualChangeSetSchema = z
   .object({
     text: z.string().max(MAX_TEXT, `Use ${MAX_TEXT} characters or fewer.`).optional(),
     backgroundColor: colorSchema.optional(),
     src: imageUrlSchema.optional(),
     alt: z.string().max(MAX_ALT, `Use ${MAX_ALT} characters or fewer.`).optional(),
+    color: colorSchema.optional(),
+    fontSize: styleValue(isFontSize, "Use a size like 24px, 1.5rem or 120%.").optional(),
+    fontWeight: styleValue(isFontWeight, "Use a weight from 100 to 900.").optional(),
+    textAlign: styleValue(isTextAlign, "Use left, center, right or justify.").optional(),
+    padding: styleValue(
+      (value) => isBoxValue(value, false),
+      "Use one to four sizes, like 16px or 16px 24px.",
+    ).optional(),
+    margin: styleValue(
+      (value) => isBoxValue(value, true),
+      "Use one to four sizes or auto, like 0 auto.",
+    ).optional(),
+    hidden: z.literal(true).optional(),
   })
   .strict();
 
@@ -73,10 +91,28 @@ const originalSchema = z
       .max(MAX_SRC * 2)
       .optional(),
     alt: z.string().max(5_000).optional(),
+    color: z.string().max(200).optional(),
+    fontSize: z.string().max(200).optional(),
+    fontWeight: z.string().max(200).optional(),
+    textAlign: z.string().max(200).optional(),
+    padding: z.string().max(200).optional(),
+    margin: z.string().max(200).optional(),
   })
   .strict();
 
-const SET_KEYS = ["text", "backgroundColor", "src", "alt"] as const;
+const SET_KEYS = [
+  "text",
+  "backgroundColor",
+  "src",
+  "alt",
+  "color",
+  "fontSize",
+  "fontWeight",
+  "textAlign",
+  "padding",
+  "margin",
+  "hidden",
+] as const;
 
 export const visualChangeSchema = z
   .object({
@@ -111,7 +147,13 @@ export const visualChangeSchema = z
     }
     // A value equal to the original is no change at all; the editor drops those itself, so one
     // arriving here means the client is out of step.
-    if (keys.every((key) => change.set[key] === change.original[key])) {
+    if (
+      keys.every(
+        (key) =>
+          key !== "hidden" &&
+          change.set[key] === change.original[key as keyof typeof change.original],
+      )
+    ) {
       ctx.addIssue({
         code: "custom",
         path: ["set"],

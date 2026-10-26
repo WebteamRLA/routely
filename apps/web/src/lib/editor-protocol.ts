@@ -35,7 +35,18 @@ export const EDITOR_MAX_TEXT = 2_000;
 export const EDITOR_MAX_ALT = 500;
 export const EDITOR_MAX_SRC = 2_048;
 
-const KINDS: ReadonlySet<string> = new Set(["heading", "text", "button", "image"]);
+const KINDS: ReadonlySet<string> = new Set(["heading", "text", "button", "image", "block"]);
+/** The style values an element reports and a change can set, besides text and image fields. */
+export const STYLE_KEYS = [
+  "backgroundColor",
+  "color",
+  "fontSize",
+  "fontWeight",
+  "textAlign",
+  "padding",
+  "margin",
+] as const;
+export type StyleKey = (typeof STYLE_KEYS)[number];
 const TAG = /^[a-z][a-z0-9-]*$/i;
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
 const RGB = /^rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)$/i;
@@ -129,13 +140,22 @@ export function readDescriptor(value: unknown): ElementDescriptor | null {
   if (fpSrc !== undefined) out.fingerprint.src = fpSrc;
 
   const text = cap(now.text, 20_000);
-  const backgroundColor = cap(now.backgroundColor, 200);
   const src = cap(now.src, EDITOR_MAX_SRC * 2);
   const alt = cap(now.alt, 5_000);
   if (text !== undefined) out.current.text = text;
-  if (backgroundColor !== undefined) out.current.backgroundColor = backgroundColor;
   if (src !== undefined) out.current.src = src;
   if (alt !== undefined) out.current.alt = alt;
+  for (const key of STYLE_KEYS) {
+    const v = cap(now[key], 200);
+    if (v !== undefined) out.current[key] = v;
+  }
+  const crumbs = value.crumbs;
+  if (Array.isArray(crumbs)) {
+    out.crumbs = crumbs
+      .slice(0, 5)
+      .map((crumb) => (typeof crumb === "string" ? crumb.slice(0, 40) : ""))
+      .filter(Boolean);
+  }
   return out;
 }
 
@@ -205,11 +225,13 @@ export function toWireChanges(changes: readonly VisualChange[]): WireChange[] {
 
 // --- Editing ----------------------------------------------------------------------------------
 
-export type EditKey = "text" | "backgroundColor" | "src" | "alt";
+export type EditKey = "text" | "src" | "alt" | StyleKey | "hidden";
 
-/** "Heading" / "Text" / "Button" / "Image" — the panel's eyebrow. */
+/** "Heading" / "Text" / "Button" / "Image" / "Block" — the panel's eyebrow. */
 export function kindLabel(kind: ElementKind): string {
-  return { heading: "Heading", text: "Text", button: "Button", image: "Image" }[kind];
+  return { heading: "Heading", text: "Text", button: "Button", image: "Image", block: "Block" }[
+    kind
+  ];
 }
 
 export function changeFor(
@@ -240,23 +262,25 @@ export function editChange(
   changes: readonly VisualChange[],
   element: ElementDescriptor,
   key: EditKey,
-  value: string | undefined,
+  /** `hidden` takes `true` (or `undefined` to show the element again); every other key a string. */
+  value: string | true | undefined,
   makeId: () => string = newChangeId,
 ): readonly VisualChange[] {
   const existing = changeFor(changes, element.selector);
   const original: VisualChange["original"] = existing
     ? existing.original
     : Object.fromEntries(
-        (["text", "backgroundColor", "src", "alt"] as const)
+        (["text", "src", "alt", ...STYLE_KEYS] as const)
           .filter((k) => element.current[k] !== undefined)
           .map((k) => [k, element.current[k]]),
       );
 
   const set: VisualChange["set"] = { ...(existing?.set ?? {}) };
-  const clears =
-    value === undefined || value === (original[key] ?? (key === "text" ? "" : undefined));
+  const before = key === "hidden" ? undefined : original[key];
+  const clears = value === undefined || value === (before ?? (key === "text" ? "" : undefined));
   if (clears) delete set[key];
-  else set[key] = value;
+  else if (key === "hidden") set.hidden = true;
+  else if (typeof value === "string") set[key] = value;
 
   if (JSON.stringify(set) === JSON.stringify(existing?.set ?? {})) return changes;
   if (Object.keys(set).length === 0) return removeChange(changes, element.selector);

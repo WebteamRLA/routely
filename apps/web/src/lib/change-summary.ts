@@ -11,17 +11,32 @@
  * Pure and dependency-free, so client components can use it too.
  */
 
-export type ChangeKind = "heading" | "text" | "button" | "image";
+export type ChangeKind = "heading" | "text" | "button" | "image" | "block";
+
+/** The string values a change can set, in the order a description names them. */
+const STRING_KEYS = [
+  "text",
+  "backgroundColor",
+  "src",
+  "alt",
+  "color",
+  "fontSize",
+  "fontWeight",
+  "textAlign",
+  "padding",
+  "margin",
+] as const;
+type StringKey = (typeof STRING_KEYS)[number];
 
 /** The part of a stored change a description needs. */
 export interface DescribableChange {
   kind: ChangeKind;
   /** The editor's element label ("Hero heading"); optional. */
   label?: string;
-  set: { text?: string; backgroundColor?: string; src?: string; alt?: string };
+  set: Partial<Record<StringKey, string>> & { hidden?: true };
 }
 
-const KINDS: ReadonlySet<string> = new Set(["heading", "text", "button", "image"]);
+const KINDS: ReadonlySet<string> = new Set(["heading", "text", "button", "image", "block"]);
 
 /** Longest quoted text a description shows before eliding it. */
 export const SUMMARY_TEXT_MAX = 80;
@@ -45,10 +60,11 @@ export function readStoredChanges(stored: unknown): DescribableChange[] {
     if (!isRecord(set)) continue;
 
     const values: DescribableChange["set"] = {};
-    for (const key of ["text", "backgroundColor", "src", "alt"] as const) {
+    for (const key of STRING_KEYS) {
       const value = set[key];
       if (typeof value === "string") values[key] = value;
     }
+    if (set["hidden"] === true) values.hidden = true;
     if (Object.keys(values).length === 0) continue;
 
     const label = typeof item["label"] === "string" ? item["label"].trim() : "";
@@ -75,6 +91,8 @@ function subject(change: DescribableChange): string {
       return change.set.text !== undefined ? "Button text" : "Button";
     case "image":
       return "Image";
+    case "block":
+      return "Block";
   }
 }
 
@@ -87,6 +105,13 @@ export function describeChange(change: DescribableChange): string {
   }
   if (change.set.src !== undefined) parts.push("new image");
   if (change.set.alt !== undefined) parts.push(`alt text “${clip(change.set.alt)}”`);
+  if (change.set.color !== undefined) parts.push(`text colour ${change.set.color.trim()}`);
+  if (change.set.fontSize !== undefined) parts.push(`size ${change.set.fontSize.trim()}`);
+  if (change.set.fontWeight !== undefined) parts.push(`weight ${change.set.fontWeight.trim()}`);
+  if (change.set.textAlign !== undefined) parts.push(`aligned ${change.set.textAlign.trim()}`);
+  if (change.set.padding !== undefined) parts.push(`padding ${change.set.padding.trim()}`);
+  if (change.set.margin !== undefined) parts.push(`margin ${change.set.margin.trim()}`);
+  if (change.set.hidden) parts.push("hidden");
   return `${subject(change)}: ${parts.join(", ")}`;
 }
 

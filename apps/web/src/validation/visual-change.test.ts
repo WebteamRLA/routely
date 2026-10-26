@@ -128,3 +128,59 @@ describe("draft and paused-edit schemas", () => {
     expect(pausedEditSchema.safeParse({ trafficAllocation: 0 }).success).toBe(false);
   });
 });
+
+describe("visualChangeSchema — blocks, styles and hiding", () => {
+  const block = {
+    id: "c9",
+    selector: "body > section:nth-of-type(1)",
+    kind: "block" as const,
+    label: "Section",
+    fingerprint: { tag: "section" },
+    original: { backgroundColor: "rgb(19, 33, 61)", color: "rgb(255, 255, 255)", padding: "0px" },
+  };
+
+  it("accepts a section restyled and a block hidden", () => {
+    const styled = {
+      ...block,
+      set: {
+        backgroundColor: "#1F3D2B",
+        color: "#FFFFFF",
+        fontSize: "1.5rem",
+        fontWeight: "700",
+        textAlign: "center",
+        padding: "48px 24px",
+        margin: "0 auto",
+      },
+    };
+    expect(visualChangeSchema.safeParse(styled).success).toBe(true);
+    expect(visualChangeSchema.safeParse({ ...block, set: { hidden: true } }).success).toBe(true);
+  });
+
+  it("refuses style values the editor would never produce", () => {
+    for (const set of [
+      { fontSize: "12px; background:url(x)" },
+      { fontSize: "-4px" },
+      { fontWeight: "750" },
+      { textAlign: "middle" },
+      { padding: "1px 2px 3px 4px 5px" },
+      { padding: "-8px" },
+      { margin: "calc(1px + 2px)" },
+      { color: "red" },
+      { hidden: false },
+    ]) {
+      expect(visualChangeSchema.safeParse({ ...block, set }).success, JSON.stringify(set)).toBe(
+        false,
+      );
+    }
+    // A negative margin is a real layout tool; a negative padding is not valid CSS.
+    expect(visualChangeSchema.safeParse({ ...block, set: { margin: "-8px 0" } }).success).toBe(
+      true,
+    );
+  });
+
+  it("still refuses a style change equal to the original", () => {
+    expect(
+      visualChangeSchema.safeParse({ ...block, set: { color: "rgb(255, 255, 255)" } }).success,
+    ).toBe(false);
+  });
+});

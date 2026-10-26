@@ -153,7 +153,9 @@ export function LiveVisualEditor({
       },
       onSelect: (el) => {
         if (!canEditRef.current) return;
-        if (el.kind === "button") remember(el.current.backgroundColor);
+        // The page's own colours become the panel's swatches.
+        remember(el.current.backgroundColor);
+        remember(el.current.color);
         setError(null);
         setSelected(el);
       },
@@ -192,7 +194,7 @@ export function LiveVisualEditor({
     setHistory((h) => [...h, draft].slice(-HISTORY));
     setDraft([...next]);
   };
-  const edit = (key: EditKey, value: string | undefined) => {
+  const edit = (key: EditKey, value: string | true | undefined) => {
     if (selected && canEdit) commit(editChange(draft, selected, key, value));
   };
   const revert = (selector: string) => {
@@ -375,6 +377,7 @@ export function LiveVisualEditor({
                 onEdit={edit}
                 onReset={() => revert(selected.selector)}
                 onClose={() => setSelected(null)}
+                onSelectParent={(depth) => send({ type: "routely:select-parent", depth })}
               />
             ) : (
               <div className="flex flex-col gap-2.5 border-b border-[#EEF0F3] p-[18px]">

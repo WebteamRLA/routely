@@ -79,3 +79,18 @@ describe("changeSummaries", () => {
     ).toEqual(["Heading: “One”", "Button text: “Two”"]);
   });
 });
+
+describe("describing block and style changes", () => {
+  it("names each style a change sets, and hiding", () => {
+    expect(
+      describeChange({
+        kind: "block",
+        label: "Section",
+        set: { backgroundColor: "#1F3D2B", color: "#FFFFFF", fontSize: "24px", hidden: true },
+      }),
+    ).toBe("Section: background #1F3D2B, text colour #FFFFFF, size 24px, hidden");
+    expect(
+      changeSummaries([{ kind: "block", set: { padding: "48px 24px", textAlign: "center" } }]),
+    ).toEqual(["Block: aligned center, padding 48px 24px"]);
+  });
+});

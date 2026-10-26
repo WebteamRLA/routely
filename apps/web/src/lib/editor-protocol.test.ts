@@ -208,3 +208,49 @@ describe("values", () => {
     expect(isEditorImageUrl("https://a.com/" + "x".repeat(2048))).toBe(false);
   });
 });
+
+describe("blocks, breadcrumbs and styles", () => {
+  const section: ElementDescriptor = {
+    selector: "body > section:nth-of-type(2)",
+    kind: "block",
+    label: "Section",
+    fingerprint: { tag: "section" },
+    current: {
+      backgroundColor: "rgb(19, 33, 61)",
+      color: "rgb(255, 255, 255)",
+      fontSize: "16px",
+      fontWeight: "400",
+      textAlign: "center",
+      padding: "0px",
+      margin: "0px",
+    },
+    textEditable: false,
+    crumbs: ["Group", "Main"],
+  };
+
+  it("reads a block descriptor with its styles and breadcrumb, capped", () => {
+    const read = readDescriptor({ ...section, crumbs: ["Group", 7, "x".repeat(80)] });
+    expect(read?.kind).toBe("block");
+    expect(read?.current).toEqual(section.current);
+    expect(read?.crumbs).toEqual(["Group", "x".repeat(40)]);
+  });
+
+  it("restyles and hides a block as changes the server accepts", () => {
+    const styled = editChange([], section, "backgroundColor", "#1F3D2B", () => "c1");
+    const hidden = editChange(styled, section, "hidden", true, () => "c2");
+    expect(hidden).toHaveLength(1);
+    expect(hidden[0]).toMatchObject({
+      kind: "block",
+      original: { backgroundColor: "rgb(19, 33, 61)", padding: "0px" },
+      set: { backgroundColor: "#1F3D2B", hidden: true },
+    });
+    expect(visualChangeSchema.safeParse(hidden[0]).success).toBe(true);
+  });
+
+  it("drops a style set back to its original, and showing a hidden block again", () => {
+    const one = editChange([], section, "textAlign", "left", () => "c1");
+    expect(editChange(one, section, "textAlign", "center", () => "c2")).toEqual([]);
+    const hid = editChange([], section, "hidden", true, () => "c3");
+    expect(editChange(hid, section, "hidden", undefined, () => "c4")).toEqual([]);
+  });
+});

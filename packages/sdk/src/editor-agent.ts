@@ -20,7 +20,9 @@ import type { EditorContext } from "./editor-bridge";
  * What it does, all of it driven by the app (`contract.ts` documents the protocol):
  *
  *  - **edit** mode: outlines the element under the pointer (`hover`), and on click reports it
- *    (`select`) instead of letting the page act on the click.
+ *    (`select`) instead of letting the page act on the click. Any element can be selected — what
+ *    is not a heading, text, button or image is a `block` (a section, a group) — and
+ *    `select-parent` climbs to an ancestor, Gutenberg-style, with the ancestors named in `crumbs`.
  *  - **preview**: restores the page to how it loaded, then applies the change set with the very
  *    `applyChange` visitors get, and reports which changes found their element (`applied`).
  *  - **highlight**: outlines the element a change in the app's list points at.
@@ -73,7 +75,37 @@ const KIND_LABEL: Record<ElementKind, string> = {
   text: "Text",
   button: "Button",
   image: "Image",
+  block: "Block",
 };
+
+/** How many ancestors a breadcrumb names. */
+const MAX_CRUMBS = 5;
+
+/** A block's name for its label and the breadcrumb: "Section", "List", "Group". */
+const BLOCK_NAMES: Record<string, string> = {
+  section: "Section",
+  header: "Header",
+  footer: "Footer",
+  nav: "Navigation",
+  main: "Main",
+  article: "Article",
+  aside: "Sidebar",
+  form: "Form",
+  ul: "List",
+  ol: "List",
+  li: "List item",
+  a: "Link",
+  p: "Paragraph",
+  img: "Image",
+  button: "Button",
+  figure: "Figure",
+  table: "Table",
+};
+
+function blockName(el: Element): string {
+  const tag = tagOf(el);
+  return HEADINGS.test(tag) ? "Heading" : BLOCK_NAMES[tag] || "Group";
+}
 
 const tagOf = (el: Element) => el.tagName.toLowerCase();
 const clean = (text: string | null | undefined) => (text || "").replace(/\s+/g, " ").trim();
@@ -140,7 +172,29 @@ export function pick(start: Element | null): { el: Element; kind: ElementKind } 
   for (const el of chain) {
     if (TEXT_TAGS.has(tagOf(el)) && hasOwnText(el)) return { el, kind: "text" };
   }
-  return null;
+  // Anything else — a section's background, a group, a list — is selectable as a block.
+  return { el: first, kind: "block" };
+}
+
+/** The kind of an element reached by climbing (`select-parent`), not by pointing. */
+export function kindOf(el: Element): ElementKind {
+  const tag = tagOf(el);
+  if (isButtonLike(el)) return "button";
+  if (tag === "img") return "image";
+  if (HEADINGS.test(tag)) return "heading";
+  if (TEXT_TAGS.has(tag) && hasOwnText(el) && el.children.length === 0) return "text";
+  return "block";
+}
+
+/** `el`'s ancestors, nearest first, up to `MAX_CRUMBS`, stopping below `body`. */
+export function ancestors(el: Element): Element[] {
+  const out: Element[] = [];
+  for (let p = el.parentElement; p && out.length < MAX_CRUMBS; p = p.parentElement) {
+    const tag = tagOf(p);
+    if (tag === "body" || tag === "html") break;
+    out.push(p);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -208,15 +262,30 @@ function textOf(el: Element): string {
   return clean(raw).slice(0, MAX_TEXT);
 }
 
-function backgroundOf(el: Element, win: Window): string | undefined {
+const TRANSPARENT = /rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/;
+
+/** The element's current styles, as the panel shows them and a change stores as `original`. */
+function stylesOf(el: Element, win: Window): VisualChangeSet {
+  const out: VisualChangeSet = {};
   try {
-    const bg = win.getComputedStyle(el).backgroundColor;
-    return bg && bg !== "transparent" && !/rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)/.test(bg)
-      ? bg
-      : undefined;
+    const cs = win.getComputedStyle(el);
+    if (
+      cs.backgroundColor &&
+      cs.backgroundColor !== "transparent" &&
+      !TRANSPARENT.test(cs.backgroundColor)
+    ) {
+      out.backgroundColor = cs.backgroundColor;
+    }
+    if (cs.color) out.color = cs.color;
+    if (cs.fontSize) out.fontSize = cs.fontSize;
+    if (cs.fontWeight) out.fontWeight = cs.fontWeight;
+    if (cs.textAlign) out.textAlign = cs.textAlign;
+    if (cs.padding) out.padding = cs.padding;
+    if (cs.margin) out.margin = cs.margin;
   } catch {
-    return undefined;
+    // A detached node: no styles to report.
   }
+  return out;
 }
 
 /** What the app needs to know about `el`; null when no selector can find it again. */
@@ -224,11 +293,13 @@ export function describe(el: Element, kind: ElementKind, win: Window): ElementDe
   const selector = selectorFor(el, win.document);
   if (!selector) return null;
   const tag = tagOf(el);
-  const current: VisualChangeSet = {};
+  const current: VisualChangeSet = stylesOf(el, win);
   const fingerprint: ElementDescriptor["fingerprint"] = { tag };
   let summary: string;
 
-  if (kind === "image") {
+  if (kind === "block") {
+    summary = "";
+  } else if (kind === "image") {
     const img = el as HTMLImageElement;
     const src = img.currentSrc || img.src || "";
     if (src) current.src = fingerprint.src = src;
@@ -238,22 +309,22 @@ export function describe(el: Element, kind: ElementKind, win: Window): ElementDe
     const text = textOf(el);
     current.text = fingerprint.text = text;
     summary = text;
-    if (kind === "button") {
-      const bg = backgroundOf(el, win);
-      if (bg) current.backgroundColor = bg;
-    }
   }
 
   if (summary.length > MAX_LABEL_TEXT) summary = summary.slice(0, MAX_LABEL_TEXT - 1) + "…";
   return {
     selector,
     kind,
-    label: KIND_LABEL[kind] + (summary ? " · " + summary : ""),
+    label: (kind === "block" ? blockName(el) : KIND_LABEL[kind]) + (summary ? " · " + summary : ""),
     fingerprint,
     current,
     // Replacing the text of an element that holds more than text (an icon, nested markup)
     // would remove the rest, so the app doesn't offer a text change for it.
-    textEditable: tag === "input" || el.children.length === 0,
+    // A block's text is edited by selecting the text inside it; an empty block (an overlay, a
+    // spacer) has no text to offer at all.
+    textEditable:
+      kind !== "image" && kind !== "block" && (tag === "input" || el.children.length === 0),
+    crumbs: ancestors(el).map(blockName),
   };
 }
 
@@ -263,23 +334,20 @@ export function describe(el: Element, kind: ElementKind, win: Window): ElementDe
 
 interface Snapshot {
   el: Element;
-  html: string;
+  /** Only for an element holding nothing but text — the only kind whose text can change.
+   * Rewriting a section's HTML would rebuild the customer's page beneath it. */
+  html?: string;
   value?: string;
-  bg: string;
-  bgPriority: string;
+  /** The whole inline `style` attribute: every style a change sets lives there. */
+  style: string | null;
   img?: { el: Element; attrs: Record<string, string | null>; sources: [Element, Node | null][] };
 }
 
 const IMG_ATTRS = ["src", "srcset", "sizes", "alt"];
 
 export function snapshot(el: Element): Snapshot {
-  const style = (el as HTMLElement).style;
-  const shot: Snapshot = {
-    el,
-    html: el.innerHTML,
-    bg: style ? style.getPropertyValue("background-color") : "",
-    bgPriority: style ? style.getPropertyPriority("background-color") : "",
-  };
+  const shot: Snapshot = { el, style: el.getAttribute("style") };
+  if (el.children.length === 0) shot.html = el.innerHTML;
   if (tagOf(el) === "input") shot.value = (el as HTMLInputElement).value;
   const img = tagOf(el) === "img" ? el : el.querySelector("img");
   if (img) {
@@ -298,13 +366,10 @@ export function snapshot(el: Element): Snapshot {
 export function restore(shot: Snapshot): void {
   try {
     const { el } = shot;
-    if (el.innerHTML !== shot.html) el.innerHTML = shot.html;
+    if (shot.html !== undefined && el.innerHTML !== shot.html) el.innerHTML = shot.html;
     if (shot.value !== undefined) (el as HTMLInputElement).value = shot.value;
-    const style = (el as HTMLElement).style;
-    if (style) {
-      if (shot.bg) style.setProperty("background-color", shot.bg, shot.bgPriority);
-      else style.removeProperty("background-color");
-    }
+    if (shot.style === null) el.removeAttribute("style");
+    else if (el.getAttribute("style") !== shot.style) el.setAttribute("style", shot.style);
     if (shot.img) {
       const { el: img, attrs, sources } = shot.img;
       for (const name of IMG_ATTRS) {
@@ -480,6 +545,14 @@ export function startAgent(win: Win = window as Win): boolean {
         redraw();
       } else if (data.type === "routely:highlight") {
         highlight(typeof data.selector === "string" ? data.selector : null);
+      } else if (data.type === "routely:select-parent" && mode === "edit" && selected) {
+        const up = ancestors(selected)[Math.floor(Number(data.depth)) - 1];
+        const element = up ? describe(up, kindOf(up), win) : null;
+        if (up && element) {
+          selected = up;
+          redraw();
+          post({ type: "routely:select", token: ctx.token, element });
+        }
       }
     } catch {
       // Never into the page.
