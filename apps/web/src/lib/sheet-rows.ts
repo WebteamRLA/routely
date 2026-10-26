@@ -5,7 +5,7 @@
  * several small tables rather than one interleaved list:
  *
  *     Experiment | Homepage hero | Type     | A/B test    | Status              | Running | Created     ← green
- *     Date (UTC) | Variant       | Visitors | Conversions | Conversion Rate (%) |         | 2026-10-26
+ *     Date (UTC) | Variant       | Visitors | Conversions | Conversion Rate |         | 2026-10-26
  *     2026-10-26 | Control       | 7        | 4           | 57.1
  *     2026-10-26 | Variant A     | …
  *     (blank)
@@ -34,15 +34,16 @@
  * `Date (UTC)` says which timezone the day belongs to, because the boundary is not the
  * customer's local midnight and a bare `Date` would imply it was.
  *
- * `Conversion Rate (%)` is a percentage, not a fraction: a spreadsheet reader sees `7.3` and
- * reads 7.3%, whereas `0.073` invites its own percentage formatting on top.
+ * `Conversion Rate` holds a percentage, not a fraction: a spreadsheet reader sees `7.3` and reads
+ * 7.3%, whereas `0.073` invites its own percentage formatting on top. (It was headed
+ * `Conversion Rate`; the customer asked for the plain heading on 2026-10-26.)
  */
 export const SHEET_COLUMNS = [
   "Date (UTC)",
   "Variant",
   "Visitors",
   "Conversions",
-  "Conversion Rate (%)",
+  "Conversion Rate",
 ] as const;
 
 /** How many columns a block's data rows occupy. */

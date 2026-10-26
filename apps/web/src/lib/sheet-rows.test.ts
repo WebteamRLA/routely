@@ -12,16 +12,16 @@ import {
 } from "@/lib/sheet-rows";
 
 describe("headerRow", () => {
-  it("names the timezone and the unit", () => {
-    // Both are the difference between a number a customer can trust and one they have to guess
-    // at: the day boundary is UTC, and the rate is a percentage rather than a fraction.
+  it("names the timezone, and heads the rate plainly", () => {
+    // The day boundary is UTC, so the date says so. The rate column is "Conversion Rate" by the
+    // customer's choice; its values are still percentages (7.3 is 7.3%), never fractions.
     // The experiment is named by its block's title row, not repeated on every line.
     expect(headerRow()).toEqual([
       "Date (UTC)",
       "Variant",
       "Visitors",
       "Conversions",
-      "Conversion Rate (%)",
+      "Conversion Rate",
     ]);
   });
 
@@ -146,7 +146,7 @@ describe("buildSheetSections", () => {
         "Variant",
         "Visitors",
         "Conversions",
-        "Conversion Rate (%)",
+        "Conversion Rate",
         "",
         "2026-10-20",
       ]),
@@ -159,7 +159,7 @@ describe("buildSheetSections", () => {
         "Variant",
         "Visitors",
         "Conversions",
-        "Conversion Rate (%)",
+        "Conversion Rate",
         "",
         "2026-10-22",
       ]),

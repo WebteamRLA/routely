@@ -459,7 +459,12 @@ function cellData(value: SheetCell | undefined, highlighted: boolean) {
         : { userEnteredValue: { stringValue: value } }),
     // An empty format under the field mask clears the fill, so a row that is no longer a title
     // (the blocks move as days are added) loses its green.
-    userEnteredFormat: highlighted ? { backgroundColor: TITLE_FILL } : {},
+    // Everything left-aligned, numbers included (Sheets right-aligns numbers by default), so each
+    // column reads as one straight edge.
+    userEnteredFormat: {
+      horizontalAlignment: "LEFT",
+      ...(highlighted ? { backgroundColor: TITLE_FILL } : {}),
+    },
   };
 }
 
@@ -514,7 +519,8 @@ export async function overwriteWorksheet(
                 endColumnIndex: CLEARED_WIDTH,
               },
               rows: data,
-              fields: "userEnteredValue,userEnteredFormat.backgroundColor",
+              fields:
+                "userEnteredValue,userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment",
             },
           },
         ],

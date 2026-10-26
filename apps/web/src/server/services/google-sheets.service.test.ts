@@ -60,26 +60,30 @@ describe("overwriteWorksheet", () => {
     const { update } = await overwrite(
       [
         ["Experiment", "A", "Type", "A/B test", "Status", "Running", "Created"],
-        [
-          "Date (UTC)",
-          "Variant",
-          "Visitors",
-          "Conversions",
-          "Conversion Rate (%)",
-          "",
-          "2026-10-26",
-        ],
+        ["Date (UTC)", "Variant", "Visitors", "Conversions", "Conversion Rate", "", "2026-10-26"],
         ["2026-10-26", "Control", 7, 4, 57.1],
       ],
       0,
       [0],
     );
-    expect(update.fields).toBe("userEnteredValue,userEnteredFormat.backgroundColor");
+    expect(update.fields).toBe(
+      "userEnteredValue,userEnteredFormat.backgroundColor,userEnteredFormat.horizontalAlignment",
+    );
     const filled = update.rows.map(
       (row) => row.values.filter((c) => c.userEnteredFormat?.backgroundColor).length,
     );
     expect(filled).toEqual([7, 0, 0]); // the 7 title columns; column H (cleared) is not filled
     expect(update.rows[2]!.values[2]!.userEnteredValue).toEqual({ numberValue: 7 });
+  });
+
+  it("left-aligns every cell it writes, numbers included", async () => {
+    const { update } = await overwrite([["2026-10-26", "Control", 7, 4, 57.1]], 2, []);
+    const aligned = update.rows.flatMap((row) =>
+      row.values.map(
+        (c) => (c.userEnteredFormat as { horizontalAlignment?: string })?.horizontalAlignment,
+      ),
+    );
+    expect(new Set(aligned)).toEqual(new Set(["LEFT"]));
   });
 
   it("clears rows and columns an earlier, larger write left behind", async () => {

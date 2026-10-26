@@ -9,7 +9,7 @@ per day — with a blank row between blocks, so several tests on one project nev
 | | | | | | | |
 | --- | --- | --- | --- | --- | --- | --- |
 | **Experiment** | **Pricing redesign** | **Type** | **Split URL** | **Status** | **Running** | **Created** |
-| Date (UTC) | Variant | Visitors | Conversions | Conversion Rate (%) | | 2026-09-20 |
+| Date (UTC) | Variant | Visitors | Conversions | Conversion Rate | | 2026-09-20 |
 | 2026-09-28 | Control | 412 | 30 | 7.3 | | |
 | 2026-09-28 | Variant 1 | 408 | 41 | 10 | | |
 | | | | | | | |
