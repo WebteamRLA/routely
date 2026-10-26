@@ -87,7 +87,7 @@ export default function PrivacyPolicyPage() {
                   "Projects: names and website domains.",
                   "Experiments: names, page URLs, variants and the visual changes you make, traffic settings, goals and an activity log of who did what.",
                   "Team: the people in your workspace, their roles, and the email addresses of people you invite.",
-                  "Installation checks: when you ask us to verify a page, we fetch that public page and record whether the snippet was found.",
+                  "Installation checks: when you ask us to verify a page, we fetch that public page and record whether the snippet was found. To show each project's icon, we also fetch its public homepage and the favicon it declares.",
                 ]}
               />
               <H3>Google Sheets integration (optional)</H3>

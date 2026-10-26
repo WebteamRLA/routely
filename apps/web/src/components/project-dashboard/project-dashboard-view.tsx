@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
+import { ProjectAvatar } from "@/components/common/project-avatar";
 import { ConversionsChart, VisitorsChart } from "@/components/project-dashboard/charts";
 import { DeleteExperimentDialog } from "@/components/project-dashboard/delete-experiment-dialog";
 import { LaunchDialog } from "@/components/project-dashboard/launch-dialog";
@@ -447,13 +448,13 @@ export function ProjectDashboardView({
         </nav>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3.5">
-            <span
-              aria-hidden
-              className="inline-flex size-11 flex-[0_0_44px] items-center justify-center rounded-xl text-base font-bold max-[641px]:size-10 max-[641px]:basis-10"
-              style={{ background: project.color, color: project.ink }}
-            >
-              {project.initial}
-            </span>
+            <ProjectAvatar
+              id={project.id}
+              initial={project.initial}
+              color={project.color}
+              ink={project.ink}
+              className="size-11 flex-[0_0_44px] rounded-xl text-base font-bold max-[641px]:size-10 max-[641px]:basis-10"
+            />
             <div className="flex min-w-0 flex-col gap-0.5">
               <h1 className="m-0 text-xl leading-7 font-semibold tracking-[-0.01em] [overflow-wrap:anywhere] text-[#111827] max-[641px]:text-[22px]">
                 {project.name}

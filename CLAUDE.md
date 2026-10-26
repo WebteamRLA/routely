@@ -163,6 +163,7 @@ must be labelled as such wherever it appears.
 | `/api/auth/[...nextauth]` | — | Auth.js handlers (Google), Node runtime |
 | `/api/integrations/google/start` | — | **POST only.** Mints signed state (`workspaceId`, `returnTo`), redirects to Google |
 | `/api/integrations/google/callback` | — | Verifies state, exchanges the code, stores the workspace's grant |
+| `/api/favicon/[websiteId]` | — | **Session required**, members only (404 otherwise). The project's favicon for its tile: homepage `<link rel=icon>` via `safeFetch`, bitmaps only (no SVG — script-capable on our origin), type sniffed from bytes, `nosniff` + `sandbox` CSP |
 | `/api/editor/token` | — | **POST, JSON only, session required.** Issues a 30-min visual editor token |
 | `/api/cron/sheets-sync` | — | Daily 00:20 UTC. Requires `Authorization: Bearer $CRON_SECRET` |
 | `/api/cron/notifications` | — | Daily 00:40 UTC: result-ready backstop, tracking-stopped alerts, visitor-day retention. Same bearer rule |

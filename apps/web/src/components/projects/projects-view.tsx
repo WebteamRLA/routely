@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useTransition, type ReactNode
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { ProjectAvatar } from "@/components/common/project-avatar";
 import { DeleteProjectDialog } from "@/components/projects/delete-project-dialog";
 import { PixelSetupDialog } from "@/components/projects/pixel-setup-dialog";
 import { ProjectFormDialog } from "@/components/projects/project-form-dialog";
@@ -447,13 +448,13 @@ function ProjectRow({
   return (
     <div role="row" className={cn(ROW_GRID, "hover:bg-[#FAFBFC]")}>
       <div role="cell" className={cn("flex min-w-0 items-center gap-3", AREA.name)}>
-        <span
-          aria-hidden
-          className="inline-flex size-[34px] flex-none items-center justify-center rounded-lg text-[14px] font-bold"
-          style={{ background: p.color, color: p.ink }}
-        >
-          {p.initial}
-        </span>
+        <ProjectAvatar
+          id={p.id}
+          initial={p.initial}
+          color={p.color}
+          ink={p.ink}
+          className="size-[34px] flex-none rounded-lg text-[14px] font-bold"
+        />
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="truncate text-sm leading-5 font-semibold text-[#111827]">{p.name}</span>
           <span className="truncate text-[13px] leading-[18px] text-[#6B7280]">{p.domain}</span>

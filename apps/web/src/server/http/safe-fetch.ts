@@ -52,6 +52,8 @@ export interface SafeFetchOptions {
   allowPrivate?: boolean;
   /** Sent as `User-Agent`. */
   userAgent?: string;
+  /** Sent as `Accept`. Default: HTML. */
+  accept?: string;
 }
 
 export type SafeFetchFailure =
@@ -71,6 +73,8 @@ export type SafeFetchResult =
       finalUrl: string;
       contentType: string | null;
       body: string;
+      /** The same body undecoded, for binary responses (an image). */
+      bytes: Buffer;
       /** True when the body was cut off at `maxBytes`. */
       truncated: boolean;
       redirects: number;
@@ -88,6 +92,7 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_MAX_REDIRECTS = 3;
 const DEFAULT_USER_AGENT = "RoutelyInstallCheck/1 (+https://routely.app)";
+const DEFAULT_ACCEPT = "text/html,application/xhtml+xml";
 
 /** Thrown inside the lookup hook so the request fails with a recognisable cause. */
 class BlockedAddressError extends Error {
@@ -136,14 +141,20 @@ interface Hop {
   status: number;
   location: string | null;
   contentType: string | null;
-  body: string;
+  bytes: Buffer;
   truncated: boolean;
 }
 
 /** One request, no redirect following. Rejects with the socket/lookup error. */
 function requestOnce(
   url: URL,
-  options: { allowPrivate: boolean; userAgent: string; maxBytes: number; signal: AbortSignal },
+  options: {
+    allowPrivate: boolean;
+    userAgent: string;
+    accept: string;
+    maxBytes: number;
+    signal: AbortSignal;
+  },
 ): Promise<Hop> {
   return new Promise((resolve, reject) => {
     const send = url.protocol === "https:" ? httpsRequest : httpRequest;
@@ -156,7 +167,7 @@ function requestOnce(
         headers: {
           // Some hosts serve a different document, or none at all, without these.
           "User-Agent": options.userAgent,
-          Accept: "text/html,application/xhtml+xml",
+          Accept: options.accept,
           "Accept-Encoding": "gzip, deflate, br",
         },
         ...(options.allowPrivate ? {} : { lookup: guardedLookup() }),
@@ -168,7 +179,7 @@ function requestOnce(
 
         if (status >= 300 && status < 400) {
           response.resume();
-          resolve({ status, location, contentType, body: "", truncated: false });
+          resolve({ status, location, contentType, bytes: Buffer.alloc(0), truncated: false });
           return;
         }
 
@@ -189,7 +200,7 @@ function requestOnce(
             status,
             location,
             contentType,
-            body: Buffer.concat(chunks).toString("utf8"),
+            bytes: Buffer.concat(chunks),
             truncated,
           });
         };
@@ -268,6 +279,7 @@ export async function safeFetch(
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
   const allowPrivate = options.allowPrivate ?? false;
   const userAgent = options.userAgent ?? DEFAULT_USER_AGENT;
+  const accept = options.accept ?? DEFAULT_ACCEPT;
 
   let url: URL;
   try {
@@ -285,7 +297,7 @@ export async function safeFetch(
 
     let response: Hop;
     try {
-      response = await requestOnce(url, { allowPrivate, userAgent, maxBytes, signal });
+      response = await requestOnce(url, { allowPrivate, userAgent, accept, maxBytes, signal });
     } catch (error) {
       const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;
       if (cause instanceof BlockedAddressError || error instanceof BlockedAddressError) {
@@ -327,7 +339,8 @@ export async function safeFetch(
       status: response.status,
       finalUrl: url.href,
       contentType: response.contentType,
-      body: response.body,
+      body: response.bytes.toString("utf8"),
+      bytes: response.bytes,
       truncated: response.truncated,
       redirects: hop,
     };
