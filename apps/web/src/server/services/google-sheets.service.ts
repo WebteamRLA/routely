@@ -1,6 +1,6 @@
 import "server-only";
 
-import { SHEET_COLUMN_COUNT, type SheetCell, headerRow } from "@/lib/sheet-rows";
+import { SHEET_WIDTH, type SheetCell, headerRow } from "@/lib/sheet-rows";
 import { AppError, validationFailed } from "@/server/errors";
 import { spreadsheetIdSchema } from "@/validation/integration";
 
@@ -359,12 +359,12 @@ export async function resolveWorksheetTitle(
   return worksheet.title;
 }
 
-/** Column letter for a 1-based index. Only ever called for the six columns this feature writes. */
+/** Column letter for a 1-based index. Only ever called for the few columns this feature writes. */
 function columnLetter(index: number): string {
   return String.fromCharCode("A".charCodeAt(0) + index - 1);
 }
 
-const LAST_COLUMN = columnLetter(SHEET_COLUMN_COUNT);
+const LAST_COLUMN = columnLetter(SHEET_WIDTH);
 
 /**
  * Writes the header row if the worksheet does not already have one.
@@ -441,7 +441,8 @@ export async function ensureWorksheet(
 }
 
 /**
- * Overwrites a worksheet with a header and rows, in a single request.
+ * Overwrites a worksheet with `rows` — the whole tab, headers included (`buildSheetSections`), in a
+ * single request.
  *
  * `values.update`, not `append`: this tab shows *today*, and today changes. Appending would stack a
  * new copy of the same day every few seconds.
@@ -461,10 +462,9 @@ export async function overwriteWorksheet(
   rows: SheetCell[][],
   previousRowCount: number,
 ): Promise<{ rowsWritten: number }> {
-  const header = headerRow();
-  const body: SheetCell[][] = [header, ...rows];
+  const body: SheetCell[][] = [...rows];
 
-  const blank: SheetCell[] = Array.from({ length: SHEET_COLUMN_COUNT }, () => "");
+  const blank: SheetCell[] = Array.from({ length: SHEET_WIDTH }, () => "");
   for (let i = body.length; i < previousRowCount + 1; i += 1) body.push([...blank]);
 
   const range = a1Range(sheetTitle, `A1:${LAST_COLUMN}${Math.max(body.length, 1)}`);

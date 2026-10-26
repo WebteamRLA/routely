@@ -1,12 +1,23 @@
 # Integrations — Google Sheets
 
 Routely keeps a spreadsheet up to date with the last 30 days of results — **one spreadsheet per
-website**, refreshed within seconds of a visit or a conversion. One row per experiment arm per day:
+website**, refreshed within seconds of a visit or a conversion. The tab holds **one block per
+experiment** — a title row (name, type, status, creation date), the column headers, one row per arm
+per day — with a blank row between blocks, so several tests on one project never interleave
+(`lib/sheet-rows.ts` `buildSheetSections`):
 
-| Date (UTC) | Experiment | Variant | Visitors | Conversions | Conversion Rate (%) |
-| --- | --- | --- | --- | --- | --- |
-| 2026-09-28 | Pricing redesign | Control | 412 | 30 | 7.3 |
-| 2026-09-28 | Pricing redesign | Variant 1 | 408 | 41 | 10 |
+| | | | | | | | |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Experiment | Pricing redesign | Type | Split URL | Status | Running | Created | 2026-09-20 |
+| Date (UTC) | Variant | Visitors | Conversions | Conversion Rate (%) | | | |
+| 2026-09-28 | Control | 412 | 30 | 7.3 | | | |
+| 2026-09-28 | Variant 1 | 408 | 41 | 10 | | | |
+| | | | | | | | |
+| Experiment | Hero headline | Type | A/B test | Status | Paused | Created | 2026-09-22 |
+
+Blocks are ordered by experiment name, then creation date, which is what tells apart two experiments
+that share a name. Every row is padded to the full eight columns, because `values.update` leaves any
+cell it is not given untouched.
 
 Routely creates and owns **one tab**, called `Routely`, inside the spreadsheet the customer chooses.
 Nothing else in that file is read or touched. The tab is rewritten from the database on every

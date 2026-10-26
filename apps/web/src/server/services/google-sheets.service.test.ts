@@ -32,7 +32,7 @@ describe("overwriteWorksheet", () => {
       "token",
       SPREADSHEET_ID,
       "Routely",
-      [["2026-10-19", FORMULA, "Control", 10, 1, 10]],
+      [["Experiment", FORMULA, "Type", "A/B test", "Status", "Running", "Created", "2026-10-19"]],
       0,
     );
 
@@ -41,7 +41,8 @@ describe("overwriteWorksheet", () => {
     expect(url).toContain("valueInputOption=RAW");
     expect(url).not.toContain("USER_ENTERED");
     const sent = JSON.parse(String(init?.body)) as { values: unknown[][] };
-    expect(sent.values[1]?.[1]).toBe(FORMULA);
+    // The rows are the whole tab now (each block brings its own headers); nothing is prepended.
+    expect(sent.values[0]?.[1]).toBe(FORMULA);
   });
 });
 

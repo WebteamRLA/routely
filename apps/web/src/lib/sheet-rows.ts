@@ -1,6 +1,15 @@
 /**
- * Turns a day's per-arm figures into the literal cell values appended to a customer's
- * spreadsheet.
+ * Turns per-arm figures into the literal cell values written to a customer's spreadsheet.
+ *
+ * The tab is laid out **one block per experiment**, so a project running several tests reads as
+ * several small tables rather than one interleaved list:
+ *
+ *     Experiment | Homepage hero | Type | A/B test  | Status | Running | Created | 2026-10-26
+ *     Date (UTC) | Variant       | Visitors | Conversions | Conversion Rate (%)
+ *     2026-10-26 | Control       | 7        | 4           | 57.1
+ *     2026-10-26 | Variant A     | …
+ *     (blank)
+ *     Experiment | Pricing page  | Type | Split URL | …
  *
  * Pure and dependency-free so the exact bytes that reach Google can be asserted in a unit test
  * rather than inferred from a successful HTTP call.
@@ -18,10 +27,9 @@
  *   would show up in the sheet.
  */
 
-import type { UtcDayKey } from "@/lib/utc-day";
-
 /**
- * The columns, in order, exactly as they are written to the header row.
+ * The columns of an experiment's block, in order, exactly as written under its title row. The
+ * experiment itself is named by the title row, not repeated on every line.
  *
  * `Date (UTC)` says which timezone the day belongs to, because the boundary is not the
  * customer's local midnight and a bare `Date` would imply it was.
@@ -31,15 +39,21 @@ import type { UtcDayKey } from "@/lib/utc-day";
  */
 export const SHEET_COLUMNS = [
   "Date (UTC)",
-  "Experiment",
   "Variant",
   "Visitors",
   "Conversions",
   "Conversion Rate (%)",
 ] as const;
 
-/** How many columns a row occupies. Used to build the A1 range. */
+/** How many columns a block's data rows occupy. */
 export const SHEET_COLUMN_COUNT = SHEET_COLUMNS.length;
+
+/**
+ * How many columns the tab is written across: the title row's four label/value pairs. Every row is
+ * padded to this width, because `values.update` leaves cells it is not given untouched — a shorter
+ * row would keep whatever an earlier layout wrote to its right.
+ */
+export const SHEET_WIDTH = 8;
 
 /** A single cell. `""` is how a figure that does not exist is written — see `percentCell`. */
 export type SheetCell = string | number;
@@ -116,37 +130,91 @@ export interface DatedArmFigures extends DailyArmFigures {
   day: string;
 }
 
-/**
- * Rows spanning several days, ready to write.
- *
- * The caller's order is preserved — `getArmRowsByDay` returns oldest day first, with each day's
- * experiments together and control before its variants, which is the order a person reads a report
- * in. A spreadsheet's row order is the only grouping it has.
- */
-export function buildDatedSheetRows(figures: readonly DatedArmFigures[]): SheetCell[][] {
-  return figures.map((row) => [
-    row.day,
-    row.experimentName,
-    row.variantLabel,
-    row.assignedVisitors,
-    row.conversions,
-    percentCell(row.conversionRate),
-  ]);
+/** One arm-day, with what the block's title row says about its experiment. */
+export interface SectionArmFigures extends DatedArmFigures {
+  experimentId: string;
+  experimentType: "SPLIT_URL" | "AB_TEST";
+  experimentStatus: "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED";
+  /** `YYYY-MM-DD`, UTC — what tells apart two experiments that share a name. */
+  experimentCreated: string;
 }
 
+/** The labels the dashboard uses for the same things. */
+const TYPE_LABEL = { AB_TEST: "A/B test", SPLIT_URL: "Split URL" } as const;
+const STATUS_LABEL = {
+  DRAFT: "Draft",
+  ACTIVE: "Running",
+  PAUSED: "Paused",
+  COMPLETED: "Completed",
+} as const;
+
+/** What the tab says when no experiment had any activity in the window. */
+export const NO_ACTIVITY_NOTE = "No experiment activity in the last 30 days.";
+
+const padded = (row: SheetCell[]): SheetCell[] => [
+  ...row,
+  ...Array.from({ length: Math.max(0, SHEET_WIDTH - row.length) }, () => ""),
+];
+
 /**
- * The rows for one day, ready to append.
+ * The whole tab: one block per experiment — a title row naming it, its type, status and creation
+ * date; the column headers; its rows — and a blank row between blocks.
  *
- * Order is the caller's — `getDailyArmRows` returns experiments together with control first —
- * and is preserved, because a spreadsheet's row order is the only grouping an appended log has.
+ * Blocks are ordered by experiment name (then creation date, then id, so two experiments with the
+ * same name always appear in the same order and are told apart by their Created date). Within a
+ * block the caller's order is kept: `getWebsiteArmRowsByDay` returns oldest day first and control
+ * before its variants, which is the order a person reads a report in.
+ *
+ * Every row is padded to `SHEET_WIDTH`. The experiment name is customer text, written verbatim —
+ * `valueInputOption=RAW` is what keeps a formula-shaped name inert (see the file header).
  */
-export function buildSheetRows(day: UtcDayKey, figures: readonly DailyArmFigures[]): SheetCell[][] {
-  return figures.map((row) => [
-    day,
-    row.experimentName,
-    row.variantLabel,
-    row.assignedVisitors,
-    row.conversions,
-    percentCell(row.conversionRate),
-  ]);
+export function buildSheetSections(figures: readonly SectionArmFigures[]): SheetCell[][] {
+  if (figures.length === 0) return [padded([NO_ACTIVITY_NOTE])];
+
+  const blocks = new Map<string, SectionArmFigures[]>();
+  for (const row of figures) {
+    const block = blocks.get(row.experimentId) ?? [];
+    block.push(row);
+    blocks.set(row.experimentId, block);
+  }
+
+  const ordered = [...blocks.values()].sort((a, b) => {
+    const [x, y] = [a[0]!, b[0]!];
+    return (
+      x.experimentName.localeCompare(y.experimentName) ||
+      x.experimentCreated.localeCompare(y.experimentCreated) ||
+      x.experimentId.localeCompare(y.experimentId)
+    );
+  });
+
+  const out: SheetCell[][] = [];
+  ordered.forEach((block, index) => {
+    const first = block[0]!;
+    if (index > 0) out.push(padded([]));
+    out.push(
+      padded([
+        "Experiment",
+        first.experimentName,
+        "Type",
+        TYPE_LABEL[first.experimentType],
+        "Status",
+        STATUS_LABEL[first.experimentStatus],
+        "Created",
+        first.experimentCreated,
+      ]),
+    );
+    out.push(padded(headerRow()));
+    for (const row of block) {
+      out.push(
+        padded([
+          row.day,
+          row.variantLabel,
+          row.assignedVisitors,
+          row.conversions,
+          percentCell(row.conversionRate),
+        ]),
+      );
+    }
+  });
+  return out;
 }

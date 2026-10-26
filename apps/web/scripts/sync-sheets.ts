@@ -25,9 +25,9 @@
  */
 import "dotenv/config";
 
-import { buildSheetRows } from "@/lib/sheet-rows";
+import { buildSheetSections } from "@/lib/sheet-rows";
 import { previousUtcDay, utcDayRange } from "@/lib/utc-day";
-import { getDailyArmRows } from "@/server/services/analytics.service";
+import { getArmRowsByDay } from "@/server/services/analytics.service";
 import { refreshAllSheets, refreshSheet } from "@/server/services/sheets-sync.service";
 
 interface Options {
@@ -61,12 +61,18 @@ async function main(): Promise<void> {
       return;
     }
 
-    const rows = await getDailyArmRows(
+    const rows = await getArmRowsByDay(
       options.userId,
       utcDayRange(options.day),
       options.websiteId ?? undefined,
     );
-    const cells = buildSheetRows(options.day, rows);
+    // The same blocks the tab is written in (one per experiment), for this one day.
+    const cells = buildSheetSections(
+      rows.map((row) => ({
+        ...row,
+        experimentCreated: row.experimentCreatedAt.toISOString().slice(0, 10),
+      })),
+    );
 
     console.log(`# dry run — ${cells.length} row(s) for ${options.day} (UTC), nothing written\n`);
     for (const row of cells) {

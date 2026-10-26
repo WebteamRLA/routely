@@ -3,7 +3,7 @@ import "server-only";
 import { z } from "zod";
 
 import { env } from "@/env";
-import { buildDatedSheetRows } from "@/lib/sheet-rows";
+import { buildSheetSections } from "@/lib/sheet-rows";
 import {
   type IntegrationsSheetsCard,
   type ProjectSheetsCard,
@@ -730,7 +730,13 @@ export async function refreshSheet(
       to: utcDayRange(utcDayKey(now)).to,
     });
 
-    const cells = buildDatedSheetRows(rows);
+    // One block per experiment, so several tests on a project read as separate tables.
+    const cells = buildSheetSections(
+      rows.map((row) => ({
+        ...row,
+        experimentCreated: row.experimentCreatedAt.toISOString().slice(0, 10),
+      })),
+    );
 
     // Resolved from the stored gid, never the stored title: a tab renamed in Sheets changes its
     // title silently, and writing to a remembered name could hit the wrong tab — which, for an

@@ -376,6 +376,10 @@ export interface DailyArmRow {
 export interface DatedArmRow extends DailyArmRow {
   /** The UTC day this row describes, as `YYYY-MM-DD`. */
   day: string;
+  /** What the Sheets tab's block title shows about the experiment. */
+  experimentType: "SPLIT_URL" | "AB_TEST";
+  experimentStatus: "DRAFT" | "ACTIVE" | "PAUSED" | "COMPLETED";
+  experimentCreatedAt: Date;
 }
 
 export function getArmRowsByDay(
@@ -448,9 +452,12 @@ async function armRowsByDay(
     select: {
       id: true,
       name: true,
+      type: true,
+      status: true,
+      createdAt: true,
       variants: { select: { id: true, name: true }, orderBy: { position: "asc" } },
     },
-    orderBy: { name: "asc" },
+    orderBy: [{ name: "asc" }, { createdAt: "asc" }],
   });
 
   const utcDay = (at: Date): string => at.toISOString().slice(0, 10);
@@ -504,6 +511,9 @@ async function armRowsByDay(
           day,
           experimentId: experiment.id,
           experimentName: experiment.name,
+          experimentType: experiment.type,
+          experimentStatus: experiment.status,
+          experimentCreatedAt: experiment.createdAt,
           variantId,
           variantLabel: armLabel(variantId, experiment.variants),
           assignedVisitors,
