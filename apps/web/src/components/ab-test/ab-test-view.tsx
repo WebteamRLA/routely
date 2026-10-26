@@ -260,6 +260,14 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
     next: () => {
       const ce = s.step < 5 ? d.errs[s.step as 1 | 2 | 3 | 4] : null;
       if (ce && ce.count > 0) {
+        // On Setup, a variant with no changes is not a mistake to report but the next thing to
+        // do: when that is all that is missing, open the editor on the first such variant instead
+        // of showing errors. Anything else (a name, the page URL) still shows them.
+        const missing = s.step === 1 ? s.form.variants.filter((v) => d.errs[1].variants[v.id]) : [];
+        if (missing.length > 0 && missing.length === ce.count && validUrl(s.form.pageUrl)) {
+          openEditor(missing[0]!.id);
+          return;
+        }
         set({ attempted: { ...s.attempted, [s.step]: true } });
         return;
       }
@@ -533,6 +541,8 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
             " The original page isn’t affected."
         : target.name + " has no changes yet.",
     );
+    // Saving finishes the edit: back to the wizard, where the toast confirms it.
+    set({ ve: null });
   };
   const confirmDiscard = () => {
     const c = s.veConfirm;
