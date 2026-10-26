@@ -16,6 +16,34 @@ import {
 } from "@/server/actions/team.actions";
 import { cn } from "@/lib/utils";
 
+/**
+ * The account's picture — the Google profile photo for a Google sign-in — or its initials when
+ * there is none (a password account) or the photo will not load.
+ */
+function AccountAvatar({ user }: { user: Pick<SessionUser, "name" | "email" | "image"> }) {
+  const [failed, setFailed] = useState(false);
+  const base =
+    "inline-flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#DBEAFE] text-xs font-semibold text-[#1E40AF]";
+  if (user.image && !failed) {
+    return (
+      // Google's photo host refuses some referrers; a plain <img> also needs no image allow-list.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={user.image}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className={cn(base, "object-cover")}
+      />
+    );
+  }
+  return (
+    <span aria-hidden className={base}>
+      {initials(user)}
+    </span>
+  );
+}
+
 function initials(user: Pick<SessionUser, "name" | "email">): string {
   const source = user.name?.trim() || user.email;
   const parts = source.split(/[\s@._-]+/).filter(Boolean);
@@ -47,7 +75,7 @@ export function SidebarAccount({
   user,
   className,
 }: {
-  user: Pick<SessionUser, "name" | "email">;
+  user: Pick<SessionUser, "name" | "email" | "image">;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -182,12 +210,7 @@ export function SidebarAccount({
           "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]",
         )}
       >
-        <span
-          aria-hidden
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-[#DBEAFE] text-xs font-semibold text-[#1E40AF]"
-        >
-          {initials(user)}
-        </span>
+        <AccountAvatar user={user} />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-sm leading-[18px] font-semibold">
             {user.name ?? "Signed in"}
