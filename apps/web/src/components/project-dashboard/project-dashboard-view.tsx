@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 
 import { ConversionsChart, VisitorsChart } from "@/components/project-dashboard/charts";
@@ -17,10 +18,12 @@ import {
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  KebabIcon,
   Spinner,
   TrashIcon,
   XIcon,
 } from "@/components/rt/icons";
+import { PopoverMenu } from "@/components/rt/popover-menu";
 import {
   ACCENT,
   ACCENT_INK,
@@ -28,6 +31,7 @@ import {
   ACCENT_TINT,
   btn,
   focusRing,
+  menuItem,
 } from "@/components/rt/styles";
 import { ToastHost, useToast } from "@/components/rt/toast";
 import {
@@ -50,7 +54,11 @@ import {
   type ProjectSheetsCard,
 } from "@/lib/sheets-card";
 import { cn } from "@/lib/utils";
-import { launchExperimentAction } from "@/server/actions/experiment.actions";
+import {
+  launchExperimentAction,
+  pauseExperimentAction,
+  resumeExperimentAction,
+} from "@/server/actions/experiment.actions";
 
 type LoadState = "data" | "loading" | "error";
 type Menu = "new" | "pixel" | "fType" | "fStatus" | null;
@@ -176,6 +184,33 @@ export function ProjectDashboardView({
   // re-checks. The action column widens for the icon only when someone can use it.
   const canDelete = (e: PdExperiment) =>
     e.status === "draft" ? permissions.editExperiments : permissions.deleteExperiments;
+
+  // Pause / Resume from the row (Editor+; the action re-checks). The row switches at once and
+  // switches back, with the server's reason, if the action is refused — as on the Experiments list.
+  const [statusOverride, setStatusOverride] = useState<Record<string, PdExperiment["status"]>>({});
+  const togglePause = (e: PdExperiment) => {
+    const pause = e.status === "running";
+    setStatusOverride((o) => ({ ...o, [e.id]: pause ? "paused" : "running" }));
+    void (async () => {
+      const result = pause ? await pauseExperimentAction(e.id) : await resumeExperimentAction(e.id);
+      if (!result.ok) {
+        setStatusOverride((o) => {
+          const { [e.id]: _undone, ...rest } = o;
+          return rest;
+        });
+        notify(
+          pause ? "Couldn’t pause the experiment" : "Couldn’t resume the experiment",
+          result.message,
+        );
+        return;
+      }
+      notify(
+        pause ? "Experiment paused" : "Experiment resumed",
+        `“${e.name}” ${pause ? "is no longer receiving traffic." : "is receiving traffic again."}`,
+      );
+      router.refresh();
+    })();
+  };
   const deleteColumn = permissions.editExperiments || permissions.deleteExperiments;
   const [fType, setFType] = useState<TypeFilter>(
     view === "filtered" || view === "filterNone" ? "split" : "all",
@@ -868,8 +903,18 @@ export function ProjectDashboardView({
               <div
                 role="table"
                 aria-label="Experiments"
-                className="min-w-[790px] max-[961px]:min-w-0"
-                style={deleteColumn ? ({ "--pd-act": "152px" } as React.CSSProperties) : undefined}
+                className={cn(
+                  "max-[961px]:min-w-0",
+                  permissions.editExperiments ? "min-w-[900px]" : "min-w-[790px]",
+                )}
+                style={
+                  // Editors get the results link, Pause / Resume and the ⋮ menu side by side.
+                  permissions.editExperiments
+                    ? ({ "--pd-act": "244px" } as React.CSSProperties)
+                    : deleteColumn
+                      ? ({ "--pd-act": "152px" } as React.CSSProperties)
+                      : undefined
+                }
               >
                 <div role="rowgroup" className="max-[961px]:hidden">
                   <div
@@ -884,27 +929,37 @@ export function ProjectDashboardView({
                     <span role="columnheader">Visitors</span>
                     <span role="columnheader">Traffic share</span>
                     <span role="columnheader">Conversion rate</span>
-                    <span role="columnheader" className="relative">
-                      <span className="sr-only">Action</span>
+                    <span role="columnheader" className="text-right">
+                      Actions
                     </span>
                   </div>
                 </div>
                 <div role="rowgroup">
                   {!isLoading
-                    ? shown.map((e) => (
-                        <ExperimentRow
-                          key={e.id}
-                          e={e}
-                          onLaunch={() => {
-                            setLaunchId(e.id);
-                            setLaunchErr(false);
-                            setLaunchErrMsg(null);
-                            setLaunching(false);
-                            setMenu(null);
-                          }}
-                          onDelete={canDelete(e) ? () => setDeleting(e) : undefined}
-                        />
-                      ))
+                    ? shown.map((row) => {
+                        const e = statusOverride[row.id]
+                          ? { ...row, status: statusOverride[row.id]! }
+                          : row;
+                        const live = e.status === "running" || e.status === "paused";
+                        return (
+                          <ExperimentRow
+                            key={e.id}
+                            e={e}
+                            onTogglePause={
+                              live && permissions.editExperiments ? () => togglePause(e) : undefined
+                            }
+                            onLaunch={() => {
+                              setLaunchId(e.id);
+                              setLaunchErr(false);
+                              setLaunchErrMsg(null);
+                              setLaunching(false);
+                              setMenu(null);
+                            }}
+                            onDelete={canDelete(e) ? () => setDeleting(row) : undefined}
+                            reserveMenu={deleteColumn}
+                          />
+                        );
+                      })
                     : null}
                   {isLoading ? <SkeletonRows /> : null}
                 </div>
@@ -1153,13 +1208,41 @@ export function ProjectDashboardView({
 function ExperimentRow({
   e,
   onLaunch,
+  onTogglePause,
   onDelete,
+  reserveMenu,
 }: {
   e: PdExperiment;
   onLaunch(): void;
+  /** Present for a running or paused experiment when the viewer may pause it (Editor+). */
+  onTogglePause?: () => void;
   /** Present only when the viewer may delete this experiment. */
   onDelete?: () => void;
+  /** True when other rows may have a ⋮ menu, so this one keeps its place. */
+  reserveMenu: boolean;
 }) {
+  // The table scrolls sideways, and a scroll container clips its contents on both axes, so the
+  // menu is portalled to <body> and pinned over the ⋮ button — opening upward near the bottom of
+  // the window, and closing on scroll rather than drifting away from its row.
+  const [menuAt, setMenuAt] = useState<{ rect: DOMRect; up: boolean } | null>(null);
+  const kebabRef = useRef<HTMLButtonElement>(null);
+  const menuOpen = menuAt !== null;
+  const toggleMenu = () => {
+    const rect = kebabRef.current?.getBoundingClientRect();
+    setMenuAt((open) =>
+      open || !rect ? null : { rect, up: rect.bottom + 110 > window.innerHeight },
+    );
+  };
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuAt(null);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menuOpen]);
   const st = STATUS[e.status];
   const typeLabel = e.type === "ab" ? "A/B Testing" : "Split URL";
   const when = e.justLaunched
@@ -1252,7 +1335,7 @@ function ExperimentRow({
           {e.note}
         </span>
       </div>
-      <div role="cell" className={cn("flex items-center justify-end gap-1.5", AREA.act)}>
+      <div role="cell" className={cn("relative flex items-center justify-end gap-1.5", AREA.act)}>
         {!launch && href ? (
           <Link href={href} aria-label={aria} className={cn(actClass, "max-[961px]:flex-1")}>
             {e.action}
@@ -1268,17 +1351,75 @@ function ExperimentRow({
             {e.action}
           </button>
         )}
-        {onDelete ? (
+        {onTogglePause ? (
           <button
             type="button"
-            aria-haspopup="dialog"
-            aria-label={`Delete experiment: ${e.name}`}
-            title="Delete experiment"
-            onClick={onDelete}
-            className={cn(btn.icon, "size-9 hover:text-[#B91C1C] max-[961px]:size-11")}
+            aria-label={`${e.status === "running" ? "Pause" : "Resume"} experiment: ${e.name}`}
+            onClick={onTogglePause}
+            className={cn(actClass, "max-[961px]:h-11 max-[961px]:flex-1")}
           >
-            <TrashIcon size={16} />
+            {e.status === "running" ? "Pause" : "Resume"}
           </button>
+        ) : null}
+        {onDelete ? (
+          <>
+            <button
+              ref={kebabRef}
+              type="button"
+              aria-label={`More actions for ${e.name}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={toggleMenu}
+              className={cn(btn.icon, "size-9 max-[961px]:size-11")}
+            >
+              <KebabIcon />
+            </button>
+            {menuAt
+              ? createPortal(
+                  <div
+                    className="fixed z-50"
+                    style={{
+                      top: menuAt.rect.top,
+                      left: menuAt.rect.left,
+                      width: menuAt.rect.width,
+                      height: menuAt.rect.height,
+                    }}
+                  >
+                    <PopoverMenu
+                      open={menuOpen}
+                      onClose={() => setMenuAt(null)}
+                      triggerRef={kebabRef}
+                      label={`Actions for ${e.name}`}
+                      className={cn(
+                        "min-w-[180px]",
+                        menuAt.up && "top-auto bottom-[calc(100%+4px)]",
+                      )}
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        aria-haspopup="dialog"
+                        onClick={() => {
+                          setMenuAt(null);
+                          onDelete();
+                        }}
+                        className={cn(
+                          menuItem,
+                          "h-[34px] whitespace-nowrap text-[#B91C1C] hover:bg-[#FEF2F2] focus-visible:bg-[#FEF2F2]",
+                        )}
+                      >
+                        <TrashIcon size={16} />
+                        Delete experiment
+                      </button>
+                    </PopoverMenu>
+                  </div>,
+                  document.body,
+                )
+              : null}
+          </>
+        ) : reserveMenu ? (
+          // Keeps this row's buttons aligned with rows that do have a ⋮.
+          <span aria-hidden className="block size-9 flex-[0_0_36px] max-[961px]:hidden" />
         ) : null}
       </div>
     </div>
