@@ -160,6 +160,25 @@ export function markPixelVerified(
   });
 }
 
+/**
+ * Records that a tracking check found this website's own snippet in one of its pages — the same
+ * evidence the pixel dialog's Verify stamps with `markPixelVerified`, reached by another path.
+ *
+ * Takes no actor, like `touchLastSeen`: it is called only by `tracking-check.service`'s `runCheck`,
+ * whose website was already loaded through an access-filtered query (or by launch, which authorized
+ * it), and it writes nothing but the evidence. Never moves the stamp backwards.
+ */
+export function recordSnippetFound(
+  websiteId: string,
+  at: Date,
+  client: DbClient = db,
+): Promise<Prisma.BatchPayload> {
+  return client.website.updateMany({
+    where: { id: websiteId, OR: [{ pixelVerifiedAt: null }, { pixelVerifiedAt: { lt: at } }] },
+    data: { pixelVerifiedAt: at },
+  });
+}
+
 export function deleteWebsite(
   websiteId: string,
   userId: string,

@@ -132,6 +132,12 @@ async function runCheck(website: Website, url: string, now: Date): Promise<UrlCh
     seenRecently,
   });
 
+  // The snippet found in the page is the same evidence the pixel dialog's Verify records, so the
+  // project's tracking badge says Active from here on — a launch (which runs these checks) used to
+  // leave a just-installed site reading "Not installed" until its first visitor. Only a find is
+  // written: a failed check is not evidence that an earlier installation went away.
+  if (detection.scriptFound) await websiteRepo.recordSnippetFound(website.id, now);
+
   await trackingCheckRepo.upsertTrackingCheck({
     websiteId: website.id,
     urlKey,
