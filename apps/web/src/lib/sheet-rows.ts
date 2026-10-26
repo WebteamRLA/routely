@@ -4,8 +4,8 @@
  * The tab is laid out **one block per experiment**, so a project running several tests reads as
  * several small tables rather than one interleaved list:
  *
- *     Experiment | Homepage hero | Type | A/B test  | Status | Running | Created | 2026-10-26
- *     Date (UTC) | Variant       | Visitors | Conversions | Conversion Rate (%)
+ *     Experiment | Homepage hero | Type     | A/B test    | Status              | Running | Created     ← green
+ *     Date (UTC) | Variant       | Visitors | Conversions | Conversion Rate (%) |         | 2026-10-26
  *     2026-10-26 | Control       | 7        | 4           | 57.1
  *     2026-10-26 | Variant A     | …
  *     (blank)
@@ -49,11 +49,10 @@ export const SHEET_COLUMNS = [
 export const SHEET_COLUMN_COUNT = SHEET_COLUMNS.length;
 
 /**
- * How many columns the tab is written across: the title row's four label/value pairs. Every row is
- * padded to this width, because `values.update` leaves cells it is not given untouched — a shorter
- * row would keep whatever an earlier layout wrote to its right.
+ * How many columns the tab is written across: the title row's label/value pairs, ending in
+ * `Created`, whose date sits beneath it on the header row. Every row is padded to this width.
  */
-export const SHEET_WIDTH = 8;
+export const SHEET_WIDTH = 7;
 
 /** A single cell. `""` is how a figure that does not exist is written — see `percentCell`. */
 export type SheetCell = string | number;
@@ -156,9 +155,17 @@ const padded = (row: SheetCell[]): SheetCell[] => [
   ...Array.from({ length: Math.max(0, SHEET_WIDTH - row.length) }, () => ""),
 ];
 
+/** The whole tab: its cells, and which rows are block titles (highlighted when written). */
+export interface SheetLayout {
+  rows: SheetCell[][];
+  /** 0-based indexes into `rows`. */
+  titleRows: number[];
+}
+
 /**
- * The whole tab: one block per experiment — a title row naming it, its type, status and creation
- * date; the column headers; its rows — and a blank row between blocks.
+ * The whole tab: one block per experiment — a title row naming it, its type and status (and
+ * `Created`); the column headers, with the creation date under `Created`; its rows — and a blank
+ * row between blocks.
  *
  * Blocks are ordered by experiment name (then creation date, then id, so two experiments with the
  * same name always appear in the same order and are told apart by their Created date). Within a
@@ -168,8 +175,8 @@ const padded = (row: SheetCell[]): SheetCell[] => [
  * Every row is padded to `SHEET_WIDTH`. The experiment name is customer text, written verbatim —
  * `valueInputOption=RAW` is what keeps a formula-shaped name inert (see the file header).
  */
-export function buildSheetSections(figures: readonly SectionArmFigures[]): SheetCell[][] {
-  if (figures.length === 0) return [padded([NO_ACTIVITY_NOTE])];
+export function buildSheetSections(figures: readonly SectionArmFigures[]): SheetLayout {
+  if (figures.length === 0) return { rows: [padded([NO_ACTIVITY_NOTE])], titleRows: [] };
 
   const blocks = new Map<string, SectionArmFigures[]>();
   for (const row of figures) {
@@ -188,9 +195,11 @@ export function buildSheetSections(figures: readonly SectionArmFigures[]): Sheet
   });
 
   const out: SheetCell[][] = [];
+  const titleRows: number[] = [];
   ordered.forEach((block, index) => {
     const first = block[0]!;
     if (index > 0) out.push(padded([]));
+    titleRows.push(out.length);
     out.push(
       padded([
         "Experiment",
@@ -200,10 +209,9 @@ export function buildSheetSections(figures: readonly SectionArmFigures[]): Sheet
         "Status",
         STATUS_LABEL[first.experimentStatus],
         "Created",
-        first.experimentCreated,
       ]),
     );
-    out.push(padded(headerRow()));
+    out.push(padded([...headerRow(), "", first.experimentCreated]));
     for (const row of block) {
       out.push(
         padded([
@@ -216,5 +224,5 @@ export function buildSheetSections(figures: readonly SectionArmFigures[]): Sheet
       );
     }
   });
-  return out;
+  return { rows: out, titleRows };
 }

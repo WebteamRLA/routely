@@ -67,7 +67,7 @@ async function main(): Promise<void> {
       options.websiteId ?? undefined,
     );
     // The same blocks the tab is written in (one per experiment), for this one day.
-    const cells = buildSheetSections(
+    const { rows: cells } = buildSheetSections(
       rows.map((row) => ({
         ...row,
         experimentCreated: row.experimentCreatedAt.toISOString().slice(0, 10),

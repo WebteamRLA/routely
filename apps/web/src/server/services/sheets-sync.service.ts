@@ -731,7 +731,7 @@ export async function refreshSheet(
     });
 
     // One block per experiment, so several tests on a project read as separate tables.
-    const cells = buildSheetSections(
+    const layout = buildSheetSections(
       rows.map((row) => ({
         ...row,
         experimentCreated: row.experimentCreatedAt.toISOString().slice(0, 10),
@@ -749,19 +749,20 @@ export async function refreshSheet(
       sheets.overwriteWorksheet(
         token,
         target.spreadsheetId,
-        worksheet.title,
-        cells,
+        worksheet.sheetId,
+        layout.rows,
         target.rowCount,
+        layout.titleRows,
       ),
     );
 
     await targetRepo.recordWrite(target.id, {
       sheetId: worksheet.sheetId,
       sheetTitle: worksheet.title,
-      rowCount: cells.length,
+      rowCount: layout.rows.length,
     });
 
-    return { refreshed: true, rows: cells.length };
+    return { refreshed: true, rows: layout.rows.length };
   } catch (error) {
     const message = isAppError(error) ? error.message : "The refresh failed unexpectedly.";
 
