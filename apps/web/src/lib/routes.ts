@@ -11,6 +11,9 @@ export const routes = {
   /** Email + password sign-up. `?invite=<token>` joins the inviting workspace instead. */
   signup: "/signup",
   forgotPassword: "/forgot-password",
+  /** Public legal pages, linked from every sign-in screen's footnote. */
+  privacyPolicy: "/privacy-policy",
+  termsOfService: "/terms-of-service",
   /** Links in emails — the raw token only ever travels here. */
   resetPassword: (token: string) => `/reset-password/${encodeURIComponent(token)}`,
   verifyEmail: (token: string) => `/verify-email/${encodeURIComponent(token)}`,

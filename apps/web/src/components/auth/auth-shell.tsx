@@ -8,6 +8,8 @@ import { useFormStatus } from "react-dom";
 import { AlertCircleIcon, CheckIcon, Spinner, Svg } from "@/components/rt/icons";
 import { ToastHost, useToast } from "@/components/rt/toast";
 import { input } from "@/components/rt/styles";
+import { authFocusRing, authTextLink } from "@/components/auth/styles";
+import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,13 +19,9 @@ import { cn } from "@/lib/utils";
  * boxes and footer, so an undesigned step reads as part of the same flow.
  */
 
-export const authFocusRing =
-  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]";
-
-export const authTextLink = cn(
-  "cursor-pointer border-0 bg-transparent p-0 font-semibold text-[#374151] underline decoration-[#D1D5DB] underline-offset-2 hover:text-[#111827] hover:decoration-[#111827]",
-  authFocusRing,
-);
+// Plain strings, kept in a module without "use client" so server pages (the legal pages) can use
+// them too; re-exported here for the account screens that already import them from this file.
+export { authFocusRing, authTextLink } from "@/components/auth/styles";
 
 export function AuthShell({
   title,
@@ -84,23 +82,13 @@ export function AuthShell({
             {footnote === "legal" ? (
               <p className="m-0 text-xs leading-[18px] text-pretty text-[#6B7280]">
                 By continuing, you agree to Routely’s{" "}
-                <button
-                  type="button"
-                  className={authTextLink}
-                  onClick={() =>
-                    notify("Terms of Service", "The legal pages aren’t published yet.")
-                  }
-                >
+                <Link href={routes.termsOfService} className={authTextLink}>
                   Terms of Service
-                </button>{" "}
+                </Link>{" "}
                 and{" "}
-                <button
-                  type="button"
-                  className={authTextLink}
-                  onClick={() => notify("Privacy Policy", "The legal pages aren’t published yet.")}
-                >
+                <Link href={routes.privacyPolicy} className={authTextLink}>
                   Privacy Policy
-                </button>
+                </Link>
                 .
               </p>
             ) : null}
