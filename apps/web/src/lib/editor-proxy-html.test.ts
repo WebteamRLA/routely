@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { escapeAttr, rewriteForEditor } from "@/lib/editor-proxy-html";
+import { editorProxyCsp, escapeAttr, rewriteForEditor } from "@/lib/editor-proxy-html";
 
 const OPTS = {
   baseUrl: "https://shop.acme.com/sale/",
@@ -47,5 +47,17 @@ describe("rewriteForEditor", () => {
     expect(escapeAttr('a"><script>')).toBe("a&quot;&gt;&lt;script&gt;");
     const out = rewriteForEditor("<head></head>", { ...OPTS, baseUrl: 'https://a.com/"x' });
     expect(out).toContain('href="https://a.com/&quot;x"');
+  });
+});
+
+describe("editorProxyCsp", () => {
+  // The proxy is served from the dashboard's own origin; this sandbox is all that keeps the
+  // customer's scripts from acting as the dashboard. Do not "fix" this test by relaxing it.
+  it("sandboxes the copy into an opaque origin and lets only the app frame it", () => {
+    const csp = editorProxyCsp("https://routely.example");
+    const directives = csp.split(";").map((d) => d.trim());
+    expect(directives).toContain("sandbox allow-scripts");
+    expect(csp).not.toMatch(/allow-same-origin|allow-top-navigation|allow-popups|allow-forms/);
+    expect(directives).toContain("frame-ancestors https://routely.example");
   });
 });

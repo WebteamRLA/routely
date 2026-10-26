@@ -98,6 +98,9 @@ export function LiveVisualEditor({
   const shown: readonly VisualChange[] = isControl ? [] : canEdit ? draft : (variant.visual ?? []);
   const dirty = canEdit && JSON.stringify(draft) !== JSON.stringify(saved);
   const D = DEVICE_FRAMES[device];
+  // Desktop fills the canvas, so the real page gets as much room as the screen allows; tablet and
+  // mobile keep their device widths, which is what those previews are for.
+  const frameMax = device === "desktop" ? undefined : D.max;
 
   // Read by the bridge's handlers, which outlive a render.
   const canEditRef = useRef(canEdit);
@@ -253,7 +256,7 @@ export function LiveVisualEditor({
             {!canEdit ? (
               <div
                 className="mx-auto mb-3 flex w-full items-center gap-2.5 rounded-lg bg-white px-3 py-2.5 text-[13px] leading-[19px] text-[#374151]"
-                style={{ maxWidth: D.max }}
+                style={{ maxWidth: frameMax }}
               >
                 <LockIcon size={16} className="flex-none" />
                 <span>
@@ -267,7 +270,7 @@ export function LiveVisualEditor({
             ) : null}
             <div
               className="mx-auto flex w-full flex-auto flex-col overflow-hidden rounded-xl bg-white shadow-[0_12px_32px_#1118271F]"
-              style={{ maxWidth: D.max }}
+              style={{ maxWidth: frameMax }}
             >
               <div
                 aria-hidden
@@ -287,13 +290,15 @@ export function LiveVisualEditor({
                   <iframe
                     key={attempt}
                     ref={setFrame}
-                    src={via === "proxy" && session.proxyUrl ? session.proxyUrl : session.frameUrl}
+                    src={via === "proxy" ? session.proxyUrl : session.frameUrl}
                     onLoad={onFrameLoad}
                     title={"Your page: " + shortUrl(pageUrl)}
-                    // The customer's page keeps its own origin (never Routely's) and runs its
-                    // scripts, but cannot navigate the dashboard away (no top navigation), open
-                    // windows or submit forms while it is being edited.
-                    sandbox="allow-scripts allow-same-origin"
+                    // The customer's page runs its scripts but cannot navigate the dashboard away
+                    // (no top navigation), open windows or submit forms while it is being edited.
+                    // Framed directly it keeps its own origin. Through the proxy it is served from
+                    // Routely's host, so it gets no origin at all (no `allow-same-origin`, and the
+                    // proxy's CSP says the same): that holds for anything the frame navigates to.
+                    sandbox={via === "proxy" ? "allow-scripts" : "allow-scripts allow-same-origin"}
                     // Chrome's Local Network Access: a public page in this frame may load the
                     // snippet from a private or loopback Routely (local development, self-hosting)
                     // only when the embedder delegates the permission. Both the current and the

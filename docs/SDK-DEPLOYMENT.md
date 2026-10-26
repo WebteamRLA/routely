@@ -565,9 +565,13 @@ code visitors get — then `applied`. Every inbound message must come from the a
 window it said hello to, and carry the token.
 
 **Sites that forbid framing** (`X-Frame-Options`, or CSP `frame-ancestors` without the Routely origin)
-are reloaded in the frame through the page proxy (`/api/editor/proxy`, served only on
-`EDITOR_PROXY_ORIGIN`), which serves a copy with this app's snippet; without a proxy origin they use
-the popup. A site can opt in to the in-screen editor by sending
+are reloaded in the frame through the page proxy (`/api/editor/proxy`), which serves a copy with this
+app's snippet. The copy is served with `Content-Security-Policy: sandbox allow-scripts` (and the frame
+is `sandbox="allow-scripts"`), so it has an opaque origin: the customer's scripts get no cookies, no
+storage and no same-origin access to the dashboard, although the copy comes from the dashboard's own
+host. Its messages arrive with origin `"null"` and the editor answers it with `targetOrigin "*"`,
+always to that one frame. `EDITOR_PROXY_ORIGIN` optionally moves the proxy to a separate host. The
+popup is now only the last resort, for a page the proxy cannot fetch either. A site can opt in to the in-screen editor by sending
 `Content-Security-Policy: frame-ancestors 'self' <routely origin>`; browsers ignore
 `X-Frame-Options` when `frame-ancestors` is present, so the old header can stay.
 

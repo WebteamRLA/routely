@@ -51,3 +51,14 @@ export function rewriteForEditor(
   }
   return "<head>" + inject + "</head>" + stripped;
 }
+
+/**
+ * The proxied copy's `Content-Security-Policy`. `sandbox allow-scripts` is the security boundary of
+ * the whole proxy: without `allow-same-origin` the copy has an opaque origin, so the customer's
+ * scripts get no cookies, no storage and no same-origin access to the dashboard it is served
+ * beside. Never add `allow-same-origin`. Forms, popups and top-level navigation stay blocked too;
+ * the editor agent blocks clicks and submits anyway, so editing loses nothing.
+ */
+export function editorProxyCsp(appOrigin: string): string {
+  return `sandbox allow-scripts; frame-ancestors ${appOrigin}`;
+}

@@ -6,6 +6,7 @@ import type { EditorAppMessage, ElementDescriptor } from "@routely/sdk/contract"
 
 import {
   type EditorSession,
+  OPAQUE_ORIGIN,
   appMessage,
   initMessage,
   isFromEditorPage,
@@ -27,17 +28,29 @@ import {
  * When the page does not answer in the frame, the cause is either a site that forbids framing
  * (`X-Frame-Options` / CSP `frame-ancestors`) or a page without the snippet; a frame cannot tell the
  * two apart from outside. The editor then reloads the frame through Routely's page proxy
- * (`/api/editor/proxy`, when enabled), which serves a copy the frame may show. Only if that does not
- * answer either does it offer the popup — framing rules do not apply there, so a page that does not
- * answer in the popup has no snippet, and only then does the editor say "not installed".
+ * (`/api/editor/proxy`), which serves a sandboxed copy the frame may show, so the page is edited in
+ * this screen. Only if that does not answer either (the site refused Routely's server, say) does it
+ * offer the popup — framing rules do not apply there, so a page that does not answer in the popup
+ * has no snippet, and only then does the editor say "not installed".
  */
 
 /** `proxy`: the same frame, loading the page through Routely's proxy (a site that refuses framing). */
 export type Via = "frame" | "proxy" | "popup";
 
-/** The origin the page's messages come from, and ours go to, in each mode. */
+/** The origin the page's messages come from in each mode. The proxied copy is sandboxed. */
 function pageOriginFor(session: EditorSession, via: Via): string {
-  return via === "proxy" ? (session.proxyOrigin ?? session.origin) : session.origin;
+  return via === "proxy" ? OPAQUE_ORIGIN : session.origin;
+}
+
+/**
+ * The `targetOrigin` our messages are posted with. An opaque origin cannot be named, so the proxied
+ * copy gets `"*"`: the message still goes only to the frame's own window (`target()`), and that
+ * frame stays sandboxed whatever it navigates to (the iframe's own `sandbox` attribute), so the
+ * most another document there could read is this session's token — which opens the customer's own
+ * pages through the proxy for 30 minutes and grants no data.
+ */
+function postOriginFor(session: EditorSession, via: Via): string {
+  return via === "proxy" ? "*" : session.origin;
 }
 
 export type BridgeState =
@@ -159,7 +172,7 @@ export function useEditorBridge({
 
   /** No hello in the frame: retry through the proxy once, then give up on framing. */
   const frameUnanswered = useCallback(() => {
-    if (viaRef.current === "frame" && sessionRef.current?.proxyUrl) {
+    if (viaRef.current === "frame" && sessionRef.current) {
       viaRef.current = "proxy";
       setVia("proxy");
       setAttempt((n) => n + 1);
@@ -258,7 +271,7 @@ export function useEditorBridge({
       const win = target();
       if (!current || !win || stateRef.current.kind !== "ready") return;
       try {
-        win.postMessage(appMessage(current.token, message), pageOriginFor(current, viaRef.current));
+        win.postMessage(appMessage(current.token, message), postOriginFor(current, viaRef.current));
       } catch {
         // A closed popup or a navigated frame; the state machine notices separately.
       }
@@ -287,7 +300,7 @@ export function useEditorBridge({
           // Answered on every hello, including a repeat after the page reloaded itself: the
           // agent restarts with it, and the editor re-sends its preview on the next ready.
           const init: EditorAppMessage = initMessage(current.token);
-          win.postMessage(init, origin);
+          win.postMessage(init, postOriginFor(current, via));
           if (stateRef.current.kind !== "handshake") go({ kind: "handshake", via });
           window.clearTimeout(timers.current.agent);
           timers.current.agent = window.setTimeout(() => {

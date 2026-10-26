@@ -53,10 +53,10 @@ export interface EditorSession {
   origin: string;
   /**
    * The same page through Routely's proxy (`/api/editor/proxy`), for a site that refuses to be
-   * framed — absent when the proxy is off. Messages then come from `proxyOrigin` instead.
+   * framed. Relative (served beside the dashboard) unless a separate proxy host is configured. The
+   * copy is sandboxed into an opaque origin, so its messages arrive from `OPAQUE_ORIGIN`.
    */
-  proxyUrl?: string;
-  proxyOrigin?: string;
+  proxyUrl: string;
   /**
    * What the last tracking check said about the tested page, used only to word the message when
    * the page does not answer: `found` (the snippet was seen there), `missing`, or `unknown` (never
@@ -66,6 +66,9 @@ export interface EditorSession {
 }
 
 // --- Accepting messages -----------------------------------------------------------------------
+
+/** `event.origin` of a message from a sandboxed document without `allow-same-origin`. */
+export const OPAQUE_ORIGIN = "null";
 
 export interface MessageGuard {
   /** The tested page's origin, from the session. */

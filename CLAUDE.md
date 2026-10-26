@@ -578,11 +578,19 @@ The protocol is fully specified in `contract.ts`.
 frame with the session's `proxyUrl`. The route fetches the page with `safeFetch` (token-bound origin,
 project domain, every redirect re-checked), strips the page's own Routely tags and blocking `<meta>`
 (`lib/editor-proxy-html.ts`), adds `<base>` plus this app's snippet with `data-api`, and serves it with
-`frame-ancestors <app>` and `no-store`. It answers **only on `EDITOR_PROXY_ORIGIN`** (dev default: the
-app's host swapped localhost↔127.0.0.1), never the dashboard's origin, so customer scripts never get
-the dashboard's cookies. No proxy origin in production → the popup. Fidelity limits: fetched without
-the user's cookies (logged-out view); web fonts and other CORS-gated assets may not load; all
-proxied customer pages share one origin's storage.
+`Content-Security-Policy: sandbox allow-scripts; frame-ancestors <app>` and `no-store`. **The
+sandbox is the security boundary** (user request 2026-10-26: always edit in-screen, never the popup):
+without `allow-same-origin` the copy has an opaque origin, so it is served from the **app's own
+origin** with no second domain, yet customer scripts get no cookies, storage or same-origin access.
+`proxyUrl` is **relative**, and the route reads the dashboard origin back from its own request
+(`proxyDashboardOrigin`), so it works on whatever origin the dashboard was opened on — building it
+from `NEXT_PUBLIC_APP_URL` broke local editing whenever that named an expired tunnel.
+Never add `allow-same-origin` to the proxy's CSP or to the proxy-mode iframe. Messages from it arrive
+with origin `"null"` and are answered with `targetOrigin "*"` to that frame only
+(`use-editor-bridge.ts`). `EDITOR_PROXY_ORIGIN` is optional extra isolation. The popup remains only
+for a page the proxy cannot fetch. Fidelity limits: fetched without the user's cookies (logged-out
+view); the customer's scripts have no storage or cookies; web fonts and other CORS-gated assets may
+not load.
 
 **Local testing gotcha:** a public site loading the snippet from `http://localhost:3000` is blocked by
 Chrome's Local Network Access unless the user allows it for that site — no SDK, no tracking, no

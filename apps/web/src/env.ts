@@ -139,13 +139,10 @@ const serverSchema = z.object({
   EDITOR_TOKEN_SECRET: z.string().min(32, "must be at least 32 characters").optional(),
 
   /**
-   * Where the visual editor's page proxy is served (`/api/editor/proxy`), for sites that forbid
-   * being framed. Must be a **different origin** from `NEXT_PUBLIC_APP_URL` pointing at this same
-   * deployment (e.g. `https://editor-proxy.routely.app`): the proxied page runs the customer's own
-   * scripts, which must never share an origin with the dashboard.
-   *
-   * Optional: unset in development, the app's host is swapped between `localhost` and `127.0.0.1`;
-   * unset in production, the proxy is off and such sites open in a popup instead.
+   * Optional extra isolation for the visual editor's page proxy (`/api/editor/proxy`): another host
+   * pointing at this same deployment to serve it from. Unset, it is served from the app's own
+   * origin, which is safe because the proxied copy is sandboxed into an opaque origin
+   * (`server/editor-proxy.ts`).
    */
   EDITOR_PROXY_ORIGIN: z.url().optional(),
 });

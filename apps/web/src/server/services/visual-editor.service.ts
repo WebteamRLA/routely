@@ -6,7 +6,7 @@ import type { EditorSession } from "@/lib/editor-protocol";
 import { pageOrigin } from "@/lib/editor-token";
 import { pageKey, sameSiteMessage, withScheme } from "@/lib/launch-rules";
 import { isSameSite } from "@/lib/url";
-import { editorProxyOrigin } from "@/server/editor-proxy";
+import { separateProxyOrigin } from "@/server/editor-proxy";
 import { mintEditorToken } from "@/server/editor-token";
 import { rateLimited, validationFailed } from "@/server/errors";
 import { rateLimit } from "@/server/http/rate-limit";
@@ -96,11 +96,11 @@ export async function issueEditorSession(
         : "unknown";
 
   const pageHref = frame.href.split("#")[0] as string;
-  const proxyOrigin = editorProxyOrigin();
-  const proxy = proxyOrigin
-    ? `${proxyOrigin}/api/editor/proxy?u=${encodeURIComponent(pageHref)}&t=${encodeURIComponent(token)}` +
-      `#${EDITOR_HASH_PARAM}=${token}`
-    : null;
+  // Relative unless a separate proxy host is configured: served beside the dashboard, on whatever
+  // origin it was opened on (`server/editor-proxy.ts`).
+  const proxyUrl =
+    `${separateProxyOrigin() ?? ""}/api/editor/proxy?u=${encodeURIComponent(pageHref)}&t=${encodeURIComponent(token)}` +
+    `#${EDITOR_HASH_PARAM}=${token}`;
 
   return {
     token,
@@ -108,7 +108,7 @@ export async function issueEditorSession(
     pageUrl: pageHref,
     frameUrl: frame.href,
     origin,
-    ...(proxy && proxyOrigin ? { proxyUrl: proxy, proxyOrigin } : {}),
+    proxyUrl,
     snippet,
   };
 }
