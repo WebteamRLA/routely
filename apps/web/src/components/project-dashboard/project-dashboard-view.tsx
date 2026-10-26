@@ -659,30 +659,18 @@ export function ProjectDashboardView({
             <h2 id="rt-int-title" className="m-0 text-sm leading-5 font-semibold text-[#374151]">
               Integrations
             </h2>
-            <Link
-              href={routes.integrations}
-              aria-label="View all integrations"
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              aria-label={`Set up Google Sheets for ${project.name}`}
+              onClick={openSheets}
               className={cn(
-                "relative z-[1] inline-flex h-6 items-center gap-1.5 px-0.5 text-[13px] font-medium whitespace-nowrap text-[#4B5563] no-underline hover:text-[#111827]",
+                "relative z-[1] inline-flex h-7 cursor-pointer items-center rounded-lg border border-[#E5E7EB] bg-white px-2.5 text-[13px] font-medium whitespace-nowrap text-[#374151] hover:bg-[#F9FAFB] hover:text-[#111827]",
                 focusRing,
               )}
             >
-              View all
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <path d="M5 12h14" />
-                <path d="m13 6 6 6-6 6" />
-              </svg>
-            </Link>
+              Setup
+            </button>
           </div>
           <div className="flex min-w-0 items-center gap-3">
             <span
