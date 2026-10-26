@@ -3,7 +3,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
-import { ArrowLeftIcon, TrashIcon, XIcon } from "@/components/rt/icons";
+import { ArrowLeftIcon, PlusIcon, TrashIcon, XIcon } from "@/components/rt/icons";
 import {
   ACCENT,
   ACCENT_INK,
@@ -46,6 +46,10 @@ export interface EditorShellProps {
   tabs: EditorTab[];
   activeTab: string;
   onTab(id: string): void;
+  /** "+ Add variant" after the tabs; absent when the actor cannot add one (or at the limit). */
+  onAddTab?: () => void;
+  /** A "×" on every tab but Control; absent when the actor cannot remove (or one variant is left). */
+  onRemoveTab?: (id: string) => void;
   device: Device;
   onDevice(device: Device): void;
   /** Shows the save status, Undo and "Save changes". */
@@ -458,6 +462,8 @@ export function EditorShell({
   tabs,
   activeTab,
   onTab,
+  onAddTab,
+  onRemoveTab,
   device,
   onDevice,
   editable,
@@ -512,24 +518,53 @@ export function EditorShell({
             >
               {tabs.map((tb) => {
                 const on = tb.id === activeTab;
+                const removable = onRemoveTab && tb.id !== "control";
                 return (
-                  <button
+                  <span
                     key={tb.id}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => onTab(tb.id)}
-                    className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border-0 px-3 text-[13px] font-medium whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]"
+                    className="inline-flex h-8 items-center rounded-lg"
                     style={pressed(on)}
                   >
-                    <span
-                      aria-hidden
-                      className="size-2 rounded-xs"
-                      style={{ background: tb.color }}
-                    />
-                    {tb.label}
-                  </button>
+                    <button
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => onTab(tb.id)}
+                      className={cn(
+                        "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border-0 bg-transparent pl-3 text-[13px] font-medium whitespace-nowrap text-inherit focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]",
+                        removable ? "pr-1" : "pr-3",
+                      )}
+                    >
+                      <span
+                        aria-hidden
+                        className="size-2 rounded-xs"
+                        style={{ background: tb.color }}
+                      />
+                      {tb.label}
+                    </button>
+                    {removable ? (
+                      <button
+                        type="button"
+                        aria-label={"Remove " + tb.label}
+                        title={"Remove " + tb.label}
+                        onClick={() => onRemoveTab(tb.id)}
+                        className="mr-1 inline-flex size-5 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[#9CA3AF] hover:bg-[#E5E7EB] hover:text-[#B91C1C] focus-visible:outline-2 focus-visible:outline-[#0091FF]"
+                      >
+                        <XIcon size={12} />
+                      </button>
+                    ) : null}
+                  </span>
                 );
               })}
+              {onAddTab ? (
+                <button
+                  type="button"
+                  onClick={onAddTab}
+                  className="inline-flex h-8 cursor-pointer items-center gap-1 rounded-lg border-0 bg-transparent px-2.5 text-[13px] font-medium whitespace-nowrap text-[#0060AD] hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]"
+                >
+                  <PlusIcon size={14} />
+                  Add variant
+                </button>
+              ) : null}
             </div>
             <div
               role="group"

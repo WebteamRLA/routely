@@ -46,6 +46,31 @@ import { cn } from "@/lib/utils";
 
 type Patch = Partial<AbState> | ((s: AbState) => Partial<AbState>);
 
+/**
+ * The form with one more variant — the next free letter and colour, traffic re-split evenly — and
+ * the new variant's id; null at the four-variant limit. Shared by the wizard's "Add variant" and
+ * the visual editor's, so the two cannot drift.
+ */
+function nextVariant(f: AbForm): { id: string; patch: Partial<AbForm> } | null {
+  if (f.variants.length >= 4) return null;
+  const used = f.variants.map((x) => x.color);
+  const color = [1, 2, 3, 4].find((c) => !used.includes(c)) ?? 1;
+  const names = f.variants.map((x) => x.name);
+  const letter =
+    ["A", "B", "C", "D"].find((l) => !names.includes("Variant " + l)) ??
+    String(f.variants.length + 1);
+  const id = "v" + f.nextId;
+  const vs = [...f.variants, { id, name: "Variant " + letter, color, changes: {} }];
+  return {
+    id,
+    patch: {
+      variants: vs,
+      nextId: f.nextId + 1,
+      split: evenSplit(["control", ...vs.map((x) => x.id)]),
+    },
+  };
+}
+
 function reducer(s: AbState, p: Patch): AbState {
   return { ...s, ...(typeof p === "function" ? p(s) : p) };
 }
@@ -238,9 +263,10 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
 
   const removeVariant = (id: string, name: string) => {
     const remaining = s.form.variants.filter((x) => x.id !== id);
-    setForm({
-      variants: remaining,
-      split: evenSplit(["control", ...remaining.map((x) => x.id)]),
+    // From the latest form, so a save made in the same click is not overwritten.
+    setForm((f) => {
+      const left = f.variants.filter((x) => x.id !== id);
+      return { variants: left, split: evenSplit(["control", ...left.map((x) => x.id)]) };
     });
     notify(
       name + " removed",
@@ -282,29 +308,13 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
     },
     openEditor,
     addVariant: () => {
-      setForm((f) => {
-        if (f.variants.length >= 4) return {};
-        const used = f.variants.map((x) => x.color);
-        const color = [1, 2, 3, 4].find((c) => !used.includes(c)) ?? 1;
-        const names = f.variants.map((x) => x.name);
-        const letter =
-          ["A", "B", "C", "D"].find((l) => !names.includes("Variant " + l)) ??
-          String(f.variants.length + 1);
-        const vs = [
-          ...f.variants,
-          { id: "v" + f.nextId, name: "Variant " + letter, color, changes: {} },
-        ];
-        return {
-          variants: vs,
-          nextId: f.nextId + 1,
-          split: evenSplit(["control", ...vs.map((x) => x.id)]),
-        };
-      });
+      setForm((f) => nextVariant(f)?.patch ?? {});
     },
-    removeVariant: (id: string) => {
+    removeVariant: (id: string, pendingChanges?: number) => {
       const v = s.form.variants.find((x) => x.id === id);
       if (!v) return;
-      const n = changeCountOf(v);
+      // The visual editor passes the open variant's current list, unsaved edits included.
+      const n = pendingChanges ?? changeCountOf(v);
       if (n > 0) {
         set({ rmConfirm: { id, name: v.name, n } });
         return;
@@ -526,7 +536,7 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
     },
   };
   /** The live editor's "Save changes": the variant's change list, stored by the autosave. */
-  const saveLive = (variantId: string, changes: VisualChange[]) => {
+  const saveLive = (variantId: string, changes: VisualChange[], options?: { stay?: boolean }) => {
     const target = s.form.variants.find((x) => x.id === variantId);
     if (!target) return;
     setForm((f) => ({
@@ -541,8 +551,19 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
             " The original page isn’t affected."
         : target.name + " has no changes yet.",
     );
-    // Saving finishes the edit: back to the wizard, where the toast confirms it.
-    set({ ve: null });
+    // "Save changes" finishes the edit: back to the wizard, where the toast confirms it. The save
+    // made on switching variants (`stay`) keeps the editor open on the next one.
+    if (!options?.stay) set({ ve: null });
+  };
+  /** The visual editor's "Add variant": adds it and tells the editor which one to open. */
+  const addVariantFromEditor = (): string | null => {
+    const next = nextVariant(s.form);
+    if (!next) return null;
+    // Built from the latest form, not `s.form`: the editor saves the variant it is leaving in the
+    // same click, and a patch made from the render-time form would replace the variant list and
+    // drop that save. The id is the same either way (`nextId` is not touched by a save).
+    setForm((f) => nextVariant(f)?.patch ?? {});
+    return next.id;
   };
   const confirmDiscard = () => {
     const c = s.veConfirm;
@@ -682,6 +703,16 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
           viewer={s.ctx.readOnly}
           ensureDraft={sync.flush}
           onSave={saveLive}
+          onRemoveVariant={
+            isEdit && !s.ctx.readOnly && s.form.variants.length > 1
+              ? (id, pending) => act.removeVariant(id, pending)
+              : undefined
+          }
+          onAddVariant={
+            isEdit && !s.ctx.readOnly && s.form.variants.length < 4
+              ? addVariantFromEditor
+              : undefined
+          }
           onExit={() => set({ ve: null })}
           onInstall={() =>
             set({ ve: null, modal: "install", instStep: 1, verify: "idle", copied: false })
@@ -720,7 +751,7 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
             ? s.rmConfirm.name +
               " has " +
               s.rmConfirm.n +
-              (s.rmConfirm.n === 1 ? " saved change" : " saved changes") +
+              (s.rmConfirm.n === 1 ? " change" : " changes") +
               " from the visual editor. Removing it deletes those changes and splits traffic evenly between the remaining versions."
             : ""
         }

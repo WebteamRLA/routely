@@ -50,7 +50,8 @@ export interface WizardAct {
   fix(n: number): void;
   openEditor(target: string): void;
   addVariant(): void;
-  removeVariant(id: string): void;
+  /** `pendingChanges`: the visual editor's count for the variant it has open (unsaved included). */
+  removeVariant(id: string, pendingChanges?: number): void;
   applySplit(id: string, raw: string): void;
   splitEvenly(): void;
   setInclude(raw: string): void;

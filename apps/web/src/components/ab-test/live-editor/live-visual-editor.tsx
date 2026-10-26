@@ -45,9 +45,22 @@ export interface LiveVisualEditorProps {
   viewer: boolean;
   /** Flushes the autosave; resolves to the draft id, or null when it could not be saved. */
   ensureDraft(): Promise<string | null>;
-  /** "Save changes": the variant's whole change list. Persisted by the draft autosave. */
-  onSave(variantId: string, changes: VisualChange[]): void;
+  /**
+   * The variant's whole change list, persisted by the draft autosave. "Save changes" leaves the
+   * editor; `stay` is the save made on switching to another variant, which keeps it open.
+   */
+  onSave(variantId: string, changes: VisualChange[], options?: { stay?: boolean }): void;
   onExit(): void;
+  /**
+   * "+ Add variant" in the tab bar: adds one to the draft and returns its id (null at the limit).
+   * Absent when the actor cannot add variants.
+   */
+  onAddVariant?: () => string | null;
+  /**
+   * "×" on a variant tab: removes it (confirming first when it has changes — `pending` is the open
+   * variant's current list, unsaved edits included). Absent when the actor cannot remove variants.
+   */
+  onRemoveVariant?: (id: string, pending?: number) => void;
   /** Leaves the editor for the install instructions. */
   onInstall(): void;
 }
@@ -76,6 +89,8 @@ export function LiveVisualEditor({
   ensureDraft,
   onSave,
   onExit,
+  onAddVariant,
+  onRemoveVariant,
   onInstall,
 }: LiveVisualEditorProps) {
   const variantOf = (id: string) => form.variants.find((v) => v.id === id) ?? null;
@@ -196,9 +211,10 @@ export function LiveVisualEditor({
     setSaved(clone(draft));
   };
 
-  const open = (next: string) => {
+  /** `isNew`: a variant just added, which the form holds by the next render (no changes yet). */
+  const open = (next: string, isNew = false) => {
     const list = clone(variantOf(next)?.visual ?? []);
-    setTarget(variantOf(next) ? next : "control");
+    setTarget(isNew || variantOf(next) ? next : "control");
     setDraft(list);
     setSaved(list);
     setHistory([]);
@@ -206,14 +222,40 @@ export function LiveVisualEditor({
     setError(null);
     setApplied({});
   };
+  // Switching variants saves the one being left — no "discard?" question: an edit made and then
+  // switched away from was meant to be kept. Only Exit still asks (below).
   const switchTo = (next: string) => {
     if (next === target) return;
-    if (dirty) setConfirm({ next });
-    else open(next);
+    if (dirty && variant && canEdit) onSave(variant.id, clone(draft), { stay: true });
+    open(next);
   };
   const exit = () => {
     if (dirty) setConfirm({ next: null });
     else onExit();
+  };
+
+  // "×" on a tab. The wizard removes it (after its confirm, when there are changes); if it was the
+  // variant open here, the editor then moves to its neighbour — below, once it is gone.
+  const [afterRemove, setAfterRemove] = useState("control");
+  const removeVariant = (id: string) => {
+    if (!onRemoveVariant) return;
+    const ids = form.variants.map((v) => v.id);
+    const at = ids.indexOf(id);
+    if (id === target) setAfterRemove(ids[at - 1] ?? ids[at + 1] ?? "control");
+    onRemoveVariant(id, id === target ? draft.length : undefined);
+  };
+  if (target !== "control" && !variant) {
+    // The open variant no longer exists (removed above, or elsewhere).
+    open(variantOf(afterRemove) ? afterRemove : "control");
+  }
+
+  // "+ Add variant": the variant being left is saved, as on any switch, then the new one opens.
+  // The wizard's form update and this switch come from the same click, so they render together.
+  const addVariant = () => {
+    if (!onAddVariant) return;
+    if (dirty && variant && canEdit) onSave(variant.id, clone(draft), { stay: true });
+    const id = onAddVariant();
+    if (id) open(id, true);
   };
   const discard = () => {
     const next = confirm?.next ?? null;
@@ -242,6 +284,8 @@ export function LiveVisualEditor({
         tabs={editorTabs(form.variants)}
         activeTab={isControl ? "control" : target}
         onTab={switchTo}
+        onAddTab={onAddVariant ? addVariant : undefined}
+        onRemoveTab={onRemoveVariant ? removeVariant : undefined}
         device={device}
         onDevice={setDevice}
         editable={canEdit}
