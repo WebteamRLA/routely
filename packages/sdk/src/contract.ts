@@ -173,6 +173,27 @@ export interface EventBatch {
 }
 
 /**
+ * Body of `POST /api/v1/assign`, sent as `text/plain`: a visitor with **no stored arm** asking
+ * which arm they are in. The server chooses — it alone sees every visitor's assignment, which
+ * balancing needs — and records it. The request names no arm.
+ */
+export interface AssignRequest {
+  v: typeof SDK_PROTOCOL_VERSION;
+  siteId: string;
+  visitorId: string;
+  experimentId: string;
+}
+
+/**
+ * A `200` answer to `AssignRequest`: the visitor's arm, `null` for control. Any other answer —
+ * `204`, an error, a timeout — means "not entered on this page load", and the SDK leaves the page
+ * alone and asks again on the next one.
+ */
+export interface AssignResponse {
+  variantId: string | null;
+}
+
+/**
  * Body of `POST /api/v1/hit` — one site-wide page hit, independent of any experiment.
  *
  * Sent with `sendBeacon` as `text/plain` (a CORS-simple request, no preflight) at most once per

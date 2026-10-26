@@ -42,8 +42,12 @@ and hand-written HTML.
 6. Matches the normalised current URL against each active experiment's control URL.
 7. Skips the experiment — no draw, nothing reported, page revealed — if the device is not targeted,
    or the visitor falls outside the traffic allocation (a decision drawn once and persisted).
-8. Reads the visitor's stored assignment, or draws one by the arms' weights and persists it.
-9. Reports the assignment and page view to `/api/v1/events` with `sendBeacon`.
+8. Reads the visitor's stored assignment; with none, asks the server (`POST /api/v1/assign`, once),
+   which chooses a balanced arm against the actual assignments and records it — and persists the
+   answer. No answer (offline, timeout, a bot, a paused test) means not entered on this page load;
+   the browser never draws an arm of its own.
+9. Reports the page view to `/api/v1/events` with `sendBeacon` (the assignment itself was recorded
+   by the server when it chose it).
 10. **Split URL:** redirects variant visitors to the variant URL (carrying their own query string
     and fragment when `keepParams` is on), or leaves control visitors in place.
     **A/B test:** keeps everyone on the page and applies the variant's visual changes (§6).

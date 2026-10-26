@@ -1,250 +1,191 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   assignmentKey,
-  drawArm,
+  knownAssignment,
+  obtainAssignment,
   readAssignment,
-  resolveAssignment,
+  requestAssignment,
   writeAssignment,
 } from "../src/assignment";
-import type { ExperimentConfig } from "../src/contract";
+import type { AssignResponse } from "../src/contract";
 import { createMemoryStore } from "../src/env";
 
+/**
+ * The browser side of assignment: the arm is the server's (`POST /api/v1/assign`, balanced there —
+ * see `apps/web/src/lib/balance.test.ts`), asked for once and then read from storage. These tests
+ * pin the "once": repeat visits and refreshes never ask again, and nothing is ever guessed.
+ */
+
+const EXP = "exp_1";
 const VARIANT_ID = "var_1";
 
-const EXPERIMENT: ExperimentConfig = {
-  id: "exp_1",
-  control: { url: "https://acme.test/pricing", match: "EXACT" },
-  controlWeight: 50,
-  variants: [{ id: VARIANT_ID, url: "https://acme.test/pricing-v2", weight: 50 }],
-  goal: { url: "https://acme.test/thanks", match: "EXACT" },
-  trafficAllocation: 100,
-};
+/** A server that answers `variantId` and counts how often it was asked. */
+function server(answer: AssignResponse | null) {
+  return vi.fn(async () => answer);
+}
 
-/** A deterministic source of "randomness", so a draw can be aimed at any arm. */
-const fixed = (value: number) => () => value;
-
-describe("drawArm", () => {
-  it("respects the boundary between control and one variant", () => {
-    // Control holds the lower half of the range, the one variant the upper half.
-    expect(drawArm(50, EXPERIMENT.variants, fixed(0.49))).toBeNull();
-    expect(drawArm(50, EXPERIMENT.variants, fixed(0.5))).toBe(VARIANT_ID);
-    expect(drawArm(50, EXPERIMENT.variants, fixed(0.99))).toBe(VARIANT_ID);
-  });
-
-  it("splits evenly when every arm carries the same weight", () => {
-    const variants = [
-      { id: "var_1", url: "https://acme.test/v1", weight: 50 },
-      { id: "var_2", url: "https://acme.test/v2", weight: 50 },
-    ];
-    // 3 equally-weighted arms: each occupies one third of the range.
-    expect(drawArm(50, variants, fixed(0.1))).toBeNull();
-    expect(drawArm(50, variants, fixed(0.4))).toBe("var_1");
-    expect(drawArm(50, variants, fixed(0.7))).toBe("var_2");
-  });
-
-  it("honours an uneven split", () => {
-    const variants = [{ id: "var_1", url: "https://acme.test/v1", weight: 80 }];
-    // 20/80: control owns only the first fifth of the range.
-    expect(drawArm(20, variants, fixed(0.19))).toBeNull();
-    expect(drawArm(20, variants, fixed(0.21))).toBe("var_1");
-  });
-
-  it("treats weights as relative, not as percentages", () => {
-    // 1:1 must behave exactly like 50:50 — nothing requires weights to add up to 100.
-    const variants = [{ id: "var_1", url: "https://acme.test/v1", weight: 1 }];
-    expect(drawArm(1, variants, fixed(0.49))).toBeNull();
-    expect(drawArm(1, variants, fixed(0.51))).toBe("var_1");
-  });
-
-  it("never draws an arm parked at zero", () => {
-    const variants = [
-      { id: "var_1", url: "https://acme.test/v1", weight: 0 },
-      { id: "var_2", url: "https://acme.test/v2", weight: 50 },
-    ];
-    for (const roll of [0.5, 0.6, 0.75, 0.9, 0.999]) {
-      expect(drawArm(50, variants, fixed(roll))).not.toBe("var_1");
-    }
-    // …and control at zero is skipped just the same.
-    expect(drawArm(0, [{ id: "var_1", url: "https://acme.test/v1", weight: 10 }], fixed(0))).toBe(
-      "var_1",
-    );
-  });
-
-  it("falls back to control rather than throwing when every arm is parked", () => {
-    // Rejected by validation server-side, but a tracking script must not throw on a config it
-    // somehow received anyway.
-    expect(
-      drawArm(0, [{ id: "var_1", url: "https://acme.test/v1", weight: 0 }], fixed(0.5)),
-    ).toBeNull();
-  });
-
-  it("ignores a non-finite or negative weight instead of corrupting the range", () => {
-    const variants = [
-      { id: "var_1", url: "https://acme.test/v1", weight: Number.NaN },
-      { id: "var_2", url: "https://acme.test/v2", weight: -10 },
-      { id: "var_3", url: "https://acme.test/v3", weight: 50 },
-    ];
-    // Only control and var_3 carry usable weight, so this is an even two-way split.
-    expect(drawArm(50, variants, fixed(0.25))).toBeNull();
-    expect(drawArm(50, variants, fixed(0.75))).toBe("var_3");
-  });
-
-  it("stays inside the last arm for a random source that returns exactly 1", () => {
-    expect(drawArm(50, EXPERIMENT.variants, fixed(1))).toBe(VARIANT_ID);
-  });
-});
-
-describe("distribution", () => {
-  it("is approximately balanced across many new visitors, one variant", () => {
-    const trials = 20_000;
-    let variant = 0;
-
-    for (let i = 0; i < trials; i += 1) {
-      // Each iteration is a distinct new visitor: a fresh store means no prior assignment.
-      const store = [createMemoryStore()];
-      if (resolveAssignment(EXPERIMENT, store).variantId !== null) variant += 1;
-    }
-
-    const share = variant / trials;
-    // ±2 points. A true 50/50 over 20k draws has a standard deviation of ~0.35 points, so
-    // this is ~5.7σ — tight enough to catch a real bias, loose enough not to flake.
-    expect(share).toBeGreaterThan(0.48);
-    expect(share).toBeLessThan(0.52);
-  });
-
-  it("is approximately balanced across control and two variants", () => {
-    const trials = 30_000;
-    const experiment: ExperimentConfig = {
-      ...EXPERIMENT,
-      controlWeight: 50,
-      variants: [
-        { id: "var_1", url: "https://acme.test/v1", weight: 50 },
-        { id: "var_2", url: "https://acme.test/v2", weight: 50 },
-      ],
-    };
-    const counts = { control: 0, var_1: 0, var_2: 0 };
-
-    for (let i = 0; i < trials; i += 1) {
-      const store = [createMemoryStore()];
-      const { variantId } = resolveAssignment(experiment, store);
-      counts[variantId === null ? "control" : (variantId as "var_1" | "var_2")] += 1;
-    }
-
-    // Each of the 3 arms should land near 1/3 — ±2.5 points is comfortably outside noise for
-    // 30k trials (σ ≈ 0.27 points).
-    for (const share of [counts.control / trials, counts.var_1 / trials, counts.var_2 / trials]) {
-      expect(share).toBeGreaterThan(0.308);
-      expect(share).toBeLessThan(0.358);
-    }
-  });
-
-  it("follows an uneven weighting over many visitors", () => {
-    const trials = 30_000;
-    const experiment: ExperimentConfig = {
-      ...EXPERIMENT,
-      controlWeight: 20,
-      variants: [{ id: "var_1", url: "https://acme.test/v1", weight: 80 }],
-    };
-    let control = 0;
-
-    for (let i = 0; i < trials; i += 1) {
-      const store = [createMemoryStore()];
-      if (resolveAssignment(experiment, store).variantId === null) control += 1;
-    }
-
-    // 20/80 — σ ≈ 0.23 points over 30k draws, so ±2 points is far outside noise.
-    const share = control / trials;
-    expect(share).toBeGreaterThan(0.18);
-    expect(share).toBeLessThan(0.22);
-  });
-});
-
-describe("assignment consistency", () => {
-  it("does not re-randomise on a repeat visit", () => {
+describe("obtainAssignment", () => {
+  it("asks the server once, stores the answer as already recorded, and returns it", async () => {
     const stores = [createMemoryStore()];
-    const first = resolveAssignment(EXPERIMENT, stores);
+    const ask = server({ variantId: VARIANT_ID });
 
-    // Draws are forced to the *opposite* arm; a stored assignment must win regardless.
-    const opposite = first.variantId !== null ? fixed(0.99) : fixed(0.01);
-
-    for (let i = 0; i < 50; i += 1) {
-      const again = resolveAssignment(EXPERIMENT, stores, { random: opposite });
-      expect(again.variantId).toBe(first.variantId);
-      expect(again.isNew).toBe(false);
-    }
+    expect(await obtainAssignment(EXP, stores, ask)).toBe(VARIANT_ID);
+    expect(ask).toHaveBeenCalledTimes(1);
+    // `sent`: the server wrote the assignment when it chose it, so no assignment event follows.
+    expect(readAssignment(EXP, stores)).toMatchObject({ variantId: VARIANT_ID, sent: true });
   });
 
-  it("keeps separate experiments independent", () => {
+  it("keeps a control answer as control (null), not as 'no answer'", async () => {
     const stores = [createMemoryStore()];
-    resolveAssignment(EXPERIMENT, stores, { random: fixed(0.9) });
-    resolveAssignment({ ...EXPERIMENT, id: "exp_2" }, stores, { random: fixed(0.1) });
+    expect(await obtainAssignment(EXP, stores, server({ variantId: null }))).toBeNull();
+    expect(readAssignment(EXP, stores)?.variantId).toBeNull();
+  });
+
+  it("never asks again on a repeat visit: the returning visitor keeps their version", async () => {
+    const stores = [createMemoryStore()];
+    await obtainAssignment(EXP, stores, server({ variantId: VARIANT_ID }));
+
+    // The server would now say something else — it is never asked.
+    const later = server({ variantId: null });
+    for (let visit = 0; visit < 20; visit += 1) {
+      expect(await obtainAssignment(EXP, stores, later)).toBe(VARIANT_ID);
+    }
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it("does not ask on a refresh, which reads the same storage again", async () => {
+    const storage = createMemoryStore();
+    await obtainAssignment(EXP, [storage], server({ variantId: VARIANT_ID }));
+
+    const ask = server({ variantId: null });
+    for (let refresh = 0; refresh < 5; refresh += 1) {
+      // A refresh: a new page load, new store list, the same underlying storage.
+      expect(await obtainAssignment(EXP, [storage, createMemoryStore()], ask)).toBe(VARIANT_ID);
+    }
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it("does not enter the visitor — and guesses nothing — when the server cannot answer", async () => {
+    const stores = [createMemoryStore()];
+    expect(await obtainAssignment(EXP, stores, server(null))).toBeUndefined();
+    expect(readAssignment(EXP, stores)).toBeNull();
+
+    // The next page load asks again.
+    expect(await obtainAssignment(EXP, stores, server({ variantId: VARIANT_ID }))).toBe(VARIANT_ID);
+  });
+
+  it("rejects a malformed answer rather than storing it", async () => {
+    const stores = [createMemoryStore()];
+    const junk = vi.fn(async () => ({ variantId: 42 }) as unknown as AssignResponse);
+    expect(await obtainAssignment(EXP, stores, junk)).toBeUndefined();
+    expect(readAssignment(EXP, stores)).toBeNull();
+  });
+
+  it("keeps separate experiments independent", async () => {
+    const stores = [createMemoryStore()];
+    await obtainAssignment("exp_1", stores, server({ variantId: VARIANT_ID }));
+    await obtainAssignment("exp_2", stores, server({ variantId: null }));
 
     expect(readAssignment("exp_1", stores)?.variantId).toBe(VARIANT_ID);
     expect(readAssignment("exp_2", stores)?.variantId).toBeNull();
     expect(assignmentKey("exp_1")).not.toBe(assignmentKey("exp_2"));
   });
 
+  it("asks again when the stored value is corrupted or the wrong type", async () => {
+    const corrupt = createMemoryStore();
+    corrupt.setItem(assignmentKey(EXP), "{not json");
+    expect(await obtainAssignment(EXP, [corrupt], server({ variantId: VARIANT_ID }))).toBe(
+      VARIANT_ID,
+    );
+
+    const wrongType = createMemoryStore();
+    wrongType.setItem(assignmentKey(EXP), JSON.stringify({ variantId: 12345 }));
+    expect(await obtainAssignment(EXP, [wrongType], server({ variantId: null }))).toBeNull();
+  });
+
+  it("writes to every store so one being cleared does not re-ask", async () => {
+    const local = createMemoryStore();
+    const memory = createMemoryStore();
+    await obtainAssignment(EXP, [local, memory], server({ variantId: VARIANT_ID }));
+
+    local.removeItem(assignmentKey(EXP));
+
+    const ask = server({ variantId: null });
+    expect(await obtainAssignment(EXP, [local, memory], ask)).toBe(VARIANT_ID);
+    expect(ask).not.toHaveBeenCalled();
+  });
+});
+
+describe("knownAssignment", () => {
   it("applies a handed-over decision only when nothing is stored", () => {
     const fresh = [createMemoryStore()];
-    expect(resolveAssignment(EXPERIMENT, fresh, { forced: VARIANT_ID }).variantId).toBe(VARIANT_ID);
+    expect(knownAssignment(EXP, fresh, VARIANT_ID)).toBe(VARIANT_ID);
+    expect(readAssignment(EXP, fresh)?.variantId).toBe(VARIANT_ID);
 
     // An existing assignment must not be overwritten by a value from a query string.
     const existing = [createMemoryStore()];
-    resolveAssignment(EXPERIMENT, existing, { random: fixed(0.01) }); // control
-    expect(resolveAssignment(EXPERIMENT, existing, { forced: VARIANT_ID }).variantId).toBeNull();
+    writeAssignment(EXP, { variantId: null, at: 0, sent: true }, existing);
+    expect(knownAssignment(EXP, existing, VARIANT_ID)).toBeNull();
   });
 
-  it("distinguishes `forced: null` (forced to control) from omitting `forced` entirely", () => {
-    // `null` is itself meaningful now — unlike the old model, it can't share a sentinel with
-    // "no forced value" the way falsy values could when control had no id of its own.
-    const store = [createMemoryStore()];
-    expect(resolveAssignment(EXPERIMENT, store, { forced: null }).variantId).toBeNull();
+  it("distinguishes forced to control (null) from no forced value (undefined)", () => {
+    expect(knownAssignment(EXP, [createMemoryStore()], null)).toBeNull();
+    expect(knownAssignment(EXP, [createMemoryStore()])).toBeUndefined();
   });
 
-  it("re-draws when the stored value is corrupted", () => {
-    const store = createMemoryStore();
-    store.setItem(assignmentKey(EXPERIMENT.id), "{not json");
-
-    const result = resolveAssignment(EXPERIMENT, [store], { random: fixed(0.9) });
-    expect(result.variantId).toBe(VARIANT_ID);
-    expect(result.isNew).toBe(true);
+  it("marks a handed-over decision as not yet reported, so its assignment event is sent", () => {
+    const stores = [createMemoryStore()];
+    knownAssignment(EXP, stores, VARIANT_ID);
+    expect(readAssignment(EXP, stores)?.sent).toBe(false);
   });
+});
 
-  it("ignores a stored value whose variantId is the wrong type", () => {
-    const store = createMemoryStore();
-    store.setItem(assignmentKey(EXPERIMENT.id), JSON.stringify({ variantId: 12345 }));
+describe("requestAssignment", () => {
+  it("posts the visitor and experiment as text/plain, naming no arm", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ variantId: "v" }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const answer = await requestAssignment("https://api.test", {
+        siteId: "rt_abc",
+        visitorId: "visitor-1",
+        experimentId: EXP,
+      });
+      expect(answer).toEqual({ variantId: "v" });
 
-    expect(resolveAssignment(EXPERIMENT, [store], { random: fixed(0.01) }).variantId).toBeNull();
-  });
-
-  it("survives a page refresh, which reads the same store again", () => {
-    const store = createMemoryStore();
-    const first = resolveAssignment(EXPERIMENT, [store]);
-
-    // A refresh: new arrays, same underlying storage.
-    for (let i = 0; i < 5; i += 1) {
-      expect(resolveAssignment(EXPERIMENT, [store]).variantId).toBe(first.variantId);
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("https://api.test/api/v1/assign");
+      expect(init.method).toBe("POST");
+      expect(init.credentials).toBe("omit");
+      expect(typeof init.body).toBe("string"); // a string body is sent as text/plain: no preflight
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      expect(body).toEqual({ v: 4, siteId: "rt_abc", visitorId: "visitor-1", experimentId: EXP });
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 
-  it("writes to every store so one being cleared does not re-bucket the visitor", () => {
-    const local = createMemoryStore();
-    const memory = createMemoryStore();
-    const first = resolveAssignment(EXPERIMENT, [local, memory]);
-
-    local.removeItem(assignmentKey(EXPERIMENT.id));
-
-    expect(resolveAssignment(EXPERIMENT, [local, memory]).variantId).toBe(first.variantId);
-  });
-
-  it("marks an assignment as reported without changing the arm", () => {
-    const stores = [createMemoryStore()];
-    const first = resolveAssignment(EXPERIMENT, stores);
-
-    writeAssignment(EXPERIMENT.id, { variantId: first.variantId, at: 0, sent: true }, stores);
-
-    expect(readAssignment(EXPERIMENT.id, stores)?.sent).toBe(true);
-    expect(readAssignment(EXPERIMENT.id, stores)?.variantId).toBe(first.variantId);
+  it("resolves null — not entered — on a 204, an error status or a network failure", async () => {
+    const answers = [
+      async () => ({ ok: true, json: async () => JSON.parse("") as unknown }),
+      async () => ({ ok: false, json: async () => ({}) }),
+      async () => {
+        throw new Error("offline");
+      },
+    ];
+    for (const answer of answers) {
+      vi.stubGlobal("fetch", vi.fn(answer));
+      try {
+        expect(
+          await requestAssignment("https://api.test", {
+            siteId: "rt_abc",
+            visitorId: "visitor-1",
+            experimentId: EXP,
+          }),
+        ).toBeNull();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    }
   });
 });

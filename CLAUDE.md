@@ -167,6 +167,7 @@ must be labelled as such wherever it appears.
 | `/api/cron/sheets-sync` | — | Daily 00:20 UTC. Requires `Authorization: Bearer $CRON_SECRET` |
 | `/api/cron/notifications` | — | Daily 00:40 UTC: result-ready backstop, tracking-stopped alerts, visitor-day retention. Same bearer rule |
 | `/api/v1/config` | — | **Public.** Active experiments for a site id (`?v=4`; v3 document for older bundles) |
+| `/api/v1/assign` | — | **Public.** A new visitor's arm, chosen and recorded by the server (balanced allocation, §6) |
 | `/api/v1/events` | — | **Public.** Event ingestion (accepts `v` 3 or 4) |
 | `/api/v1/hit` | — | **Public.** Site-wide page hit — tracking status, daily visitors, page baselines |
 
@@ -484,6 +485,16 @@ Application-level rules enforced in `experiment.service.ts`:
 
 - The **website** comes from the public site id, never from a payload field
 - Every **experiment** is re-checked against that website; only `ACTIVE` accepts events
+- **The server chooses the arm** (`/api/v1/assign`, `lib/balance.ts`): a new visitor goes to the arm
+  furthest below its configured share of *actual* assignments (deficit allocation, random tie-break),
+  inside a transaction holding `pg_advisory_xact_lock` per experiment — so 25 visitors across five
+  equal versions are 5 each, a 50/20/10/10/10 split over 20 is 10/4/2/2/2, and no arm is ever a whole
+  visitor off its share, even under concurrent requests. An existing visitor gets their stored arm
+  back and nothing is written. The SDK asks only when it has no stored arm, and a failed ask means
+  "not entered" for that page load — never a browser-side guess. Balancing is separate from the
+  verdict (`lib/verdict.ts`), which still names nothing below its gate. `/events` can still create an
+  assignment from a claimed arm, for browsers running a cached older bundle; the balancer corrects any
+  skew because it counts the rows that exist
 - The **stored arm wins** over whatever the client claims
 - **URLs are normalised server-side** — a URL over the network is an assertion, not a fact
 - **Timestamps are clamped** (browser clocks are routinely hours off)
@@ -519,7 +530,7 @@ In `<head>`, no `async`/`defer`, so the redirect decision precedes first paint.
 | `identity.ts` | Anonymous visitor id; layered persistence; cross-origin handoff |
 | `url.ts` | Normalisation, EXACT/PREFIX matching, handoff params |
 | `inclusion.ts` | `trafficAllocation` gate, drawn once and persisted, before any arm is drawn |
-| `assignment.ts` | Weighted random draw across the arms, persisted so it never repeats |
+| `assignment.ts` | Stored arm, else the server's (`POST /api/v1/assign`), persisted so it is asked once; never guessed in the browser |
 | `device.ts` | Desktop / mobile / tablet from the user agent, for device targeting |
 | `redirect.ts` | The split-URL decision, four independent loop guards, `keepParams` carry-over |
 | `apply.ts` | Applies an A/B variant's visual changes — text, background colour, image src/alt — bounded, never `innerHTML` |

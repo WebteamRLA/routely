@@ -1,13 +1,21 @@
-import type { ExperimentConfig, ExperimentVariantConfig } from "./contract";
+import type { AssignRequest, AssignResponse } from "./contract";
+import { SDK_PROTOCOL_VERSION } from "./contract";
 import { type KeyValueStore, createMemoryStore, getLocalStorage } from "./env";
+import { getJson } from "./transport";
 
 /**
  * Which arm of an experiment a visitor belongs to.
  *
- * The assignment is made **once**, at random, and then persisted. Persistence — not the
- * randomness — is what makes the experience consistent: on every later page load the stored
- * value is read rather than a new draw being made, so a refresh, a return visit or a second
- * tab all see the same version. A visitor who saw a variant yesterday sees it today.
+ * The arm is chosen **by the server**, once (`POST /api/v1/assign`): only there are the other
+ * visitors' assignments visible, and the split is balanced against them — 25 visitors across five
+ * equal versions are 5 each, not whatever a coin happened to give. It is then persisted here, and
+ * persistence is what makes the experience consistent: every later page load reads the stored arm
+ * and asks nothing, so a refresh, a return visit or a second tab all see the same version and none
+ * of them counts as a new visitor.
+ *
+ * The browser never guesses. If the server cannot be asked — offline, slow, blocked — the visitor
+ * is simply not entered on that page load and sees the page as it is; the next page load asks
+ * again. A guess would put them in an arm the server never balanced or recorded.
  */
 
 const KEY_PREFIX = "routely_a_";
@@ -82,85 +90,56 @@ export function writeAssignment(
 }
 
 /**
- * Draws an arm for a visitor who has none, weighted by each arm's share.
+ * The visitor's arm without asking anyone: the stored one, or — on a fresh origin after a
+ * redirect — the one `forced` carries in the URL, which is then stored. Undefined when neither.
  *
- * Weights are **relative**, not percentages: they are summed and the draw lands proportionally,
- * so `50/50` and `1/1` mean the same thing and no caller has to make them add to 100. An arm
- * weighted `0` is simply never drawn, which is what parking an arm means.
- *
- * The draw is a plain weighted random rather than a hash of the visitor id: with the result
- * persisted, hashing would buy nothing except an inability to re-weight later without
- * re-bucketing everyone who had already been assigned.
- *
- * A non-finite or negative weight is treated as `0`, and a set that sums to `0` falls back to
- * control — a configuration that can't be drawn from must not throw inside a tracking script.
+ * `forced` is applied only when nothing is stored: a value from a query string is
+ * attacker-controllable, so it may seed an origin that has no assignment yet but never overwrite
+ * one. `undefined` (not `null`) means "no forced value" — `null` is itself an arm (control).
  */
-export function drawArm(
-  controlWeight: number,
-  variants: Pick<ExperimentVariantConfig, "id" | "weight">[],
-  random: () => number = Math.random,
-): string | null {
-  const clean = (weight: number) => (Number.isFinite(weight) && weight > 0 ? weight : 0);
-
-  const control = clean(controlWeight);
-  const weights = variants.map((variant) => clean(variant.weight));
-  const total = weights.reduce((sum, weight) => sum + weight, control);
-
-  if (total <= 0) return null;
-
-  // `random()` is [0, 1), so `roll` lands inside one of the ranges below. A source that
-  // returns exactly 1 — or a float rounding at the very top of the range — falls past the
-  // last range instead, so the tail below hands it to the last arm that can actually be
-  // drawn rather than wrapping it back to control.
-  let roll = random() * total;
-
-  if (roll < control) return null;
-  roll -= control;
-
-  for (const [index, weight] of weights.entries()) {
-    if (roll < weight) return variants[index]!.id;
-    roll -= weight;
-  }
-
-  for (let index = weights.length - 1; index >= 0; index -= 1) {
-    if (weights[index]! > 0) return variants[index]!.id;
-  }
-
-  return null;
+export function knownAssignment(
+  experimentId: string,
+  stores: KeyValueStore[],
+  forced?: string | null,
+): string | null | undefined {
+  const existing = readAssignment(experimentId, stores);
+  if (existing) return existing.variantId;
+  if (forced === undefined) return undefined;
+  writeAssignment(experimentId, { variantId: forced, at: Date.now(), sent: false }, stores);
+  return forced;
 }
 
-export interface AssignmentResult {
-  variantId: string | null;
-  /** True when this page load made the decision, rather than reading a stored one. */
-  isNew: boolean;
+/** Asks the server for this visitor's arm (`AssignRequest`). Null: not entered. */
+export function requestAssignment(
+  apiBase: string,
+  request: Omit<AssignRequest, "v">,
+  timeoutMs?: number,
+): Promise<AssignResponse | null> {
+  return getJson<AssignResponse>(
+    apiBase + "/api/v1/assign",
+    timeoutMs,
+    JSON.stringify({ v: SDK_PROTOCOL_VERSION, ...request }),
+  );
 }
 
 /**
- * Returns the visitor's arm for an experiment, drawing and persisting one only if absent.
- *
- * `forced` carries a decision handed over in the URL after a redirect. It is applied only when
- * nothing is stored: a value from a query string is attacker-controllable, so it may seed a new
- * assignment on a fresh origin but must never overwrite one already made. Distinguished from
- * "no forced value" by `undefined` rather than `null`, because `null` is itself a meaningful
- * forced value now (forced to control) — unlike the old two-arm model, where "not forced" and
- * "forced to control" could share one falsy sentinel.
+ * The visitor's arm: the stored one if there is one (no request — this is every refresh and every
+ * return visit), otherwise the server's answer, stored as already recorded (`sent`), since the
+ * server wrote the assignment when it chose it. Undefined when the server did not enter them.
  */
-export function resolveAssignment(
-  experiment: Pick<ExperimentConfig, "id" | "controlWeight" | "variants">,
+export async function obtainAssignment(
+  experimentId: string,
   stores: KeyValueStore[],
-  options: { forced?: string | null; random?: () => number; now?: number } = {},
-): AssignmentResult {
-  const existing = readAssignment(experiment.id, stores);
-  if (existing) return { variantId: existing.variantId, isNew: false };
+  ask: () => Promise<AssignResponse | null>,
+): Promise<string | null | undefined> {
+  const known = knownAssignment(experimentId, stores);
+  if (known !== undefined) return known;
 
-  const variantId =
-    options.forced !== undefined
-      ? options.forced
-      : drawArm(experiment.controlWeight, experiment.variants, options.random);
-
-  writeAssignment(experiment.id, { variantId, at: options.now ?? Date.now(), sent: false }, stores);
-
-  return { variantId, isNew: true };
+  const answer = await ask();
+  const variantId = answer ? answer.variantId : undefined;
+  if (variantId !== null && typeof variantId !== "string") return undefined;
+  writeAssignment(experimentId, { variantId, at: Date.now(), sent: true }, stores);
+  return variantId;
 }
 
 /** Marks an assignment as acknowledged by the backend so it is not reported repeatedly. */

@@ -12,8 +12,14 @@ import * as visitorDayRepo from "@/server/repositories/visitor-day.repository";
 import * as visitorRepo from "@/server/repositories/visitor.repository";
 import * as websiteRepo from "@/server/repositories/website.repository";
 import * as websiteService from "@/server/services/website.service";
+import { assignVisitor } from "@/lib/balance";
 import { utcDayKey } from "@/lib/utc-day";
-import { clampClientTimestamp, eventBatchSchema, pageHitSchema } from "@/validation/tracking";
+import {
+  assignRequestSchema,
+  clampClientTimestamp,
+  eventBatchSchema,
+  pageHitSchema,
+} from "@/validation/tracking";
 
 /**
  * Ingestion of events reported by the tracking SDK.
@@ -175,6 +181,12 @@ export async function ingest(payload: unknown): Promise<IngestResult> {
      * means either the visitor was never in the experiment, or a forged payload is trying to
      * manufacture one. Creating it here would let a crafted request invent a visitor *and*
      * their arm, and then convert them: a direct way to move an experiment's result.
+     *
+     * The current SDK never relies on this creation: its arm comes from `assignForVisitor`
+     * (balanced, recorded) before any event is sent, so the row already exists here. It remains
+     * for a browser still running a cached older bundle, which drew its own arm — rejecting those
+     * would strand that visitor's events for good. Any skew they add is corrected by the balancer,
+     * which counts the rows that exist, whoever created them.
      */
     const assignment =
       event.type === "conversion"
@@ -221,6 +233,44 @@ export async function ingest(payload: unknown): Promise<IngestResult> {
   }
 
   return result;
+}
+
+/**
+ * A new visitor's arm in an experiment — `POST /api/v1/assign`.
+ *
+ * The server, not the browser, chooses: only here are the other visitors' assignments visible, and
+ * balancing needs them (`lib/balance.ts` — deficit allocation against the configured split, under a
+ * per-experiment lock). A visitor who already has an arm gets that arm back and nothing is written,
+ * so a refresh, a return visit or a second tab neither moves nor adds a visitor.
+ *
+ * The same trust rules as `ingest`: the website comes from the public site id, the experiment must
+ * be ACTIVE on that website, and the request names no arm at all. Returns null — "not entered" —
+ * for anything malformed, unknown or paused; the SDK then leaves the page alone.
+ */
+export async function assignForVisitor(
+  payload: unknown,
+  now: Date = new Date(),
+): Promise<{ variantId: string | null } | null> {
+  const parsed = assignRequestSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  const { siteId, visitorId: anonymousId, experimentId } = parsed.data;
+
+  const website = await websiteService.resolveWebsiteByPublicSiteId(siteId);
+  if (!website) return null;
+  const experiment = await experimentRepo.findActiveExperimentForWebsite(experimentId, website.id);
+  if (!experiment) return null;
+
+  const visitor = await visitorRepo.upsertVisitor(website.id, anonymousId, now);
+  const { variantId } = await assignVisitor(
+    assignmentRepo.assignmentLedger(now),
+    {
+      id: experiment.id,
+      controlWeight: experiment.controlWeight,
+      variants: experiment.variants.map((variant) => ({ id: variant.id, weight: variant.weight })),
+    },
+    visitor.id,
+  );
+  return { variantId };
 }
 
 /**

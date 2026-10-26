@@ -95,6 +95,17 @@ export const pageHitSchema = z.object({
 export type PageHitInput = z.infer<typeof pageHitSchema>;
 
 /**
+ * Body of `POST /api/v1/assign` — a visitor with no arm yet asking for one (`AssignRequest` in the
+ * SDK contract). The server chooses the arm (`lib/balance.ts`); nothing in the request can.
+ */
+export const assignRequestSchema = z.object({
+  v: z.literal(ACCEPTED_PROTOCOL_VERSIONS),
+  siteId: publicSiteIdSchema,
+  visitorId: anonymousIdSchema,
+  experimentId: idSchema,
+});
+
+/**
  * Query parameters of the SDK config endpoint.
  *
  * `v` is the protocol the caller understands. Absent (an installed v3 bundle never sent it) or

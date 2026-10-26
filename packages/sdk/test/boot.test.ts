@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConfigResponse, ExperimentConfig } from "../src/contract";
+import { assignmentKey } from "../src/assignment";
+import type { AssignResponse, ConfigResponse, ExperimentConfig } from "../src/contract";
+import { resetPageViewGuard } from "../src/dedupe";
 import { createMemoryStore } from "../src/env";
 import { boot } from "../src/index";
 import { FakeElement } from "./fake-dom";
@@ -37,20 +39,39 @@ interface Setup {
   experiments?: ExperimentConfig[];
   ua?: string;
   framedBy?: { postMessage: (...args: unknown[]) => void };
+  /** What `POST /api/v1/assign` answers; null is "not entered". Default: the first variant. */
+  assign?: AssignResponse | null;
+  /** Storage carried over from an earlier page load (a refresh, a return visit). */
+  localStorage?: ReturnType<typeof createMemoryStore>;
 }
 
-function setup({ href = PAGE, experiments = [AB], ua = DESKTOP_UA, framedBy }: Setup = {}) {
+function setup({
+  href = PAGE,
+  experiments = [AB],
+  ua = DESKTOP_UA,
+  framedBy,
+  assign = { variantId: experiments[0]?.variants[0]?.id ?? null },
+  localStorage = createMemoryStore(),
+}: Setup = {}) {
+  // Each setup is a new page load, so a new bundle instance: no page view reported yet.
+  resetPageViewGuard();
   const hero = new FakeElement("h1");
   hero.textContent = "Original heading";
   const reveal = vi.fn();
   const beacons: { url: string; body: Blob }[] = [];
   const config: ConfigResponse = { v: 4, siteId: "rt_abc", ttl: 60, experiments };
-  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => config }));
+  const fetchMock = vi.fn(async (url: string) =>
+    url.endsWith("/api/v1/assign")
+      ? { ok: assign !== null, json: async () => assign }
+      : { ok: true, json: async () => config },
+  );
+  const assignCalls = () =>
+    fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/api/v1/assign")).length;
 
   const script = { dataset: { siteId: "rt_abc", api: API } };
   const win: Record<string, unknown> = {
     location: { href, protocol: "https:", replace: vi.fn() },
-    localStorage: createMemoryStore(),
+    localStorage,
     sessionStorage: createMemoryStore(),
     __routelyReveal: reveal,
     opener: null,
@@ -77,7 +98,7 @@ function setup({ href = PAGE, experiments = [AB], ua = DESKTOP_UA, framedBy }: S
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("addEventListener", vi.fn());
 
-  return { hero, reveal, beacons, fetchMock, win };
+  return { hero, reveal, beacons, fetchMock, win, assignCalls, localStorage };
 }
 
 const sentTo = (beacons: { url: string }[], path: string) =>
@@ -105,9 +126,7 @@ describe("boot", () => {
   });
 
   it("leaves an A/B control visitor's page untouched and reveals at once", async () => {
-    const page = setup({
-      experiments: [{ ...AB, controlWeight: 100, variants: [{ ...AB.variants[0]!, weight: 0 }] }],
-    });
+    const page = setup({ assign: { variantId: null } });
     const state = await boot();
     expect(state?.action).toBe("stay");
     expect(state?.assignment?.variantId).toBeNull();
@@ -167,5 +186,69 @@ describe("boot", () => {
     const state = await boot();
     expect(state?.action).toBe("apply");
     expect(page.fetchMock).toHaveBeenCalled();
+  });
+
+  it("takes the arm from the server once, and reports no assignment event of its own", async () => {
+    const page = setup();
+    await boot();
+    expect(page.assignCalls()).toBe(1);
+    // The server recorded the assignment when it chose it; the page view is all that is sent.
+    const [events] = sentTo(page.beacons, "/api/v1/events");
+    const body = JSON.parse(await events!.body.text()) as { events: { type: string }[] };
+    expect(body.events.map((event) => event.type)).toEqual(["page_view"]);
+  });
+
+  it("keeps a returning visitor on their original version without asking the server", async () => {
+    const localStorage = createMemoryStore();
+    localStorage.setItem(
+      assignmentKey(AB.id),
+      JSON.stringify({ variantId: null, at: 1, sent: true }),
+    );
+    // The server would now say the variant — it is never asked.
+    const page = setup({ localStorage, assign: { variantId: "var_a" } });
+    const state = await boot();
+    expect(page.assignCalls()).toBe(0);
+    expect(state?.assignment).toEqual({ experimentId: AB.id, variantId: null });
+    expect(page.hero.textContent).toBe("Original heading");
+  });
+
+  it("asks once across refreshes: later page loads read the stored arm", async () => {
+    const localStorage = createMemoryStore();
+    let asked = 0;
+    for (let load = 0; load < 4; load += 1) {
+      const page = setup({ localStorage });
+      const state = await boot();
+      asked += page.assignCalls();
+      expect(state?.assignment).toEqual({ experimentId: AB.id, variantId: "var_a" });
+      vi.unstubAllGlobals();
+    }
+    expect(asked).toBe(1);
+  });
+
+  it("does not enter a visitor the server could not assign: page untouched, nothing reported", async () => {
+    const page = setup({ assign: null });
+    const state = await boot();
+    expect(state?.action).toBe("skip");
+    expect(state?.assignment).toBeNull();
+    expect(page.hero.textContent).toBe("Original heading");
+    expect(sentTo(page.beacons, "/api/v1/events")).toHaveLength(0);
+    expect(page.reveal).toHaveBeenCalled();
+    expect(page.localStorage.getItem(assignmentKey(AB.id))).toBeNull();
+  });
+
+  it("does not ask for an arm for a visitor opening a variant page directly", async () => {
+    const split: ExperimentConfig = {
+      id: "exp_split",
+      control: { url: "https://acme.test/", match: "PREFIX" },
+      controlWeight: 50,
+      variants: [{ id: "var_1", url: "https://acme.test/v2", weight: 50 }],
+      goal: { url: "https://acme.test/thanks", match: "EXACT" },
+      trafficAllocation: 100,
+    };
+    const page = setup({ href: "https://acme.test/v2", experiments: [split] });
+    const state = await boot();
+    expect(state?.action).toBe("skip");
+    expect(page.assignCalls()).toBe(0);
+    expect(state?.assignment).toBeNull();
   });
 });

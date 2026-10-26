@@ -301,10 +301,14 @@ page view:
 3. SDK fetches `/api/v1/config?siteId=…&v=4` (cached in `sessionStorage` for its TTL, and
    `s-maxage`-cacheable server-side) and, meanwhile, sends the site-wide hit.
 4. SDK finds an ACTIVE experiment whose control URL matches the normalised current URL.
-5. Device targeting, then the traffic-allocation gate (drawn once, persisted), then the arm:
-   a **random weighted draw, persisted** in `localStorage` so it never repeats. (Part 0 planned a
-   deterministic FNV-1a hash of the visitor id; a persisted draw replaced it, so a stored assignment
-   never moves whatever the configuration later says.)
+5. Device targeting, then the traffic-allocation gate (drawn once, persisted), then the arm: the
+   stored one, or — for a visitor with none — **chosen by the server** (`POST /api/v1/assign`) and
+   persisted in `localStorage` so it is asked once. The server balances against the actual
+   assignments (`lib/balance.ts`: each new visitor goes to the arm furthest below its configured
+   share, under a per-experiment advisory lock), so small samples follow the split exactly instead
+   of a coin's lumps. A failed request means "not entered" for that page load; the browser never
+   guesses. (Part 0 planned an FNV-1a hash of the visitor id, then a persisted browser-side random
+   draw replaced it; balancing needs the other visitors' counts, which only the server has.)
 6. Split URL: control stays, a variant gets `location.replace(variantUrl + handoff params)`.
    A/B test: everyone stays; a variant's visual changes are applied.
 7. Assignment, page-view, engagement and conversion events are beaconed to `/api/v1/events`.
@@ -488,8 +492,9 @@ feature rather than stopping the server.
 2. **Conversions and identity are per-origin.** The assignment lives in `localStorage`; the
    redirect handoff carries identity from control to variant, but a goal page on another origin
    reached without that handoff will not convert.
-3. **Client-side assignment** means a visitor who clears storage is re-bucketed and counted as
-   a new visitor. Assignment is stable per device, not per person. Device targeting is decided in
+3. **Assignment is keyed to the browser's anonymous id**, so a visitor who clears storage gets a
+   new id and is re-bucketed and counted as a new visitor. A first visit to a tested page costs one
+   extra request (`/api/v1/assign`) before the redirect decision, inside the anti-flicker window. Assignment is stable per device, not per person. Device targeting is decided in
    the browser and cannot be verified by the server.
 4. **Redirect flicker is mitigated, not eliminated** on slow connections; the cloak times out
    at `routelyTimeout` (1250 ms by default) in favour of showing the Control page. Sites that do

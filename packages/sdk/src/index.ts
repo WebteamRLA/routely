@@ -24,9 +24,11 @@
  */
 
 import {
+  knownAssignment,
   markAssignmentSent,
+  obtainAssignment,
   readAssignment,
-  resolveAssignment,
+  requestAssignment,
   resolveAssignmentStores,
 } from "./assignment";
 import { applyChanges } from "./apply";
@@ -57,7 +59,7 @@ import { normalizeUrl, readHandoff, stripHandoff } from "./url";
 export * from "./contract";
 export { resolveIdentity, isValidVisitorId } from "./identity";
 export { loadConfig, isConfigResponse } from "./config";
-export { resolveAssignment, drawArm, readAssignment } from "./assignment";
+export { obtainAssignment, knownAssignment, readAssignment } from "./assignment";
 export { resolveInclusion, readInclusion } from "./inclusion";
 export { decide, findExperimentForUrl } from "./redirect";
 export { normalizeUrl, urlMatches, isSameUrl, withHandoff, readHandoff } from "./url";
@@ -247,6 +249,14 @@ export async function boot(): Promise<RoutelyState | null> {
   const forcedVariantId = (experiment: { id: string }): string | null | undefined =>
     handoff && handoff.experimentId === experiment.id ? handoff.variant : undefined;
 
+  // Only a visitor with no stored arm reaches the server, and only once per experiment.
+  const ask = (experimentId: string) => () =>
+    requestAssignment(
+      options.apiBase,
+      { siteId: options.siteId, visitorId: identity.id, experimentId },
+      options.timeoutMs,
+    );
+
   const experiment = findExperimentForUrl(href, state.experiments);
   if (!experiment) {
     log("no experiment matches this page");
@@ -262,20 +272,27 @@ export async function boot(): Promise<RoutelyState | null> {
   }
 
   if (experiment.kind === "ab_test") {
-    runVisual(options, state, stores, href, experiment, log);
+    await runVisual(options, state, stores, href, experiment, ask(experiment.id), log);
     return publish();
   }
 
-  const decision = decide(
-    href,
-    [experiment],
-    (experiment) =>
-      // `resolveAssignment` applies `forced` only when nothing is stored, so a query string
-      // can never move an existing visitor.
-      resolveAssignment(experiment, stores, { forced: forcedVariantId(experiment) }).variantId,
-    { visitorId: identity.id },
-    (experiment) => resolveInclusion(experiment.id, experiment.trafficAllocation, stores).included,
-  );
+  const context = { visitorId: identity.id };
+  const included = (experiment: ExperimentConfig) =>
+    resolveInclusion(experiment.id, experiment.trafficAllocation, stores).included;
+
+  // Every loop guard and the inclusion gate run before an arm is asked for, so a visitor who is
+  // skipped anyway never takes a place in the split. Only then is the arm resolved — stored, or
+  // the server's — and the decision made again with it.
+  let decision = decide(href, [experiment], () => null, context, included);
+  if (decision && decision.action === "stay") {
+    const variantId = await obtainAssignment(experiment.id, stores, ask(experiment.id));
+    if (variantId === undefined) {
+      log(`skipping ${experiment.id}: not entered`);
+      state.action = "skip";
+      return publish();
+    }
+    decision = decide(href, [experiment], () => variantId, context, included);
+  }
 
   if (!decision) {
     log("no experiment matches this page");
@@ -293,12 +310,16 @@ export async function boot(): Promise<RoutelyState | null> {
       return publish();
     }
 
-    // An assignment still exists for a visitor already on a variant; surface it so the state
-    // is honest about which arm they are in even when nothing happened this page load.
-    const stored = resolveAssignment(decision.experiment, stores, {
-      forced: forcedVariantId(decision.experiment),
-    });
-    state.assignment = { experimentId: decision.experiment.id, variantId: stored.variantId };
+    // A visitor already on a variant has an arm — stored, or carried in from the redirect on a
+    // fresh origin. Surface and report it. One with neither (who opened a variant URL directly)
+    // was never entered, and is not invented an arm now.
+    const known = knownAssignment(
+      decision.experiment.id,
+      stores,
+      forcedVariantId(decision.experiment),
+    );
+    if (known === undefined) return publish();
+    state.assignment = { experimentId: decision.experiment.id, variantId: known };
     report(options, state, stores, href);
     trackEngagement(options, state, href);
     return publish();
@@ -327,21 +348,27 @@ export async function boot(): Promise<RoutelyState | null> {
  * None of the redirect loop guards apply — nothing navigates. Assignment, reporting, visible
  * time and conversions work exactly as for a split-URL test on its control page.
  */
-function runVisual(
+async function runVisual(
   options: RoutelyOptions,
   state: RoutelyState,
   stores: ReturnType<typeof resolveAssignmentStores>,
   href: string,
   experiment: ExperimentConfig,
+  ask: () => ReturnType<typeof requestAssignment>,
   log: (...args: unknown[]) => void,
-): void {
+): Promise<void> {
   if (!resolveInclusion(experiment.id, experiment.trafficAllocation, stores).included) {
     log(`skipping ${experiment.id}: excluded`);
     state.action = "skip";
     return;
   }
 
-  const { variantId } = resolveAssignment(experiment, stores);
+  const variantId = await obtainAssignment(experiment.id, stores, ask);
+  if (variantId === undefined) {
+    log(`skipping ${experiment.id}: not entered`);
+    state.action = "skip";
+    return;
+  }
   // An id not in this experiment's list is a stale assignment: treated as control, as a
   // split-URL test does, rather than applying nothing under a variant's name.
   const variant = experiment.variants.find((v) => v.id === variantId);

@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Assignment } from "@/generated/prisma/client";
+import type { AssignmentLedger } from "@/lib/balance";
 import { type DbClient, db } from "@/server/db";
 
 /**
@@ -69,4 +70,38 @@ export async function countAssignmentsByVariant(
   });
 
   return new Map(rows.map((row) => [row.variantId, row._count._all]));
+}
+
+/**
+ * The Postgres ledger behind balanced allocation (`lib/balance.ts`).
+ *
+ * Each allocation is one transaction holding `pg_advisory_xact_lock` on the experiment, so the
+ * counts it reads cannot change until its own row is written: two visitors arriving together are
+ * allocated one after the other, never both against the same counts. The lock is transaction-scoped,
+ * so it works through a transaction-mode pooler and is released on commit or rollback. Allocations
+ * for different experiments do not wait for each other.
+ *
+ * The unique constraint on `(experimentId, visitorId)` stays the final guarantee that a visitor can
+ * never hold two arms; the lock is what keeps the *split* honest.
+ */
+export function assignmentLedger(assignedAt: Date): AssignmentLedger {
+  return {
+    serialised: (experimentId, fn) =>
+      db.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`routely:assign:${experimentId}`}, 0))`;
+        return fn({
+          existing: async (visitorId) =>
+            (await tx.assignment.findUnique({
+              where: { experimentId_visitorId: { experimentId, visitorId } },
+              select: { variantId: true },
+            })) ?? undefined,
+          counts: () => countAssignmentsByVariant(experimentId, undefined, tx),
+          create: async (visitorId, variantId) => {
+            await tx.assignment.create({
+              data: { experimentId, visitorId, variantId, assignedAt },
+            });
+          },
+        });
+      }),
+  };
 }
