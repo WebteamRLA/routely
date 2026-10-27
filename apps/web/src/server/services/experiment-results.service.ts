@@ -16,6 +16,7 @@ import {
   buildExperimentModel,
 } from "@/lib/experiment-model";
 import { changeCount, shortUrl } from "@/lib/launch-rules";
+import { spreadsheetUrl } from "@/lib/sheets-card";
 import { can } from "@/lib/permissions";
 import { routes } from "@/lib/routes";
 import { armShares } from "@/lib/traffic";
@@ -31,6 +32,7 @@ import type { ExperimentWithWebsite } from "@/server/repositories/experiment.rep
 import * as resultsRepo from "@/server/repositories/experiment-results.repository";
 import { safeTimeZone } from "@/server/http/viewer-time-zone";
 import * as websiteRepo from "@/server/repositories/website.repository";
+import * as targetRepo from "@/server/repositories/website-sheet-target.repository";
 import * as analyticsService from "@/server/services/analytics.service";
 import * as trackingCheckService from "@/server/services/tracking-check.service";
 
@@ -240,6 +242,8 @@ export type ExperimentDetail =
       canShare: boolean;
       /** The current public link; only filled in for someone who may manage it. */
       shareUrl: string | null;
+      /** The project's Google Sheet (its Routely tab), when one is attached. */
+      sheetUrl: string | null;
     };
 
 async function loadAccess(actorUserId: string, experimentId: string) {
@@ -270,7 +274,7 @@ export async function getExperimentDetail(
   const now = options.now ?? new Date();
   const timeZone = safeTimeZone(options.timeZone);
 
-  const [assigned, converted, rows, activity, tracking, createdByName, chosenByName] =
+  const [assigned, converted, rows, activity, tracking, createdByName, chosenByName, sheet] =
     await Promise.all([
       assignmentRepo.countAssignmentsByVariant(experiment.id),
       conversionRepo.countConversionsByVariant(experiment.id),
@@ -284,6 +288,7 @@ export async function getExperimentDetail(
       trackingCheckService.getExperimentTracking(actorUserId, experiment.id),
       experiment.createdById ? resultsRepo.findDisplayName(experiment.createdById) : null,
       experiment.winnerChosenById ? resultsRepo.findDisplayName(experiment.winnerChosenById) : null,
+      targetRepo.findTargetForWebsite(experiment.websiteId, actorUserId),
     ]);
 
   const resumed = [...activity].reverse().find((row) => row.type === "RESUMED");
@@ -325,6 +330,7 @@ export async function getExperimentDetail(
     canEdit: can(role, "experiment.edit"),
     canShare,
     shareUrl: canShare && experiment.shareToken ? shareUrl(experiment.shareToken) : null,
+    sheetUrl: sheet ? spreadsheetUrl(sheet.spreadsheetId, sheet.sheetId) : null,
   };
 }
 

@@ -58,6 +58,13 @@ export const CheckIcon = (p: IconProps) => (
     <path d="M20 6 9 17l-5-5" />
   </Svg>
 );
+export const ExternalLinkIcon = (p: IconProps) => (
+  <Svg size={15} strokeWidth={1.8} {...p}>
+    <path d="M14 4h6v6" />
+    <path d="M20 4 10 14" />
+    <path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+  </Svg>
+);
 export const EyeIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0" />

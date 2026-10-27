@@ -63,6 +63,7 @@ export default async function ExperimentPage({ params, searchParams }: Props) {
         canEdit={detail.canEdit}
         canShare={detail.canShare}
         shareUrl={detail.shareUrl}
+        sheetUrl={detail.sheetUrl}
         timeZone={timeZone}
       />
     </>

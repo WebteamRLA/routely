@@ -19,6 +19,7 @@ import {
   AlertCircleIcon,
   CheckIcon,
   ChevronRightIcon,
+  ExternalLinkIcon,
   InfoIcon,
   KebabIcon,
   Spinner,
@@ -91,6 +92,7 @@ export function ExperimentView({
   canEdit,
   canShare,
   shareUrl,
+  sheetUrl = null,
   timeZone,
 }: {
   experimentId: string;
@@ -99,6 +101,8 @@ export function ExperimentView({
   canEdit: boolean;
   canShare: boolean;
   shareUrl: string | null;
+  /** The project's Google Sheet, when one is attached: "Open in Google Sheets" in the header. */
+  sheetUrl?: string | null;
   /** The zone the server formatted dates in. */
   timeZone: string;
 }) {
@@ -248,7 +252,19 @@ export function ExperimentView({
             {m.header.sub}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2.5 max-[641px]:w-full max-[641px]:[&>button]:flex-auto">
+        <div className="flex flex-wrap gap-2.5 max-[641px]:w-full max-[641px]:[&>a]:flex-auto max-[641px]:[&>button]:flex-auto">
+          {sheetUrl ? (
+            <a
+              href={sheetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(BTN_OUTLINE, "hover:bg-[#F9FAFB]")}
+            >
+              <ExternalLinkIcon />
+              Open in Google Sheets
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          ) : null}
           {allowed("pause") ? (
             <button type="button" onClick={() => setModal("pause")} className={BTN_OUTLINE}>
               <PauseIcon />
