@@ -261,8 +261,8 @@ describe("cumulative chart", () => {
       [0, 0, 0.5],
     ]);
     expect(m.chart.xTicks.map((t) => t.label)).toEqual(["Oct 10", "Oct 11", "Oct 12"]);
-    // yMax = ceil(50 + 0.4) = 51 → step 2 → 52.
-    expect(m.chart.yMaxPct).toBe(52);
+    // 50% at most → steps of 10 up to 60% (lib/chart-axis.ts).
+    expect(m.chart.yMaxPct).toBe(60);
     const hover = chartHover(m.chart, 1);
     expect(hover.tipDate).toBe("Oct 11 · day 2");
     expect(hover.tipRows.map((r) => r.value)).toEqual(["33.33%", "0.00%"]);

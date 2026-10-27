@@ -4,6 +4,7 @@ import type { MouseEvent } from "react";
 import Link from "next/link";
 
 import { ArrowRightIcon, CheckIcon } from "@/components/rt/icons";
+import { percentAxis } from "@/lib/chart-axis";
 import {
   ACCENT_INK,
   ACCENT_TINT,
@@ -226,7 +227,7 @@ export function Results({
   });
   let maxR = 0;
   series.forEach((sr) => sr.forEach((r) => (maxR = Math.max(maxR, r))));
-  const yMaxPct = Math.max(1, Math.ceil(maxR * 100 + 0.4));
+  const { maxPct: yMaxPct, ticks } = percentAxis(maxR);
   const X = (i: number) => (i / (DAYS - 1)) * 1000;
   const Y = (r: number) => 200 - ((r * 100) / yMaxPct) * 200;
   const dateOf = (i: number) => {
@@ -237,7 +238,7 @@ export function Results({
   const hasHover = hasData && hi != null && hi >= 0 && hi < DAYS;
   const hIdx = hasHover ? hi! : DAYS - 1;
   const yTicks: { label: string; bottom: string; line: string }[] = [];
-  for (let yt = 0; yt <= yMaxPct; yt++)
+  for (const yt of ticks)
     yTicks.push({
       label: yt + "%",
       bottom: ((yt / yMaxPct) * 100).toFixed(2) + "%",

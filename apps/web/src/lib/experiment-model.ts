@@ -14,6 +14,7 @@
  */
 
 import { changeSummaries } from "@/lib/change-summary";
+import { percentAxis } from "@/lib/chart-axis";
 import {
   capitalize,
   dayNumber,
@@ -286,14 +287,12 @@ function buildChart(
 
   let maxR = 0;
   for (const line of rates) for (const r of line) maxR = Math.max(maxR, r);
-  let yMaxPct = Math.max(1, Math.ceil(maxR * 100 + 0.4));
-  const step = yMaxPct > 6 ? 2 : 1;
-  yMaxPct = Math.ceil(yMaxPct / step) * step;
+  const { maxPct: yMaxPct, ticks } = percentAxis(maxR);
   const Y = (r: number) => 200 - ((r * 100) / yMaxPct) * 200;
 
   const dates = series.days.map((key) => formatMonthDay(new Date(`${key}T00:00:00.000Z`), "UTC"));
   const yTicks: ChartModel["yTicks"] = [];
-  for (let yt = 0; yt <= yMaxPct; yt += step) {
+  for (const yt of ticks) {
     yTicks.push({
       label: `${yt}%`,
       bottom: `${((yt / yMaxPct) * 100).toFixed(2)}%`,
