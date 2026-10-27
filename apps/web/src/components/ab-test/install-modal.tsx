@@ -1,5 +1,6 @@
 "use client";
 
+import { HelpLink } from "@/components/common/help-link";
 import {
   ArrowRightIcon,
   ArrowLeftIcon,
@@ -224,7 +225,6 @@ export function InstallModal({
                   <CodeIcon size={12} strokeWidth={2.4} />
                   Manual installation
                 </span>
-                <span className="text-[13px] text-[#6B7280]">About 5 minutes</span>
               </span>
               <AbDialogTitle className="text-[18px] leading-[26px] tracking-[-0.01em]">
                 Add the Routely script to your site
@@ -233,6 +233,9 @@ export function InstallModal({
                 It goes on the page you’re testing and on your goal page, so Routely can show
                 variants and count conversions.
               </p>
+              <HelpLink anchor="tracking-install" newTab>
+                Installation guide
+              </HelpLink>
             </div>
             <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
               <li className="relative flex min-w-0 items-start gap-3">
@@ -382,6 +385,9 @@ export function InstallModal({
                       Check that a cookie banner isn’t blocking the script until visitors accept.
                     </li>
                   </ul>
+                  <HelpLink anchor="tracking-not-found" newTab>
+                    More fixes for a missing pixel
+                  </HelpLink>
                 </div>
               ) : null}
             </section>

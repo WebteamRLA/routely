@@ -7,6 +7,7 @@
  * imported from a client module arrives on the server as a client reference, not an array.
  */
 
+import type { Checklist } from "@/lib/onboarding";
 import { normalizeDomain, projectAddressError, projectNameError } from "@/lib/projects";
 
 /**
@@ -61,6 +62,10 @@ export interface AccountOverview {
   runningProjects: number;
   /** The top projects: most running experiments, then most experiments. At most `TOP_PROJECTS`. */
   projects: DashboardProject[];
+  /** The reader's role in the workspace. */
+  role: "OWNER" | "ADMIN" | "EDITOR" | "VIEWER";
+  /** "Getting started", from the workspace's real state (`lib/onboarding.ts`). */
+  checklist: Checklist;
 }
 
 /** How many projects the card lists before "View all {N} projects". */

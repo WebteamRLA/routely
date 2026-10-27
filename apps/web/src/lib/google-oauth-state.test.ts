@@ -4,6 +4,7 @@ import {
   DEFAULT_RETURN_TO,
   readIdTokenClaims,
   sanitizeReturnTo,
+  withOutcome,
   signState,
   unverifiedReturnTo,
   verifyState,
@@ -73,9 +74,17 @@ describe("OAuth state", () => {
 });
 
 describe("sanitizeReturnTo", () => {
-  it("allows only Integrations and a project dashboard", () => {
+  it("allows only Integrations, a project dashboard, and the Dashboard for a project", () => {
     expect(sanitizeReturnTo("/integrations")).toBe("/integrations");
     expect(sanitizeReturnTo("/projects/cmabc123_-X")).toBe("/projects/cmabc123_-X");
+    expect(sanitizeReturnTo("/dashboard?project=cmabc123")).toBe("/dashboard?project=cmabc123");
+  });
+
+  it("joins the outcome query whether or not the page has one", () => {
+    expect(withOutcome("/projects/p1", "sheets=connected")).toBe("/projects/p1?sheets=connected");
+    expect(withOutcome("/dashboard?project=p1", "sheets=connected")).toBe(
+      "/dashboard?project=p1&sheets=connected",
+    );
   });
 
   it("falls back for everything else", () => {
@@ -92,6 +101,12 @@ describe("sanitizeReturnTo", () => {
       "/projects/a/b",
       "/projects/../settings",
       "/projects/x?y=1",
+      "/dashboard",
+      "/dashboard?project=",
+      "/dashboard?project=x&y=1",
+      "/dashboard?project=x#y",
+      "/dashboard?project=../x",
+      "/dashboard?evil=x",
       "/integrations#x",
       "/settings",
       `/projects/${"a".repeat(65)}`,

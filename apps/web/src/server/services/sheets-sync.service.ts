@@ -82,6 +82,11 @@ function missingConfiguration(): string | null {
   return null;
 }
 
+/** The integration can be used on this deployment (the Dashboard checklist's Sheets step). */
+export function isSheetsAvailable(): boolean {
+  return missingConfiguration() === null;
+}
+
 function assertConfigured(): void {
   const missing = missingConfiguration();
 

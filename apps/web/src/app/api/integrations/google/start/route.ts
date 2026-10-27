@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { env } from "@/env";
-import { sanitizeReturnTo } from "@/lib/google-oauth-state";
+import { sanitizeReturnTo, withOutcome } from "@/lib/google-oauth-state";
 import { can } from "@/lib/permissions";
 import { routes } from "@/lib/routes";
 import { outcomeQuery } from "@/lib/sheets-card";
@@ -28,8 +28,9 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
  *
  * The form may carry a `websiteId` — the project dashboard's Connect button does. Then the grant
  * goes to **that project's** workspace and the callback returns to the project; otherwise it goes
- * to the active workspace and returns to Integrations. Both are decided here and sealed into the
- * signed state, so nothing on the way back can change them.
+ * to the active workspace and returns to Integrations. A connect from the Dashboard checklist's
+ * dialog (`from=dashboard`) returns to `/dashboard?project=<id>` instead, which reopens it. All of
+ * this is decided here and sealed into the signed state, so nothing on the way back can change it.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const session = await getSession();
@@ -46,6 +47,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const form = await request.formData().catch(() => null);
   const websiteId = form?.get("websiteId");
+  // Started from the Dashboard checklist's dialog: come back to the Dashboard, which reopens it.
+  const fromDashboard = form?.get("from") === "dashboard";
 
   if (typeof websiteId === "string" && ID_PATTERN.test(websiteId)) {
     const access = await findWebsiteAccess(websiteId, session.user.id);
@@ -55,13 +58,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (access) {
       workspaceId = access.website.workspaceId;
       role = access.role;
-      returnTo = routes.projects.detail(access.website.id);
+      returnTo = fromDashboard
+        ? `${routes.dashboard}?project=${access.website.id}`
+        : routes.projects.detail(access.website.id);
     }
   }
 
   returnTo = sanitizeReturnTo(returnTo);
   const back = (outcome: Parameters<typeof outcomeQuery>[0]) =>
-    NextResponse.redirect(new URL(`${returnTo}?${outcomeQuery(outcome)}`, request.url), {
+    NextResponse.redirect(new URL(withOutcome(returnTo, outcomeQuery(outcome)), request.url), {
       status: 303,
     });
 

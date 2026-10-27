@@ -2,6 +2,7 @@
 
 import { useState, type MouseEvent } from "react";
 
+import { HelpLink } from "@/components/common/help-link";
 import { ChartIcon } from "@/components/experiments-list/experiment-type-icons";
 import { Svg } from "@/components/rt/icons";
 import { type ResultsModel, chartHover } from "@/lib/experiment-model";
@@ -22,8 +23,11 @@ const MLABEL = "hidden text-left text-xs text-[#6B7280] max-[961px]:block leadin
 export function ResultsPanel({
   m,
   onChooseWinner,
+  helpLinks = false,
 }: {
   m: ResultsModel;
+  /** Links into Help & Guides — signed-in pages only, never the public share page. */
+  helpLinks?: boolean;
   /** Opens "Choose winner"; absent for a Viewer and on the public share page. */
   onChooseWinner?: (() => void) | undefined;
 }) {
@@ -261,6 +265,14 @@ export function ResultsPanel({
         {m.notProof ? (
           <p className="m-0 border-t border-[#EEF0F3] px-5 py-3 text-[13px] leading-[19px] text-pretty text-[#6B7280]">
             {m.notProof}
+            {helpLinks ? (
+              <>
+                {" "}
+                <HelpLink anchor="results" className="align-baseline">
+                  How to read these results
+                </HelpLink>
+              </>
+            ) : null}
           </p>
         ) : null}
       </section>

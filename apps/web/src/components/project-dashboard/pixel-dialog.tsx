@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
+import { HelpLink } from "@/components/common/help-link";
 import {
   type PixelCheckResult,
   type PixelVerify as Verify,
@@ -256,7 +257,6 @@ function PixelPanel({
                   </svg>
                   Manual installation
                 </span>
-                <span className="text-[13px] text-[#6B7280]">About 5 minutes</span>
               </span>
               <DialogPrimitive.Title className="m-0 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-[#111827]">
                 Add the Routely script to your site
@@ -265,6 +265,9 @@ function PixelPanel({
                 It goes on every page of {domain} you want to test, so Routely can show variants and
                 count conversions.
               </p>
+              <HelpLink anchor="tracking-install" newTab>
+                Installation guide
+              </HelpLink>
             </div>
 
             <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
@@ -460,7 +463,6 @@ function VerifyStep({
   onSubmit(e: React.FormEvent): void;
 }) {
   const domain = project.domain;
-  const key = project.key;
   const checking = verify === "checking";
   const shortUrl = shortCheckUrl(url, domain);
 
@@ -470,7 +472,7 @@ function VerifyStep({
     pending: { iconBg: "#F3F4F6", fg: "#9CA3AF", icon: "pending" },
     running: { iconBg: ACCENT_TINT, fg: ACCENT_INK, icon: "running" },
   } as const;
-  const checks = checkRows(verify, result, { shortUrl, key, now: new Date() }).map((c) => ({
+  const checks = checkRows(verify, result, { shortUrl }).map((c) => ({
     title: c.title,
     text: c.text,
     ...TONES[c.tone],
@@ -632,6 +634,9 @@ function VerifyStep({
               <li>If you use a caching plugin or CDN, clear the cache and check again.</li>
               <li>Check that a cookie banner isn’t blocking the code until visitors accept.</li>
             </ul>
+            <HelpLink anchor="tracking-not-found" newTab>
+              More fixes for a missing pixel
+            </HelpLink>
           </div>
         ) : null}
       </section>

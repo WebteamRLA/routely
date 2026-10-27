@@ -242,7 +242,11 @@ export function ProjectDashboardView({
 
   const sheets = data?.sheets ?? null;
   const panel0 = initialPanel(view);
-  const [sheetsOpen, setSheetsOpen] = useState(panel0 !== null && sheets !== null);
+  // Back from Google's consent screen (`?sheets=…`), straight into the setup dialog: with Google
+  // connected, the next step is choosing the spreadsheet.
+  const [sheetsOpen, setSheetsOpen] = useState(
+    (panel0 !== null || sheets?.outcome != null) && sheets !== null,
+  );
   const [sheetsPanel, setSheetsPanel] = useState<Partial<SheetsPanel> | undefined>(
     panel0 ?? undefined,
   );

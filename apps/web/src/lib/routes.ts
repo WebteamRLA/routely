@@ -41,6 +41,11 @@ export const routes = {
     detail: (projectId: string) => `/projects/${encodeURIComponent(projectId)}`,
   },
 
+  /** Help & Guides: every guide (`lib/guides.ts`) on one scrolling page. */
+  help: {
+    index: "/help",
+  },
+
   /** Public, token-addressed results page. Deliberately outside the protected prefixes. */
   share: (token: string) => `/share/${encodeURIComponent(token)}`,
 
@@ -101,6 +106,7 @@ export const PROTECTED_PREFIXES = [
   "/experiments",
   "/metrics",
   "/integrations",
+  "/help",
 ] as const;
 
 export function isProtectedPath(pathname: string): boolean {

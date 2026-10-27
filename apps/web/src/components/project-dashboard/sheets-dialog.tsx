@@ -90,6 +90,8 @@ export interface LiveSheets {
   replacing: string | null;
   /** Server-side failure of the create form. */
   createError: string | null;
+  /** Opened on the Dashboard: Google's consent flow returns there (`from=dashboard`). */
+  fromDashboard?: boolean;
 }
 
 const box =
@@ -187,6 +189,7 @@ function StoppedPill() {
  */
 export function ConnectForm({
   websiteId,
+  fromDashboard = false,
   disabled = false,
   busy = false,
   onSubmit,
@@ -194,6 +197,8 @@ export function ConnectForm({
   children,
 }: {
   websiteId: string;
+  /** Carried through Google so the project page can send the reader back to the Dashboard. */
+  fromDashboard?: boolean;
   disabled?: boolean;
   busy?: boolean;
   onSubmit?: () => void;
@@ -214,6 +219,7 @@ export function ConnectForm({
       }}
     >
       <input type="hidden" name="websiteId" value={websiteId} />
+      {fromDashboard ? <input type="hidden" name="from" value="dashboard" /> : null}
       <button type="submit" disabled={disabled} aria-busy={busy} className={className}>
         {children}
       </button>
@@ -318,6 +324,7 @@ export function SheetsDialog({
                 {reconnect && live ? (
                   <ConnectForm
                     websiteId={live.websiteId}
+                    fromDashboard={live.fromDashboard}
                     disabled={!canManage}
                     onSubmit={on.connect}
                     className={cn(primary, "min-w-[132px] gap-1.5")}
@@ -399,6 +406,7 @@ export function SheetsDialog({
               {live ? (
                 <ConnectForm
                   websiteId={live.websiteId}
+                  fromDashboard={live.fromDashboard}
                   disabled={waiting || notConfigured || !canManage}
                   busy={waiting}
                   onSubmit={on.connect}
@@ -811,6 +819,7 @@ export function ProjectSheetsDialog({
   onClose,
   notify,
   initialPanel,
+  fromDashboard = false,
 }: {
   card: ProjectSheetsCard;
   open: boolean;
@@ -818,6 +827,8 @@ export function ProjectSheetsDialog({
   notify(title: string, note: string): void;
   /** Optional starting panel, e.g. from a `?view=` state. */
   initialPanel?: Partial<SheetsPanel>;
+  /** Opened on the Dashboard (the checklist): Connect email returns there, not to the project. */
+  fromDashboard?: boolean;
 }) {
   const router = useRouter();
   const [panel, setPanel] = useState<SheetsPanel>({ ...CLOSED_PANEL, ...initialPanel });
@@ -883,6 +894,7 @@ export function ProjectSheetsDialog({
 
   const live: LiveSheets = {
     websiteId,
+    fromDashboard,
     email,
     initials: account?.initials ?? "G",
     sheetTitle: destination?.sheetTitle ?? "Routely",

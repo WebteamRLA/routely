@@ -360,6 +360,7 @@ export function ExperimentView({
         {tab === "results" || !review ? (
           <ResultsPanel
             m={m}
+            helpLinks
             onChooseWinner={
               allowed("end") || canChooseWinner ? () => setWinnerOpen(true) : undefined
             }

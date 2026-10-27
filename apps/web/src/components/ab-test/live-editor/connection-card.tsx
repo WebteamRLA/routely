@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 
+import { HelpLink } from "@/components/common/help-link";
 import { Spinner } from "@/components/rt/icons";
 import { shortUrl } from "@/lib/launch-rules";
 import { cn } from "@/lib/utils";
@@ -274,6 +275,11 @@ function Card({
         {hint ? (
           <span className="text-[13px] leading-[19px] text-pretty text-[#6B7280]">{hint}</span>
         ) : null}
+        {busy ? null : (
+          <HelpLink anchor="editor-wont-load" newTab>
+            Visual editor troubleshooting
+          </HelpLink>
+        )}
         {children ? (
           <div className="mt-1 flex flex-wrap justify-center gap-2">{children}</div>
         ) : null}

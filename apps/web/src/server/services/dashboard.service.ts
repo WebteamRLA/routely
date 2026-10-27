@@ -7,13 +7,17 @@ import {
   TOP_PROJECTS,
   rankProjects,
 } from "@/lib/dashboard";
+import type { MemberRole } from "@/generated/prisma/client";
+import { type Checklist, buildChecklist } from "@/lib/onboarding";
 import { can } from "@/lib/permissions";
 import { trackingStatus } from "@/lib/pixel-status";
 import { needsAction } from "@/lib/project-dashboard";
 import { projectTile, seenAgo, trackFromState } from "@/lib/projects";
 import { dailyVisitors, visitors30 } from "@/lib/visitors";
 import { notFound } from "@/server/errors";
+import { isSheetsAvailable } from "@/server/services/sheets-sync.service";
 import * as projectRepo from "@/server/repositories/project.repository";
+import * as targetRepo from "@/server/repositories/website-sheet-target.repository";
 import * as workspaceRepo from "@/server/repositories/workspace.repository";
 
 /**
@@ -25,6 +29,61 @@ import * as workspaceRepo from "@/server/repositories/workspace.repository";
  * from `lib/visitors` (`visitors30` = distinct visitors, D8), experiment counts grouped by status.
  */
 
+/** The reader's own choices on this browser, from cookies the page reads. */
+export interface ChecklistPrefs {
+  sheetsSkipped?: boolean;
+}
+
+/** Whether any project in the workspace has a spreadsheet attached; skipped when unavailable. */
+async function sheetsAttached(workspaceId: string, actorUserId: string): Promise<boolean> {
+  if (!isSheetsAvailable()) return false;
+  const targets = await targetRepo.listTargetsInWorkspace(workspaceId, actorUserId);
+  return targets.length > 0;
+}
+
+/** The checklist facts from rows the caller already has (or `getChecklist` loads). */
+function checklistFrom(
+  role: MemberRole,
+  records: projectRepo.ProjectRecord[],
+  statuses: projectRepo.ExperimentStatusRow[],
+  attached: boolean,
+  prefs: ChecklistPrefs,
+): Checklist {
+  return buildChecklist({
+    role,
+    // A project counts as tracked once its snippet was ever seen (a verified check or a hit).
+    projects: records.map((record) => ({
+      id: record.id,
+      name: record.name,
+      domain: record.domain,
+      key: record.publicSiteId,
+      protocol: record.protocol,
+      tracked: record.pixelVerifiedAt !== null || record.lastSeenAt !== null,
+    })),
+    hasExperiment: statuses.length > 0,
+    sheets: { available: isSheetsAvailable(), attached, skipped: prefs.sheetsSkipped === true },
+  });
+}
+
+/** "Getting started" alone, for Help & Guides — without the Dashboard's visitor queries. */
+export async function getChecklist(
+  actorUserId: string,
+  workspaceId: string,
+  prefs: ChecklistPrefs = {},
+): Promise<{ checklist: Checklist; role: MemberRole }> {
+  const workspace = await workspaceRepo.findWorkspaceForMember(workspaceId, actorUserId);
+  if (!workspace) throw notFound("That workspace does not exist.");
+  const [records, statuses, attached] = await Promise.all([
+    projectRepo.listProjects(workspaceId, actorUserId),
+    projectRepo.listExperimentStatuses(workspaceId, actorUserId),
+    sheetsAttached(workspaceId, actorUserId),
+  ]);
+  return {
+    checklist: checklistFrom(workspace.role, records, statuses, attached, prefs),
+    role: workspace.role,
+  };
+}
+
 /**
  * The active workspace at a glance. NOT_FOUND when the actor is not a member of `workspaceId`.
  * Visitor queries run only for the five projects the card shows.
@@ -32,15 +91,17 @@ import * as workspaceRepo from "@/server/repositories/workspace.repository";
 export async function getAccountOverview(
   actorUserId: string,
   workspaceId: string,
+  prefs: ChecklistPrefs = {},
   now: Date = new Date(),
 ): Promise<AccountOverview> {
   const workspace = await workspaceRepo.findWorkspaceForMember(workspaceId, actorUserId);
   if (!workspace) throw notFound("That workspace does not exist.");
 
-  const [records, statuses, withTraffic] = await Promise.all([
+  const [records, statuses, withTraffic, attached] = await Promise.all([
     projectRepo.listProjects(workspaceId, actorUserId),
     projectRepo.listExperimentStatuses(workspaceId, actorUserId),
     projectRepo.activeExperimentsWithTraffic(workspaceId, actorUserId),
+    sheetsAttached(workspaceId, actorUserId),
   ]);
 
   const experiments = { total: 0, drafts: 0, paused: 0, completed: 0, running: 0 };
@@ -110,5 +171,7 @@ export async function getAccountOverview(
     experiments,
     runningProjects: rows.filter((row) => row.running > 0).length,
     projects,
+    role: workspace.role,
+    checklist: checklistFrom(workspace.role, records, statuses, attached, prefs),
   };
 }

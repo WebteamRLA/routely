@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { HelpLink } from "@/components/common/help-link";
 import { AlertCircleIcon, CheckIcon, Spinner, WarningIcon } from "@/components/rt/icons";
 import { Modal, ModalBody, ModalFooter } from "@/components/rt/modal";
 import { btn, errorText, focusRing } from "@/components/rt/styles";
@@ -233,6 +234,9 @@ function WinnerForm({
             The data doesn’t single out a version yet, so nothing is preselected.
           </p>
         )}
+        <HelpLink anchor="winner" newTab className="self-start">
+          How Routely recommends a winner
+        </HelpLink>
       </ModalBody>
       <ModalFooter>
         {choice.ending ? (

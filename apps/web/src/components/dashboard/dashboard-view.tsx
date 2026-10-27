@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -16,6 +16,9 @@ import {
   Svg,
 } from "@/components/rt/icons";
 import { ProjectAvatar } from "@/components/common/project-avatar";
+import { GettingStarted } from "@/components/dashboard/getting-started";
+import { PixelDialog } from "@/components/project-dashboard/pixel-dialog";
+import { ProjectSheetsDialog } from "@/components/project-dashboard/sheets-dialog";
 import { Skeleton } from "@/components/rt/primitives";
 import { ACCENT, ACCENT_INK, ACCENT_TINT, btn, card } from "@/components/rt/styles";
 import { ToastHost, useToast } from "@/components/rt/toast";
@@ -27,6 +30,8 @@ import {
   type DashboardProject,
   type DashboardViewName,
 } from "@/lib/dashboard";
+import { type SetupProject, showsChecklist } from "@/lib/onboarding";
+import { SHEETS_OUTCOME_PARAM, type ProjectSheetsCard } from "@/lib/sheets-card";
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { createProjectAction } from "@/server/actions/website.actions";
@@ -88,10 +93,19 @@ export function DashboardView({
   view,
   data,
   load: loadProp,
+  guideHidden = false,
+  sdkUrl = "",
+  sheetsCard = null,
 }: {
   view: DashboardViewName;
   data: AccountOverview | null;
   load: Load;
+  /** The reader hid "Getting started" on this browser. */
+  guideHidden?: boolean;
+  /** For the checklist's tracking dialog (`env.SDK_URL`). */
+  sdkUrl?: string;
+  /** For the checklist's Google Sheets dialog; null when there is no Sheets step to act on. */
+  sheetsCard?: ProjectSheetsCard | null;
 }) {
   const router = useRouter();
   const [refreshing, startRefresh] = useTransition();
@@ -102,6 +116,37 @@ export function DashboardView({
     onboarding ? (FORM_FOR[view] ?? null) : null,
   );
   const { toast, notify } = useToast(3200);
+  const checklist =
+    load === "ready" && data && showsChecklist(data.role, data.checklist, guideHidden)
+      ? data.checklist
+      : null;
+  const openFirst = () =>
+    setForm({ name: "", url: "", attempted: false, busy: false, failed: false });
+
+  // The checklist's tracking and Google Sheets dialogs open here, over the Dashboard. Each refreshes
+  // the page when its work lands (pixel found, spreadsheet attached), so the step ticks off behind it.
+  // Kept mounted once opened and closed through `open`, like the Sheets dialog: unmounting the open
+  // dialog here left its portal on screen (seen in a production build, 2026-10-27).
+  const [pixel, setPixel] = useState<{ project: SetupProject; open: boolean } | null>(null);
+  // Back from Google's consent screen (`?sheets=…`): straight into the dialog again.
+  const [sheetsOpen, setSheetsOpen] = useState(sheetsCard?.outcome != null);
+
+  // Say how Google went once, then drop the outcome from the URL so a reload doesn't repeat it.
+  const outcome = sheetsCard?.outcome ?? null;
+  const accountEmail = sheetsCard?.account?.email ?? null;
+  const sheetsProjectName = sheetsCard?.projectName ?? "";
+  useEffect(() => {
+    if (!outcome) return;
+    if (outcome.kind === "connected") {
+      notify(
+        "Google Sheets connected",
+        `${accountEmail ?? "Your Google account"} is now connected to ${sheetsProjectName}.`,
+      );
+    }
+    const url = new URL(window.location.href);
+    for (const param of [SHEETS_OUTCOME_PARAM, "reason", "project"]) url.searchParams.delete(param);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  }, [outcome, accountEmail, sheetsProjectName, notify]);
 
   const retry = () => startRefresh(() => router.refresh());
 
@@ -134,14 +179,20 @@ export function DashboardView({
       <div aria-busy={load === "loading"} className="contents">
         <h1 className="sr-only">Dashboard</h1>
         <Stats data={data} load={load} />
-        {onboarding ? (
-          <Onboarding
-            onAdd={
-              data.canManage
-                ? () => setForm({ name: "", url: "", attempted: false, busy: false, failed: false })
-                : null
-            }
+        {checklist ? (
+          <GettingStarted
+            checklist={checklist}
+            onAddProject={onboarding && data?.canManage ? openFirst : null}
+            onPixel={(project) => setPixel({ project, open: true })}
+            onSheets={sheetsCard ? () => setSheetsOpen(true) : null}
           />
+        ) : null}
+        {onboarding ? (
+          // The checklist's first step already says "Add a project"; the empty state is only for
+          // a reader without it (hidden on this browser, or a Viewer).
+          checklist ? null : (
+            <Onboarding onAdd={data.canManage ? openFirst : null} />
+          )
         ) : (
           <ProjectsSection data={data} load={load} onRetry={retry} />
         )}
@@ -153,6 +204,27 @@ export function DashboardView({
         onClose={() => setForm(null)}
         onSubmit={(f) => void submitFirst(f)}
       />
+      {pixel ? (
+        <PixelDialog
+          key={pixel.project.id}
+          open={pixel.open}
+          project={pixel.project}
+          sdkUrl={sdkUrl}
+          onVerified={() => router.refresh()}
+          onCheckingChange={() => {}}
+          onClose={() => setPixel({ ...pixel, open: false })}
+        />
+      ) : null}
+      {sheetsCard ? (
+        <ProjectSheetsDialog
+          key={sheetsCard.websiteId}
+          card={sheetsCard}
+          open={sheetsOpen}
+          onClose={() => setSheetsOpen(false)}
+          notify={notify}
+          fromDashboard
+        />
+      ) : null}
       <ToastHost toast={toast} />
     </>
   );
@@ -257,10 +329,9 @@ function ProjectsSection({
         </div>
         <Link
           href={routes.projects.list}
-          aria-label="View all projects"
           className="inline-flex h-9 items-center gap-1.5 rounded-md px-0.5 text-[13px] font-medium whitespace-nowrap text-[#4B5563] no-underline outline-none hover:text-[#111827] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]"
         >
-          View all
+          View all projects
           <ArrowRightIcon />
         </Link>
       </div>

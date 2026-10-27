@@ -158,6 +158,7 @@ must be labelled as such wherever it appears.
 | `/projects`, `/projects/[projectId]` | `(app)` | Project list; project dashboard (tracking pixel, Sheets card, experiments) |
 | `/experiments`, `/experiments/[experimentId]` | `(app)` | Experiment list; results & review. A DRAFT detail redirects to its wizard |
 | `/experiments/new/ab-test`, `/experiments/new/split-url` | `(app)` | The two wizards. `?project=<id>` starts a draft, `?id=<draftId>` resumes one (`routes.experiments.wizard`) |
+| `/help` | `(app)` | Help & Guides (2026-10-27): every guide in `lib/guides.ts` on one scrolling page, short numbered steps and a few screenshots, plus the workspace's Getting started progress. `/help/[guide]` only redirects to its first section |
 | `/integrations`, `/settings` | `(app)` | Integrations catalog (Sheets card); profile, password, sessions, team, notifications |
 | `/websites/[id]`, `/get-started`, `/metrics`, `/metrics/[id]`, `/experiments/new` | `(app)` | **Redirects only** → project dashboard, `/dashboard`, `/experiments`, the experiment, the Split URL wizard |
 | `/share/[token]` | — | **Public**, read-only results. No session. `noindex` |
@@ -375,7 +376,9 @@ creating and detaching need ADMIN (`sheets.manage`); "Sync now" needs EDITOR (`s
 The Picker runs on the grant's access token in the browser, so handing it to another member would
 let them browse the connector's Drive; everyone else gets FORBIDDEN and the UI offers "create a new
 sheet" instead, which needs no browsing. The consent flow's signed state carries the workspace and an
-allow-listed `returnTo` (`/integrations` or `/projects/<id>`), so it lands back where it started.
+allow-listed `returnTo` (`/integrations`, `/projects/<id>`, or `/dashboard?project=<id>` when the
+connect began in the Getting started checklist's dialog — the form posts `from=dashboard`), so it
+lands back where it started, and the Sheets dialog reopens there for that project.
 
 **Scopes are all non-sensitive — `openid`, `userinfo.email`, `drive.file` — so Google requires no
 verification review.** `drive.file` covers `spreadsheets.create` and `values.append` on files the app
@@ -939,6 +942,18 @@ Working:
 - **Crons** — Sheets refresh (00:20 UTC) and notifications (00:40 UTC: result-ready backstop,
   tracking-stopped alerts, 400-day retention of the visitor-day tables).
 - **Demo seed** of the design's workspace (§8).
+- **Onboarding and help** (2026-10-27) — a Dashboard "Getting started" checklist read from real
+  state (`lib/onboarding.ts`: project → tracking → Google Sheets → experiment — user request. Sheets
+  is optional, has "Skip" (a per-browser cookie) and is left out when the integration isn't
+  configured; the checklist disappears once any experiment exists, a draft included, Sheets or
+  not; the tracking and Google Sheets steps open the project's own dialogs **on the Dashboard**
+  (`PixelDialog`, `ProjectSheetsDialog`), not the project page; hidden per browser by a cookie; never shown to Viewers; with no projects it replaces the
+  "No projects yet" empty state),
+  Help & Guides (`lib/guides.ts` content, `lib/guides-types.ts` anchors — a test fails on a dead
+  anchor), and contextual `HelpLink`s in the tracking, wizard, results, winner and editor screens
+  (not the add-project dialogs — removed at the user's request). Screenshots live in `public/guides/` and were captured from the demo workspace and the
+  wizards' `?view=` states: **re-capture one when its screen changes.** The live visual editor has
+  no screenshot (it needs a real public page carrying the snippet).
 
 **Not built:** workspace rename, ownership
 transfer, leaving a workspace and deleting an account (`workspace.manage` exists in the matrix with

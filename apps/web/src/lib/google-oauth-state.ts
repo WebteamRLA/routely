@@ -26,8 +26,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 /** The places a finished consent flow may land. Everything else falls back to Integrations. */
 export const DEFAULT_RETURN_TO = "/integrations";
 
-/** `/projects/<id>` with an id-shaped segment, or `/integrations`. Nothing else, ever. */
-const RETURN_TO_PATTERN = /^\/(?:integrations|projects\/[A-Za-z0-9_-]{1,64})$/;
+/**
+ * `/projects/<id>` with an id-shaped segment, `/integrations`, or `/dashboard?project=<id>` — a
+ * connect started from the Dashboard checklist's dialog, which reopens there for that project.
+ * Nothing else, ever.
+ */
+const RETURN_TO_PATTERN =
+  /^\/(?:integrations|projects\/[A-Za-z0-9_-]{1,64}|dashboard\?project=[A-Za-z0-9_-]{1,64})$/;
 
 /**
  * Narrows a candidate path to the allow-list.
@@ -38,6 +43,11 @@ const RETURN_TO_PATTERN = /^\/(?:integrations|projects\/[A-Za-z0-9_-]{1,64})$/;
  */
 export function sanitizeReturnTo(value: unknown): string {
   return typeof value === "string" && RETURN_TO_PATTERN.test(value) ? value : DEFAULT_RETURN_TO;
+}
+
+/** The allow-listed page plus the outcome query (`?sheets=…`), joined whether or not it has one. */
+export function withOutcome(returnTo: string, query: string): string {
+  return `${returnTo}${returnTo.includes("?") ? "&" : "?"}${query}`;
 }
 
 export interface StatePayload {

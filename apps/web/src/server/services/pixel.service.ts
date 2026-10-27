@@ -41,9 +41,9 @@ export interface InstallationCheck {
   /** A Routely snippet is present, but for a different website. */
   wrongSiteId: boolean;
   /**
-   * The website's real `lastSeenAt` — when the SDK last reported a page hit. A server-side
-   * fetch cannot itself produce an event, so the dialog's "Event received {when}" row shows this
-   * and never a fabricated "just now". Null when nothing has reported yet.
+   * The website's real `lastSeenAt` — when the SDK last reported a page hit. Null when nothing has
+   * reported yet. The install dialogs no longer show it (their "Events received" row was removed,
+   * 2026-10-27); kept on the result for callers that want it.
    */
   lastSeenAt: Date | null;
   /** Where the check ended up, after any redirects. */

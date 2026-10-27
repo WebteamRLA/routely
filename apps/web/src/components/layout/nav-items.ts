@@ -2,6 +2,7 @@ import type { ComponentType, SVGProps } from "react";
 
 import {
   DashboardIcon,
+  HelpIcon,
   IntegrationsIcon,
   ProjectsIcon,
   SettingsIcon,
@@ -20,7 +21,7 @@ export interface NavItem {
 
 /**
  * The design's navigation: three primary items, and Settings in a "Workspace" group pinned
- * above the account block.
+ * above the account block. Help & Guides (not in the design) sits in that group, above Settings.
  *
  * Experiments have no item of their own — an experiment belongs to a project, so its list,
  * results and creation wizards all light Projects.
@@ -37,6 +38,7 @@ export const PRIMARY_NAV: NavItem[] = [
 ];
 
 export const WORKSPACE_NAV: NavItem[] = [
+  { href: routes.help.index, label: "Help & Guides", icon: HelpIcon },
   { href: routes.settings, label: "Settings", icon: SettingsIcon },
 ];
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { HelpLink } from "@/components/common/help-link";
 import {
   AlertCircleIcon,
   ArrowLeftIcon,
@@ -148,6 +149,17 @@ export function Wizard({ s, d, act }: Props) {
               {cur.title}
             </h2>
             <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">{cur.desc}</p>
+            <HelpLink
+              anchor={step === 5 ? "launch" : step === 1 ? "split-urls" : "split-create"}
+              newTab
+              className="mt-1 self-start"
+            >
+              {step === 5
+                ? "What launching checks"
+                : step === 1
+                  ? "How page URLs are matched"
+                  : "Split URL test guide"}
+            </HelpLink>
           </div>
 
           {showBanner ? (
@@ -964,6 +976,9 @@ function StepReview({ s, d, act }: Props) {
           <div className="flex items-center gap-2.5">
             <CodeIcon className="text-[#374151]" />
             <h3 className="m-0 text-[14px] font-semibold text-[#111827]">Tracking installation</h3>
+            <HelpLink anchor="launch-blocked" newTab>
+              Launch blocked?
+            </HelpLink>
           </div>
           <span
             aria-live="polite"

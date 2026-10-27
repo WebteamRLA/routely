@@ -211,7 +211,7 @@ describe("dashboard helpers", () => {
 });
 
 describe("pixel check rows", () => {
-  const ctx = { shortUrl: "acme.com/", key: "rt_x", now };
+  const ctx = { shortUrl: "acme.com/" };
   const base = {
     pageLoaded: true,
     loadError: null,
@@ -221,15 +221,16 @@ describe("pixel check rows", () => {
     lastSeenAt: null,
   };
 
-  it("never claims an event the server didn't see", () => {
-    const rows = checkRows("found", base, ctx);
+  it("shows two rows — the page and the script — and no events row", () => {
+    expect(checkRows("idle", null, ctx).map((r) => r.title)).toEqual([
+      "Page loads",
+      "Script found",
+    ]);
+    const rows = checkRows("found", { ...base, lastSeenAt: hoursAgo(2).toISOString() }, ctx);
     expect(rows.map((r) => [r.title, r.tone])).toEqual([
       ["Page loaded", "ok"],
       ["Pixel found", "ok"],
-      ["No events yet", "pending"],
     ]);
-    const seen = checkRows("found", { ...base, lastSeenAt: hoursAgo(2).toISOString() }, ctx);
-    expect(seen[2]).toMatchObject({ title: "Event received 2 h ago", tone: "ok" });
   });
 
   it("words a missing script, another project's script and a page that didn't load", () => {

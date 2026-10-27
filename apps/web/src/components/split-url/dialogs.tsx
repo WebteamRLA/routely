@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
+import { HelpLink } from "@/components/common/help-link";
 import {
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -237,7 +238,6 @@ export function InstallModal({
                   <CodeIcon size={12} strokeWidth={2.4} />
                   Manual installation
                 </span>
-                <span className="text-[13px] text-[#6B7280]">About 5 minutes</span>
               </span>
               <DialogPrimitive.Title
                 id="rt-inst-title"
@@ -249,6 +249,9 @@ export function InstallModal({
                 It goes on every page in this experiment — the Control page, each variant and the
                 conversion page — so Routely can redirect visitors and count conversions.
               </p>
+              <HelpLink anchor="tracking-install" newTab>
+                Installation guide
+              </HelpLink>
             </div>
             <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
               <li className="relative flex min-w-0 items-start gap-3">
@@ -421,6 +424,9 @@ export function InstallModal({
                       <li key={t}>{t}</li>
                     ))}
                   </ul>
+                  <HelpLink anchor="tracking-not-found" newTab>
+                    More fixes for a missing pixel
+                  </HelpLink>
                 </div>
               ) : null}
             </section>

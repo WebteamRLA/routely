@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 
+import { HelpLink } from "@/components/common/help-link";
 import {
   AlertCircleIcon,
   ArrowLeftIcon,
@@ -143,6 +144,17 @@ export function Wizard({ s, d, act }: P) {
             <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">
               {d.cur.desc}
             </p>
+            <HelpLink
+              anchor={s.step === 5 ? "launch" : s.step === 1 ? "visual-editor" : "ab-create"}
+              newTab
+              className="mt-1 self-start"
+            >
+              {s.step === 5
+                ? "What launching checks"
+                : s.step === 1
+                  ? "How the visual editor works"
+                  : "A/B test guide"}
+            </HelpLink>
           </div>
 
           {d.errBanner ? (
@@ -868,6 +880,9 @@ function Step5({ d, act }: { d: Derived; act: WizardAct }) {
           <div className="flex items-center gap-2.5">
             <CodeIcon className="text-[#374151]" />
             <h3 className="m-0 text-[14px] font-semibold text-[#111827]">Tracking installation</h3>
+            <HelpLink anchor="launch-blocked" newTab>
+              Launch blocked?
+            </HelpLink>
           </div>
           <span
             aria-live="polite"

@@ -71,5 +71,6 @@ export const config = {
     "/get-started/:path*",
     "/websites/:path*",
     "/metrics/:path*",
+    "/help/:path*",
   ],
 };

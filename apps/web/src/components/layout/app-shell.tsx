@@ -66,7 +66,10 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
   return (
     <div
       className={cn(
-        "fixed inset-0 flex overflow-hidden bg-white",
+        // `clip`, not `hidden`: an anchor jump (`/help/…#winner`) scrolls every scrollable ancestor,
+        // and `hidden` leaves this fixed frame scrollable by script — it would slide up and leave a
+        // blank band. Only <main> below should scroll.
+        "fixed inset-0 flex overflow-clip bg-white",
         "text-sm leading-[1.45] text-[#111827] antialiased",
       )}
     >
@@ -115,7 +118,7 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
         />
       ) : null}
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-clip">
         <header className="z-50 flex h-14 shrink-0 items-center gap-2.5 border-b border-[#EEF0F3] bg-white px-3 min-[1200px]:hidden">
           <button
             type="button"

@@ -1,18 +1,16 @@
 /**
  * What the pixel dialogs' "Verify your installation" step shows for one install check.
  *
- * Both dialogs (Projects' "Tracking code" and the project dashboard's) render the same three rows
+ * Both dialogs (Projects' "Tracking code" and the project dashboard's) render the same two rows
  * and result header from the server's check (`verifyProjectPixelAction` →
  * `pixel.service.verifyInstallation`). The rules live here, once, and pure:
  *
- *  - The verdict rests on the script being in the fetched page's HTML. A server-side fetch runs no
- *    JavaScript, so it cannot itself cause an event — the third row therefore shows the project's
- *    real last hit, never the design's fabricated "Event received just now" (spec §8 row 10).
+ *  - The verdict rests on the script being in the fetched page's HTML: the page loads, the script
+ *    is in it. The design's third "Events received" row was removed at the user's request
+ *    (2026-10-27) — a server-side fetch runs no JavaScript, so it could never cause an event.
  *  - The design has no screen for a page that failed to load or a snippet carrying another
  *    project's id; both get their own rows here (spec §2.3 "NEW copy needed").
  */
-
-import { relativeTime } from "@/lib/experiment-time";
 
 export type PixelVerify = "idle" | "checking" | "found" | "missing";
 
@@ -56,45 +54,18 @@ export function shortCheckUrl(url: string, domain: string): string {
   );
 }
 
-function eventsRow(
-  result: PixelCheckResult,
-  key: string,
-  now: Date,
-  missTone: CheckTone,
-): CheckRow {
-  if (result.lastSeenAt) {
-    return {
-      title: `Event received ${relativeTime(new Date(result.lastSeenAt), now)}`,
-      text: `Project ${key} is recording visitors.`,
-      tone: "ok",
-    };
-  }
-  return missTone === "fail"
-    ? {
-        title: "No events received",
-        text: `Routely hasn’t received an event for project ${key}.`,
-        tone: "fail",
-      }
-    : {
-        title: "No events yet",
-        text: "Events arrive when someone visits a page with the script.",
-        tone: "pending",
-      };
-}
-
-/** The three check rows for the dialog's current state. */
+/** The check rows for the dialog's current state. */
 export function checkRows(
   verify: PixelVerify,
   result: PixelCheckResult | null,
-  ctx: { shortUrl: string; key: string; now: Date },
+  ctx: { shortUrl: string },
 ): CheckRow[] {
-  const { shortUrl, key, now } = ctx;
+  const { shortUrl } = ctx;
   if (verify === "idle" || verify === "checking" || !result) {
     const tone: CheckTone = verify === "checking" ? "running" : "pending";
     return [
       { title: "Page loads", text: `Routely opens ${shortUrl}.`, tone },
       { title: "Script found", text: "The Routely script is in the page’s <head>.", tone },
-      { title: "Events received", text: `Project ${key} sends data to Routely.`, tone },
     ];
   }
 
@@ -110,7 +81,6 @@ export function checkRows(
         text: "Routely needs a page that loads to look for the script.",
         tone: "pending",
       },
-      eventsRow(result, key, now, "pending"),
     ];
   }
 
@@ -130,7 +100,6 @@ export function checkRows(
           : "The Routely code is in the page’s <head>.",
         tone: "ok",
       },
-      eventsRow(result, key, now, "pending"),
     ];
   }
 
@@ -142,7 +111,6 @@ export function checkRows(
         text: "The page has a Routely script for another project. Copy this project’s script and replace it.",
         tone: "fail",
       },
-      eventsRow(result, key, now, "fail"),
     ];
   }
 
@@ -153,7 +121,6 @@ export function checkRows(
       text: "The page loaded, but the Routely code wasn’t in its <head>.",
       tone: "fail",
     },
-    eventsRow(result, key, now, "fail"),
   ];
 }
 

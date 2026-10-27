@@ -1,11 +1,18 @@
 "use client";
 
-import type { InputHTMLAttributes, ReactNode } from "react";
+import { useState, type InputHTMLAttributes, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
 
-import { AlertCircleIcon, CheckIcon, Spinner, Svg } from "@/components/rt/icons";
+import {
+  AlertCircleIcon,
+  CheckIcon,
+  EyeIcon,
+  EyeOffIcon,
+  Spinner,
+  Svg,
+} from "@/components/rt/icons";
 import { ToastHost, useToast } from "@/components/rt/toast";
 import { input } from "@/components/rt/styles";
 import { authFocusRing, authTextLink } from "@/components/auth/styles";
@@ -188,7 +195,10 @@ export function AuthAlert({
   );
 }
 
-/** Label, 44px input, and the error (or hint) beneath it. */
+/**
+ * Label, 44px input, and the error (or hint) beneath it. A password field gets an eye button
+ * that shows or hides what was typed.
+ */
 export function AuthField({
   id,
   label,
@@ -196,6 +206,7 @@ export function AuthField({
   hint,
   aside,
   className,
+  type,
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & {
   id: string;
@@ -207,6 +218,8 @@ export function AuthField({
 }) {
   const helpId = `${id}-help`;
   const help = error || hint;
+  const isPassword = type === "password";
+  const [visible, setVisible] = useState(false);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-baseline justify-between gap-3">
@@ -215,13 +228,31 @@ export function AuthField({
         </label>
         {aside}
       </div>
-      <input
-        id={id}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={help ? helpId : undefined}
-        {...props}
-        className={cn(input, "h-11 text-[15px]", className)}
-      />
+      <div className="relative">
+        <input
+          id={id}
+          type={isPassword && visible ? "text" : type}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={help ? helpId : undefined}
+          {...props}
+          className={cn(input, "h-11 text-[15px]", isPassword && "pr-11", className)}
+        />
+        {isPassword ? (
+          <button
+            type="button"
+            onClick={() => setVisible((v) => !v)}
+            aria-label={visible ? "Hide password" : "Show password"}
+            aria-pressed={visible}
+            aria-controls={id}
+            className={cn(
+              "absolute top-1/2 right-1.5 inline-flex size-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-[#6B7280] hover:text-[#111827]",
+              authFocusRing,
+            )}
+          >
+            {visible ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
+          </button>
+        ) : null}
+      </div>
       {help ? (
         <p
           id={helpId}

@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { unverifiedReturnTo } from "@/lib/google-oauth-state";
+import { unverifiedReturnTo, withOutcome } from "@/lib/google-oauth-state";
 import { routes } from "@/lib/routes";
 import { type SheetsOutcomeReason, outcomeQuery } from "@/lib/sheets-card";
 import { getSession } from "@/server/auth/session";
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // state picks which of our own two pages shows the error.
   const returnTo = verified?.returnTo ?? unverifiedReturnTo(state);
   const back = (outcome: "connected" | SheetsOutcomeReason): NextResponse =>
-    NextResponse.redirect(new URL(`${returnTo}?${outcomeQuery(outcome)}`, request.url), {
+    NextResponse.redirect(new URL(withOutcome(returnTo, outcomeQuery(outcome)), request.url), {
       status: 303,
     });
 
