@@ -44,7 +44,7 @@ export function updateExperimentWhere(
   userId: string,
   roles: readonly MemberRole[],
   where: { status: ExperimentStatus | readonly ExperimentStatus[]; updatedAt?: Date },
-  data: Prisma.ExperimentUpdateManyMutationInput,
+  data: Prisma.ExperimentUncheckedUpdateManyInput,
   client: DbClient = db,
 ): Promise<Prisma.BatchPayload> {
   const status = typeof where.status === "string" ? where.status : { in: [...where.status] };

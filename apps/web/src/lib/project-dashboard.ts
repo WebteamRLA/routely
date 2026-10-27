@@ -10,7 +10,13 @@
 import { dayNumber, formatMonthDay, isJustNow } from "@/lib/experiment-time";
 import type { LaunchSummary } from "@/lib/launch-rules";
 import { routes } from "@/lib/routes";
-import { analyzeResults, resultNote, resultStatusOf, type ArmCounts } from "@/lib/verdict";
+import {
+  type ArmCounts,
+  type WinnerDecision,
+  analyzeResults,
+  resultNote,
+  resultStatusOf,
+} from "@/lib/verdict";
 
 /**
  * `?view=` states that are purely visual — a dialog or menu open, a filter preset. Loading,
@@ -168,6 +174,8 @@ export interface ExperimentRowInput {
   updatedAt: Date;
   /** Control first, then variants in position order. */
   arms: ArmCounts[];
+  /** The chosen winner (`storedDecision`), when one was chosen. */
+  decision?: Pick<WinnerDecision, "armIndex" | "basis"> | null;
   /** DRAFT only: steps 1–4 are complete (`lib/launch-rules.ts` `isSetupComplete`). */
   setupComplete: boolean;
   /** DRAFT and complete: the confirm dialog's facts. */
@@ -242,7 +250,7 @@ export function deriveExperimentRow(input: ExperimentRowInput, now: Date): Deriv
     variants: input.arms.length,
     share: input.status === "ACTIVE" ? input.trafficAllocation : 0,
     rate: analysis.pooledRate === null ? null : analysis.pooledRate * 100,
-    note: resultNote(analysis, status, "project"),
+    note: resultNote(analysis, status, "project", input.decision ?? null),
     need,
     action,
     href: actionHref(input.id, type, action),

@@ -8,6 +8,7 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 import { EditPausedDialog } from "@/components/experiment/edit-paused-dialog";
 import { CAPTION, CARD, H2, ResultsPanel } from "@/components/experiment/results-panel";
 import { ShareDialog } from "@/components/experiment/share-dialog";
+import { WinnerDialog } from "@/components/experiment/winner-dialog";
 import { useViewerTimeZone } from "@/components/experiment/use-viewer-time-zone";
 import {
   ChartIcon,
@@ -33,13 +34,12 @@ import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import {
   checkTrackingAction,
-  endExperimentAction,
   pauseExperimentAction,
   resumeExperimentAction,
 } from "@/server/actions/experiment.actions";
 
 type Tab = "results" | "review";
-type Dialog = "pause" | "resume" | "end";
+type Dialog = "pause" | "resume";
 
 const BTN_OUTLINE = `inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3.5 text-[13px] font-medium whitespace-nowrap text-[#374151] no-underline hover:enabled:bg-[#F9FAFB] disabled:cursor-default disabled:opacity-45 max-[641px]:h-11 ${focusRing}`;
 const BTN_PRIMARY = `inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg border-0 bg-[#0070C9] px-4 text-[13px] whitespace-nowrap text-white hover:enabled:brightness-[.8] disabled:cursor-default disabled:opacity-45 max-[641px]:h-11 ${focusRing}`;
@@ -71,20 +71,10 @@ const DIALOG_COPY: Record<
     doneNote: "Visitors are seeing the versions again.",
     failTitle: "Couldn’t resume the experiment",
   },
-  end: {
-    title: (name) => `End “${name}”?`,
-    button: "End experiment",
-    busy: "Ending…",
-    doneTitle: (name) => `“${name}” has ended`,
-    doneNote: "Visitors see the original page. Results are frozen and kept.",
-    failTitle: "Couldn’t end the experiment",
-  },
 };
 
 const PAUSE_BODY =
   "Visitors will see the original page while it’s paused. Results collected so far are kept, and you can resume at any time.";
-const END_BODY =
-  "Visitors will see the original page from now on. Results are frozen and kept. You can’t restart an ended experiment.";
 
 /**
  * One experiment's Results and Review tabs, with pause, resume and end.
@@ -114,7 +104,7 @@ export function ExperimentView({
 }) {
   useViewerTimeZone(timeZone);
   const router = useRouter();
-  const allowed = (d: Dialog) =>
+  const allowed = (d: Dialog | "end") =>
     canEdit &&
     (d === "pause" ? m.header.canPause : d === "resume" ? m.header.canResume : m.header.canEnd);
 
@@ -122,8 +112,13 @@ export function ExperimentView({
     mode === "review" || mode === "resume" ? "review" : "results",
   );
   const [modal, setModal] = useState<Dialog | null>(
-    (mode === "pause" || mode === "resume" || mode === "end") && allowed(mode) ? mode : null,
+    (mode === "pause" || mode === "resume") && allowed(mode) ? mode : null,
   );
+  // Ending always goes through "choose a winner" (with "End without choosing" inside); an ended
+  // experiment opens the same dialog to record or change its winner.
+  const [winnerOpen, setWinnerOpen] = useState(mode === "end" && allowed("end"));
+  const decided = m.winnerChoice.currentKey !== null;
+  const canChooseWinner = canEdit && m.status === "completed";
   const [shareOpen, setShareOpen] = useState(mode === "share" && canShare);
   // D7: a paused experiment's name and traffic share can change. Not in the design.
   const canEditPaused = canEdit && m.header.canResume;
@@ -147,9 +142,7 @@ export function ExperimentView({
     const result =
       which === "pause"
         ? await pauseExperimentAction(experimentId)
-        : which === "resume"
-          ? await resumeExperimentAction(experimentId)
-          : await endExperimentAction(experimentId);
+        : await resumeExperimentAction(experimentId);
     setBusy(false);
     setModal(null);
     if (!result.ok) {
@@ -181,7 +174,24 @@ export function ExperimentView({
 
   const menuItems = [
     ...(allowed("end")
-      ? [{ key: "end", label: "End experiment", icon: <StopIcon />, act: () => setModal("end") }]
+      ? [
+          {
+            key: "end",
+            label: "End and choose winner",
+            icon: <StopIcon />,
+            act: () => setWinnerOpen(true),
+          },
+        ]
+      : []),
+    ...(canChooseWinner && decided
+      ? [
+          {
+            key: "winner",
+            label: "Change winner",
+            icon: <TrophyIcon />,
+            act: () => setWinnerOpen(true),
+          },
+        ]
       : []),
     ...(canShare
       ? [
@@ -253,6 +263,16 @@ export function ExperimentView({
             >
               <PlayIcon />
               Resume experiment
+            </button>
+          ) : null}
+          {canChooseWinner && !decided ? (
+            <button
+              type="button"
+              onClick={() => setWinnerOpen(true)}
+              className={cn(BTN_PRIMARY, "font-semibold")}
+            >
+              <TrophyIcon />
+              Choose winner
             </button>
           ) : null}
           {menuItems.length > 0 ? (
@@ -338,7 +358,12 @@ export function ExperimentView({
         className="flex min-w-0 flex-col gap-5"
       >
         {tab === "results" || !review ? (
-          <ResultsPanel m={m} />
+          <ResultsPanel
+            m={m}
+            onChooseWinner={
+              allowed("end") || canChooseWinner ? () => setWinnerOpen(true) : undefined
+            }
+          />
         ) : (
           <div className="grid grid-cols-[minmax(0,65fr)_minmax(0,35fr)] items-start gap-6 max-[961px]:grid-cols-1">
             <div className="flex min-w-0 flex-col gap-5">
@@ -593,20 +618,16 @@ export function ExperimentView({
             {copy.title(m.name)}
           </AlertDialogPrimitive.Title>
           <p className="m-0 text-[13px] leading-5 text-pretty text-[#6B7280]">
-            {dialog === "pause" ? PAUSE_BODY : dialog === "end" ? END_BODY : m.resumeBody}
+            {dialog === "pause" ? PAUSE_BODY : m.resumeBody}
           </p>
         </div>
         <div className="flex flex-col gap-2 rounded-xl border border-[#EEF0F3] bg-[#FAFBFC] p-3.5">
-          {(dialog === "pause" ? m.pauseFacts : dialog === "end" ? m.endFacts : m.resumeFacts).map(
-            (fc) => (
-              <div key={fc.label} className="flex justify-between gap-3 text-[13px]">
-                <span className="text-[#6B7280]">{fc.label}</span>
-                <span className="text-right font-medium text-[#374151] tabular-nums">
-                  {fc.value}
-                </span>
-              </div>
-            ),
-          )}
+          {(dialog === "pause" ? m.pauseFacts : m.resumeFacts).map((fc) => (
+            <div key={fc.label} className="flex justify-between gap-3 text-[13px]">
+              <span className="text-[#6B7280]">{fc.label}</span>
+              <span className="text-right font-medium text-[#374151] tabular-nums">{fc.value}</span>
+            </div>
+          ))}
         </div>
         <div className="flex flex-wrap justify-end gap-2 max-[641px]:w-full max-[641px]:[&>button]:flex-auto">
           <button
@@ -640,6 +661,18 @@ export function ExperimentView({
         />
       ) : null}
 
+      {allowed("end") || canChooseWinner ? (
+        <WinnerDialog
+          open={winnerOpen}
+          onOpenChange={setWinnerOpen}
+          experimentId={experimentId}
+          name={m.name}
+          choice={m.winnerChoice}
+          facts={m.endFacts}
+          notify={notify}
+        />
+      ) : null}
+
       {canShare ? (
         <ShareDialog
           open={shareOpen}
@@ -667,6 +700,15 @@ function CheckToneIcon({ tone }: { tone: "ok" | "warn" | "fail" | "info" }) {
       {paths.map((d) => (
         <path key={d} d={d} />
       ))}
+    </Svg>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <Svg size={16}>
+      <path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4Z" />
+      <path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3" />
     </Svg>
   );
 }

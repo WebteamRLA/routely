@@ -445,7 +445,8 @@ of them into a read-then-write.
 
 Enum values: `ExperimentStatus` (DRAFT/ACTIVE/PAUSED/COMPLETED — `ARCHIVED` was renamed in place to
 `COMPLETED`), `ExperimentType` (SPLIT_URL/AB_TEST), `DeviceType` (DESKTOP/MOBILE/TABLET; an empty
-list means every device), `MemberRole` (OWNER/ADMIN/EDITOR/VIEWER), `ExperimentActivityType`,
+list means every device), `MemberRole` (OWNER/ADMIN/EDITOR/VIEWER), `ExperimentActivityType`
+(… `RESULT_READY`, `WINNER_CHOSEN`), `WinnerBasis` (RECOMMENDED/MANUAL),
 `NotificationKind` (RESULT_READY/TRACKING_STOPPED/SHEETS_SYNC_FAILED/EXPERIMENT_PAUSED),
 `TrackingCheckResult`, `UrlMatchType` (EXACT/PREFIX), `SiteProtocol`, `PrimaryMetric`,
 `SheetsConnectionStatus`, and `EventType` (`page_view`, `assignment`, `time_on_page`,
@@ -666,13 +667,32 @@ Control", "Likely better" / "Likely worse", "Winner".
   z-score Φ(z), which is not a chance.
 - **The gate**: nothing is named until *every* arm has **1,000 assigned visitors and 100
   conversions** (`MIN_VISITORS_PER_ARM`, `MIN_CONVERSIONS_PER_ARM`). Then ≥ **0.95** is likely
-  better / the winner, ≤ **0.05** likely worse (`WIN_CHANCE`, `LOSE_CHANCE`).
+  better / the winner, ≤ **0.05** likely worse (`WIN_CHANCE`, `LOSE_CHANCE`). With several
+  variants the winner must also have ≥ 0.95 chance to beat **every other variant** (2026-10-27);
+  variants that all beat Control but not each other get "<B> and <C> are likely better than
+  Control" and no winner (`likelyBetter`).
 - **"Not proof"**: `NOT_PROOF_NOTE` is rendered under results wherever a chance, a "likely" or a
   winner appears. The design's "roll out <W>" says "update your site to <W>" — Routely cannot roll
   anything out.
 
 Do not lower the gate, add a p-value or drop the note without asking. Deciding whenever the
 numbers look good is wrong regardless of the statistics behind it, which is what the note says.
+
+### Choosing a winner (2026-10-27)
+
+Editors and up choose the version to keep: **"End and choose winner"** on a running or paused
+experiment (ends it in the same transaction; "End without choosing" is inside the dialog), or
+**"Choose winner" / "Change winner"** on an ended one (`experiment.service` `chooseWinner`,
+`components/experiment/winner-dialog.tsx`). Stored on `Experiment.winnerChosenAt`,
+`winnerVariantId` (null = Control), `winnerBasis`, `winnerChosenById`, plus a `WINNER_CHOSEN`
+activity. **`winnerBasis` is decided on the server** from the counts read after the status change
+(`recommendedArm`/`winnerBasis` in `lib/verdict.ts`): `RECOMMENDED` only when the pick is the gated
+winner (or Control when every variant is likely worse), otherwise `MANUAL`. A manual pick is shown
+as "<W> chosen as the winner … a judgement call, not a statistically reliable result" with the
+reason (`manualChoiceCaveat`) — never "won" — and the dialog says so before it is made. Routely
+does not serve the winner: the results show a **Next step** (Split URL: point the control URL at
+the variant; A/B: the variant's changes; Control: nothing). The share page shows the choice without
+the chooser's name.
 
 ---
 
@@ -906,8 +926,9 @@ Working:
   verification; tracking status from the site-wide hit; daily visitors and sparklines.
 - **Experiments** — Split URL (≤ 4 variants, device targeting, keep query params) and A/B test
   (visual changes) wizards with draft autosave and resume; launch with inline tracking checks;
-  pause, resume, end; activity log; results and review with the gated Bayesian verdict (§7); public
-  share links; experiments list.
+  pause, resume, end; activity log; results and review with the gated Bayesian verdict (§7); winner
+  selection — recommended or manual, recorded with its basis (§7); public share links; experiments
+  list.
 - **SDK v4** — split-URL redirects, A/B visual changes with the overlay held until applied, device
   targeting, `keepParams`, site-wide hit, editor bridge handshake; v3 fallback for installed bundles.
 - **Email** — 11 templates through Resend; four opt-out notifications (result ready, tracking

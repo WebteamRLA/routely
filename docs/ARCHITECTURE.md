@@ -380,7 +380,13 @@ approved them on 2026-10-19 on conditions, all of which live in **`lib/verdict.t
 else: P(p_variant > p_control) under Beta(1 + conversions, 1 + non-conversions) posteriors; nothing
 named until every arm has 1,000 assigned visitors and 100 conversions; ≥ 0.95 / ≤ 0.05 thresholds;
 and a "not proof" note rendered under results. The original plan's "no statistical significance
-testing — raw rates only" was replaced by this rule, not extended.
+testing — raw rates only" was replaced by this rule, not extended. With several variants the
+winner must also be ≥ 0.95 likely to beat every other variant.
+
+**Choosing a winner** (2026-10-27): an Editor records the version to keep when ending (or after).
+The server stores whether it was the recommendation (`winnerBasis`), worked out from the frozen
+counts; a manual pick is always labelled a judgement call, never a result. Routely does not serve
+the winner — the results page tells the customer what to change on their site.
 
 ---
 

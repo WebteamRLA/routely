@@ -28,6 +28,7 @@ import {
   rolesWith,
 } from "@/lib/permissions";
 import { TRACKING_CHECK_MAX_AGE_MS } from "@/lib/tracking-check";
+import { analyzeResults, winnerBasis } from "@/lib/verdict";
 import { controlUrlsConflict, isSameSite } from "@/lib/url";
 import { pageBaseline } from "@/lib/visitors";
 import { type DbClient, db } from "@/server/db";
@@ -41,6 +42,8 @@ import {
 } from "@/server/errors";
 import { rateLimit } from "@/server/http/rate-limit";
 import * as activityRepo from "@/server/repositories/activity.repository";
+import * as assignmentRepo from "@/server/repositories/assignment.repository";
+import * as conversionRepo from "@/server/repositories/conversion.repository";
 import * as draftRepo from "@/server/repositories/experiment-draft.repository";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
 import * as websiteRepo from "@/server/repositories/website.repository";
@@ -59,6 +62,7 @@ import {
   PAUSED_EDIT_LOCKED_MESSAGE,
   type PausedEdit,
   changeExperimentStatusSchema,
+  chooseWinnerSchema,
   createDraftSchema,
   createExperimentSchema,
   draftPatchSchema,
@@ -1213,6 +1217,119 @@ export async function endExperiment(
   });
 
   return { experimentId, websiteId: experiment.websiteId, status: "COMPLETED" };
+}
+
+export interface ChooseWinnerResult extends LifecycleResult {
+  /** The chosen version's name. */
+  winner: string;
+  basis: "RECOMMENDED" | "MANUAL";
+}
+
+/**
+ * "Choose winner": records the version the team keeps. On a running or paused experiment it also
+ * ends it (ACTIVE/PAUSED → COMPLETED, an ENDED activity) in the same transaction; on a completed one
+ * it records — or changes — the choice. Logs WINNER_CHOSEN either way.
+ *
+ * Whether the choice was Routely's recommendation is decided **here**, from the counts read inside
+ * the transaction after the status change — never taken from the caller — so a manual pick can't be
+ * stored as a statistically backed one. Results are frozen once COMPLETED (ingestion accepts only
+ * ACTIVE), so the basis stays true. Routely does not then serve the winner; the customer updates
+ * their site, which the results page spells out.
+ */
+export async function chooseWinner(
+  actorUserId: string,
+  experimentId: string,
+  input: unknown,
+): Promise<ChooseWinnerResult> {
+  const { arm } = parseOrThrow(chooseWinnerSchema, input);
+  const { experiment } = await getExperimentAccess(actorUserId, experimentId, "experiment.edit");
+  if (experiment.status === "DRAFT") {
+    throw validationFailed("Launch the experiment before choosing a winner.");
+  }
+  const variantId = arm === "control" ? null : arm;
+  const variantIndex =
+    variantId === null ? -1 : experiment.variants.findIndex((v) => v.id === variantId);
+  if (variantId !== null && variantIndex < 0) {
+    throw validationFailed("That version isn’t part of this experiment.");
+  }
+  const ending = experiment.status !== "COMPLETED";
+  const now = new Date();
+  const names = [
+    "Control",
+    ...experiment.variants.map((v, i) => v.name.trim() || `Variant ${String.fromCharCode(65 + i)}`),
+  ];
+
+  const basis = await db.$transaction(async (tx) => {
+    if (ending) {
+      const ended = await draftRepo.updateExperimentWhere(
+        experimentId,
+        actorUserId,
+        EDIT_ROLES,
+        { status: ["ACTIVE", "PAUSED"] },
+        { status: "COMPLETED", endedAt: now },
+        tx,
+      );
+      if (ended.count === 0) {
+        await transitionRefused(
+          actorUserId,
+          experimentId,
+          "Only a running or paused experiment can be ended.",
+          tx,
+        );
+      }
+      await activityRepo.createActivity({ experimentId, type: "ENDED", actorId: actorUserId }, tx);
+    }
+
+    const [assigned, converted] = await Promise.all([
+      assignmentRepo.countAssignmentsByVariant(experimentId, undefined, tx),
+      conversionRepo.countConversionsByVariant(experimentId, undefined, tx),
+    ]);
+    const keys = [null, ...experiment.variants.map((v) => v.id)];
+    const analysis = analyzeResults(
+      keys.map((key, i) => ({
+        name: names[i]!,
+        visitors: assigned.get(key) ?? 0,
+        conversions: converted.get(key) ?? 0,
+      })),
+    );
+    const chosen: "RECOMMENDED" | "MANUAL" =
+      winnerBasis(analysis, variantIndex + 1) === "recommended" ? "RECOMMENDED" : "MANUAL";
+
+    const written = await draftRepo.updateExperimentWhere(
+      experimentId,
+      actorUserId,
+      EDIT_ROLES,
+      { status: "COMPLETED" },
+      {
+        winnerChosenAt: now,
+        winnerVariantId: variantId,
+        winnerBasis: chosen,
+        winnerChosenById: actorUserId,
+      },
+      tx,
+    );
+    if (written.count === 0) {
+      await transitionRefused(actorUserId, experimentId, "That experiment has changed.", tx);
+    }
+    await activityRepo.createActivity(
+      {
+        experimentId,
+        type: "WINNER_CHOSEN",
+        actorId: actorUserId,
+        meta: { variantId, name: names[variantIndex + 1]!, basis: chosen },
+      },
+      tx,
+    );
+    return chosen;
+  });
+
+  return {
+    experimentId,
+    websiteId: experiment.websiteId,
+    status: "COMPLETED",
+    winner: names[variantIndex + 1]!,
+    basis,
+  };
 }
 
 /**

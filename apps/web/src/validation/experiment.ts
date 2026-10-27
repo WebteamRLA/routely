@@ -147,6 +147,13 @@ export const experimentIdSchema = z.object({
   experimentId: idSchema,
 });
 
+/** "Choose winner": Control, or one of the experiment's own variants (checked by the service). */
+export const chooseWinnerSchema = z.object({
+  arm: z.union([z.literal("control"), idSchema], {
+    error: "Choose the version to keep.",
+  }),
+});
+
 export const changeExperimentStatusSchema = z.object({
   experimentId: idSchema,
   status: experimentStatusSchema,

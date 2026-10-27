@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowRightIcon, CheckIcon } from "@/components/rt/icons";
 import { percentAxis } from "@/lib/chart-axis";
 import { routes } from "@/lib/routes";
+import { analyzeResults, rowVerdict, wizardVerdict } from "@/lib/verdict";
 import {
   ACCENT,
   DATASETS,
@@ -13,7 +14,6 @@ import {
   MIN_VISITORS,
   colorOf,
   fmt,
-  phi,
   shortUrl,
   type AbState,
 } from "@/lib/mock/ab-test";
@@ -116,7 +116,12 @@ export function Results({
   const at = (i: number) => data[i] ?? ZERO;
   const hasData = !!ds;
   const armAt = (i: number) => arms[i] ?? arms[0]!;
-  const enough = hasData && data.every((x) => x.v >= MIN_VISITORS && x.c >= MIN_CONVERSIONS);
+  // Every chance, pill and verdict from lib/verdict.ts (the gate, the Bayesian chance, the
+  // multi-variant winner rule) — the seeded data is only the counts.
+  const analysis = analyzeResults(
+    arms.map((a, i) => ({ name: a.name, visitors: at(i).v, conversions: at(i).c })),
+  );
+  const enough = analysis.enough;
   const totV = data.reduce((x, r) => x + r.v, 0);
   const totC = data.reduce((x, r) => x + r.c, 0);
   const base = at(0);
@@ -126,22 +131,8 @@ export function Results({
     const rate = r.v ? r.c / r.v : null;
     const isC = i === 0;
     const lift = !isC && rate != null && baseRate ? rate / baseRate - 1 : null;
-    let chance: number | null = null;
-    if (enough && !isC && rate != null) {
-      const se = Math.sqrt((baseRate * (1 - baseRate)) / base.v + (rate * (1 - rate)) / r.v);
-      chance = se ? phi((rate - baseRate) / se) : 0.5;
-    }
-    const verdict = isC
-      ? ""
-      : !hasData
-        ? ""
-        : !enough
-          ? "Needs more data"
-          : chance! >= 0.95
-            ? "Likely better"
-            : chance! <= 0.05
-              ? "Likely worse"
-              : "Not significant yet";
+    const chance = enough && !isC ? (analysis.arms[i]?.chance ?? null) : null;
+    const verdict = rowVerdict(analysis.arms[i]!, analysis);
     return {
       id: a.id,
       name: a.name,
@@ -176,52 +167,10 @@ export function Results({
             : "#4B5563",
     };
   });
-  // The variant most likely to beat Control; the first one wins a tie, as in the reference.
-  const winner = rows.reduce<{ name: string; chance: number; lift: number } | null>(
-    (b, r) =>
-      r.chanceNum != null && (!b || r.chanceNum > b.chance)
-        ? { name: r.name, chance: r.chanceNum, lift: r.liftNum }
-        : b,
-    null,
-  );
-  const significant = enough && !!winner && winner.chance >= 0.95;
-  const others = arms
-    .filter((a, i) => i > 0 && (!winner || a.name !== winner.name))
-    .map((a) => a.name);
-  let vTitle: string;
-  let vBody: string;
-  if (!hasData) {
-    vTitle = "Collecting data";
-    vBody =
-      "Results appear here once visitors reach your page. This usually takes a few minutes after launch.";
-  } else if (!enough) {
-    vTitle = "Not enough data to call a winner yet";
-    vBody =
-      "Each version needs at least " +
-      fmt(MIN_VISITORS) +
-      " visitors and " +
-      MIN_CONVERSIONS +
-      " goal page views before Routely suggests a winner. Early differences often disappear as more data comes in, so keep the experiment running.";
-  } else if (significant && winner) {
-    vTitle = winner.name + " is likely better than Control";
-    vBody =
-      winner.name +
-      " is converting " +
-      Math.abs(winner.lift * 100).toFixed(1) +
-      "% better than Control, with a " +
-      (winner.chance * 100).toFixed(1) +
-      "% chance to beat it." +
-      (others.length
-        ? " " +
-          others.join(" and ") +
-          (others.length === 1 ? " isn’t" : " aren’t") +
-          " significantly different yet."
-        : "");
-  } else {
-    vTitle = "No clear winner yet";
-    vBody =
-      "You have enough data, but no variant is clearly better or worse than Control. Keep the experiment running or try a bolder change.";
-  }
+  const wv = wizardVerdict(analysis, "ab");
+  const significant = wv.kind === "win";
+  const vTitle = wv.title;
+  const vBody = wv.body;
 
   // Seeded jitter around each arm's final rate, damped as days accumulate — the reference's curve.
   const DAYS = ds ? ds.days : 14;

@@ -19,7 +19,27 @@ const MLABEL = "hidden text-left text-xs text-[#6B7280] max-[961px]:block leadin
  * proof" note), and the cumulative conversion-rate chart. Shared by the experiment page and the
  * public share page, so a shared link shows exactly what the team sees.
  */
-export function ResultsPanel({ m }: { m: ResultsModel }) {
+export function ResultsPanel({
+  m,
+  onChooseWinner,
+}: {
+  m: ResultsModel;
+  /** Opens "Choose winner"; absent for a Viewer and on the public share page. */
+  onChooseWinner?: (() => void) | undefined;
+}) {
+  const choice = m.winnerChoice;
+  const recommendedName = choice.options.find((o) => o.key === choice.recommendedKey)?.name ?? null;
+  // Prompt where a decision is due: a live result Routely recommends, or an ended experiment
+  // nobody has chosen for yet. Otherwise "End and choose winner" stays in the header's menu.
+  const cta = !onChooseWinner
+    ? null
+    : !choice.ending
+      ? choice.currentKey === null
+        ? "Choose winner"
+        : null
+      : recommendedName
+        ? `End and keep ${recommendedName}`
+        : null;
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const hover = chartHover(m.chart, hoverIdx);
 
@@ -56,6 +76,21 @@ export function ResultsPanel({ m }: { m: ResultsModel }) {
             <p className="m-0 text-sm leading-[21px] text-pretty text-[#374151]">
               {m.verdict.body}
             </p>
+            {m.verdict.nextStep ? (
+              <p className="m-0 mt-1 text-sm leading-[21px] text-pretty text-[#374151]">
+                <span className="font-semibold text-[#111827]">Next step: </span>
+                {m.verdict.nextStep}
+              </p>
+            ) : null}
+            {cta ? (
+              <button
+                type="button"
+                onClick={onChooseWinner}
+                className="mt-2 inline-flex h-9 w-fit cursor-pointer items-center justify-center rounded-lg border-0 bg-[#0070C9] px-4 text-[13px] font-semibold whitespace-nowrap text-white hover:brightness-[.8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]"
+              >
+                {cta}
+              </button>
+            ) : null}
           </div>
         </div>
         {m.verdict.kind === "wait" ? (
@@ -144,11 +179,26 @@ export function ResultsPanel({ m }: { m: ResultsModel }) {
       </section>
 
       <section aria-labelledby="exp-perf" className={CARD}>
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-5 pt-[18px] pb-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-5 pt-[18px] pb-3.5">
           <h2 id="exp-perf" className={H2}>
             Variant performance
           </h2>
-          <p className={CAPTION}>Goal: {m.goalLabel}</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <p className={CAPTION}>Goal: {m.goalLabel}</p>
+            {onChooseWinner ? (
+              <button
+                type="button"
+                onClick={onChooseWinner}
+                className="inline-flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-[#E5E7EB] bg-white px-3 text-[13px] font-medium whitespace-nowrap text-[#374151] hover:bg-[#F9FAFB] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]"
+              >
+                {choice.ending
+                  ? "End and choose winner"
+                  : choice.currentKey
+                    ? "Change winner"
+                    : "Choose winner"}
+              </button>
+            ) : null}
+          </div>
         </div>
         <div role="table" aria-label="Variant performance">
           <div

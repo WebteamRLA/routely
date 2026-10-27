@@ -14,7 +14,7 @@ import {
   isJustNow,
 } from "@/lib/experiment-time";
 import { shortUrl } from "@/lib/launch-rules";
-import { analyzeResults, resultNote, resultStatusOf } from "@/lib/verdict";
+import { type WinnerDecision, analyzeResults, resultNote, resultStatusOf } from "@/lib/verdict";
 
 export type ExperimentType = "ab" | "split";
 export type ExperimentListStatus = "draft" | "running" | "paused" | "completed";
@@ -56,6 +56,8 @@ export interface ListItemInput {
   updatedAt: Date;
   /** Control first, then variants by position. */
   arms: { name: string; visitors: number; conversions: number }[];
+  /** The chosen winner (`storedDecision`), when one was chosen. */
+  decision?: Pick<WinnerDecision, "armIndex" | "basis"> | null;
   /** True when the latest activity was the viewer's own, under a minute ago. */
   changedByViewerJustNow: boolean;
   resultsHref: string;
@@ -144,7 +146,7 @@ export function buildListItem(input: ListItemInput, ctx: ListContext): Experimen
     variants: Math.max(1, input.arms.length),
     alloc: input.trafficAllocation,
     rate: isDraft || analysis.pooledRate === null ? null : analysis.pooledRate * 100,
-    note: resultNote(analysis, status, "list"),
+    note: resultNote(analysis, status, "list", input.decision ?? null),
     updLabel: updated.label,
     updTime: updated.time,
     resultsHref: isDraft ? null : input.resultsHref,

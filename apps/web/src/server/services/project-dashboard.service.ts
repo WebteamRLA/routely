@@ -13,7 +13,7 @@ import {
   sortExperimentRows,
 } from "@/lib/project-dashboard";
 import { projectTile, trackFromState } from "@/lib/projects";
-import type { ArmCounts } from "@/lib/verdict";
+import { type ArmCounts, storedDecision } from "@/lib/verdict";
 import { dailyVisitors, dayWindow } from "@/lib/visitors";
 import { notFound } from "@/server/errors";
 import * as projectRepo from "@/server/repositories/project.repository";
@@ -142,6 +142,10 @@ export async function getProjectExperiments(
         endedAt: exp.endedAt,
         updatedAt: exp.updatedAt,
         arms,
+        decision: storedDecision(
+          exp,
+          exp.variants.map((variant) => variant.id),
+        ),
         setupComplete,
         ...(setupComplete ? { launch: launchSummary(rules) } : {}),
       },

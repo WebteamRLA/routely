@@ -339,6 +339,19 @@ export async function endExperimentAction(
   return result;
 }
 
+/** Ends a live experiment with a winner, or records/changes the winner of an ended one. */
+export async function chooseWinnerAction(
+  experimentId: string,
+  arm: string,
+): Promise<ExperimentActionResult<experimentService.ChooseWinnerResult>> {
+  const result = await run(async () => {
+    const user = await requireUser();
+    return experimentService.chooseWinner(user.id, experimentId, { arm });
+  });
+  if (result.ok) revalidateLifecycle(result.data);
+  return result;
+}
+
 /** While PAUSED: the name and/or `trafficAllocation`, nothing else (D7). */
 export async function updatePausedExperimentAction(
   experimentId: string,

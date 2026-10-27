@@ -32,6 +32,12 @@ import {
   winnerBadge,
   wizardVerdict,
   type ArmCounts,
+  decisionBadge,
+  decisionVerdict,
+  manualChoiceCaveat,
+  recommendedArm,
+  storedDecision,
+  winnerBasis,
 } from "@/lib/verdict";
 
 const arm = (name: string, visitors: number, conversions: number): ArmCounts => ({
@@ -451,7 +457,7 @@ describe("wizardVerdict", () => {
     expect(wizardVerdict(early, "split").title).toBe("Not enough data to call a winner yet");
   });
 
-  it("names the others that aren't different yet", () => {
+  it("says the winner is also ahead of the other variants", () => {
     const a = analyzeResults([
       arm("Control", 5000, 150),
       arm("Variant A", 5000, 230),
@@ -461,7 +467,7 @@ describe("wizardVerdict", () => {
     const v = wizardVerdict(a, "ab");
     expect(v.title).toBe("Variant A is likely better than Control");
     expect(v.body).toMatch(
-      /^Variant A is converting 53\.3% better than Control, with a .+ chance to beat it\. Variant B and Variant C aren’t significantly different yet\.$/,
+      /^Variant A is converting 53\.3% better than Control, with a .+ chance to beat it\. It’s also likely ahead of every other variant\.$/,
     );
   });
 });
@@ -576,5 +582,151 @@ describe("cumulativeSeries", () => {
     expect(showCumulativeChart(true, 2)).toBe(true);
     expect(showCumulativeChart(true, 1)).toBe(false);
     expect(showCumulativeChart(false, 9)).toBe(false);
+  });
+});
+
+describe("multi-variant winner — must beat the other variants too", () => {
+  // Both variants beat Control by a mile, and are a coin toss against each other.
+  const tied = analyzeResults([
+    arm("Control", 5000, 150),
+    arm("Variant A", 5000, 230),
+    arm("Variant B", 5000, 232),
+  ]);
+
+  it("names no winner when two variants beat Control but not each other", () => {
+    expect(tied.enough).toBe(true);
+    expect(tied.likelyBetter.map((a) => a.name)).toEqual(["Variant A", "Variant B"]);
+    expect(tied.winner).toBeNull();
+    expect(recommendedArm(tied)).toBeNull();
+  });
+
+  it("says so, on the detail page and in the wizard, without naming a winner", () => {
+    for (const v of [
+      experimentVerdict(tied, { status: "running" }),
+      experimentVerdict(tied, { status: "completed" }),
+      wizardVerdict(tied, "split"),
+    ]) {
+      expect(v.kind).toBe("flat");
+      expect(v.title).toBe("Variant A and Variant B are likely better than Control");
+      expect(v.body).toMatch(/no single version is clearly best/);
+      expect(`${v.title} ${v.body}`).not.toMatch(/\bwon\b|is the winner/);
+    }
+    expect(resultNote(tied, "completed", "list")).toBe("no clear winner");
+  });
+
+  it("names the variant that beats Control and every other variant", () => {
+    const clear = analyzeResults([
+      arm("Control", 5000, 150),
+      arm("Variant A", 5000, 230),
+      arm("Variant B", 5000, 160),
+    ]);
+    expect(clear.winner?.name).toBe("Variant A");
+    expect(chanceToBeatControl(clear.arms[2]!, clear.arms[1]!)).toBeGreaterThanOrEqual(WIN_CHANCE);
+  });
+
+  it("still names a single variant's winner exactly as before", () => {
+    const single = analyzeResults([arm("Control", 5000, 150), arm("Variant", 5000, 220)]);
+    expect(single.winner?.name).toBe("Variant");
+  });
+});
+
+describe("choosing a winner", () => {
+  const winning = analyzeResults([arm("Control", 5000, 150), arm("Variant", 5000, 220)]);
+  const early = analyzeResults([arm("Control", 300, 9), arm("Variant", 300, 15)]);
+  const flat = analyzeResults([arm("Control", 5000, 150), arm("Variant", 5000, 152)]);
+  const losing = analyzeResults([arm("Control", 5000, 220), arm("Variant", 5000, 150)]);
+  const empty = analyzeResults([arm("Control", 0, 0), arm("Variant", 0, 0)]);
+
+  it("recommends the gated winner, or Control when every variant is likely worse", () => {
+    expect(recommendedArm(winning)?.name).toBe("Variant");
+    expect(recommendedArm(losing)?.name).toBe("Control");
+    expect(recommendedArm(early)).toBeNull();
+    expect(recommendedArm(flat)).toBeNull();
+    expect(recommendedArm(empty)).toBeNull();
+  });
+
+  it("only the recommendation counts as recommended", () => {
+    expect(winnerBasis(winning, 1)).toBe("recommended");
+    expect(winnerBasis(winning, 0)).toBe("manual");
+    expect(winnerBasis(early, 1)).toBe("manual");
+    expect(winnerBasis(flat, 1)).toBe("manual");
+    expect(winnerBasis(losing, 0)).toBe("recommended");
+  });
+
+  it("explains why a manual choice isn't backed by the data", () => {
+    expect(manualChoiceCaveat(winning, 1)).toBeNull();
+    expect(manualChoiceCaveat(empty, 1)).toMatch(/no data yet/);
+    expect(manualChoiceCaveat(early, 1)).toMatch(/Not every version has reached 1,000 visitors/);
+    expect(manualChoiceCaveat(flat, 1)).toMatch(/No version is clearly better/);
+    expect(manualChoiceCaveat(winning, 0)).toMatch(/The data favours Variant/);
+    expect(manualChoiceCaveat(losing, 1)).toMatch(/likely worse than Control/);
+  });
+
+  it("calls a recommended choice a win, and a manual one only a choice", () => {
+    const won = decisionVerdict(winning, {
+      armIndex: 1,
+      basis: "recommended",
+      chosenBy: "Dana",
+      chosenLabel: "Oct 27",
+    });
+    expect(won.kind).toBe("win");
+    expect(won.title).toBe("Variant won");
+    expect(won.body).toMatch(/Dana chose it on Oct 27 as the winner, as Routely recommended\.$/);
+
+    const call = decisionVerdict(early, {
+      armIndex: 1,
+      basis: "manual",
+      chosenBy: "Dana",
+      chosenLabel: "Oct 27",
+    });
+    expect(call.kind).toBe("flat");
+    expect(call.title).toBe("Variant chosen as the winner");
+    expect(call.body).toMatch(/^Dana chose Variant on Oct 27\. Not every version/);
+    expect(call.body).toMatch(/not a statistically reliable result\.$/);
+    expect(`${call.title} ${call.body}`).not.toMatch(/\bwon\b|likely better|proven/);
+  });
+
+  it("names nobody when the reader may not see who chose (the share page)", () => {
+    const v = decisionVerdict(flat, {
+      armIndex: 0,
+      basis: "manual",
+      chosenBy: null,
+      chosenLabel: "Oct 27",
+    });
+    expect(v.body).toMatch(/^Control was chosen on Oct 27\./);
+  });
+
+  it("badges and notes follow the basis", () => {
+    expect(decisionBadge("recommended")).toBe("Winner");
+    expect(decisionBadge("manual")).toBe("Chosen");
+    expect(resultNote(winning, "completed", "list", { armIndex: 1, basis: "recommended" })).toBe(
+      "variant won",
+    );
+    expect(resultNote(early, "completed", "list", { armIndex: 1, basis: "manual" })).toBe(
+      "Variant chosen",
+    );
+    expect(resultNote(flat, "completed", "project", { armIndex: 0, basis: "manual" })).toBe(
+      "control kept",
+    );
+    expect(resultNote(empty, "completed", "list", { armIndex: 1, basis: "manual" })).toBe(
+      "Variant chosen",
+    );
+  });
+
+  it("reads a stored choice back", () => {
+    const at = new Date("2026-10-27T00:00:00Z");
+    const ids = ["v1", "v2"];
+    expect(
+      storedDecision({ winnerChosenAt: null, winnerVariantId: null, winnerBasis: null }, ids),
+    ).toBeNull();
+    expect(
+      storedDecision({ winnerChosenAt: at, winnerVariantId: null, winnerBasis: "MANUAL" }, ids),
+    ).toEqual({ armIndex: 0, basis: "manual" });
+    expect(
+      storedDecision(
+        { winnerChosenAt: at, winnerVariantId: "v2", winnerBasis: "RECOMMENDED" },
+        ids,
+      ),
+    ).toEqual({ armIndex: 2, basis: "recommended" });
   });
 });

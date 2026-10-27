@@ -490,18 +490,6 @@ export const armsOf = (f: AbForm): Arm[] => [
 
 export const trackKey = (f: AbForm) => urlKey(f.pageUrl) + "|" + urlKey(f.goalUrl);
 
-/** Standard normal CDF (Abramowitz–Stegun), for the "chance to beat Control" column. */
-export function phi(z: number) {
-  const x = Math.abs(z) / Math.SQRT2;
-  const t = 1 / (1 + 0.3275911 * x);
-  const y =
-    1 -
-    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
-      t *
-      Math.exp(-x * x);
-  return 0.5 * (1 + (z < 0 ? -y : y));
-}
-
 export interface StepErrors {
   1: { name: string; page: string; variants: Record<string, string>; count: number };
   2: { include: string; split: string; low: Record<string, boolean>; total: number; count: number };

@@ -52,6 +52,7 @@ function input(overrides: Partial<ResultsInput> = {}): ResultsInput {
     now: NOW,
     arms,
     series: { days: [], visitors: arms.map(() => []), conversions: arms.map(() => []) },
+    decision: null,
     ...overrides,
   };
 }
@@ -463,5 +464,92 @@ describe("helpers", () => {
   it("takes a URL's path", () => {
     expect(urlPath("https://www.acme.com/pricing?x=1")).toBe("/pricing?x=1");
     expect(urlPath("https://acme.com")).toBe("/");
+  });
+});
+
+describe("winner selection", () => {
+  const winning = [arm("Control", 5000, 150), arm("Variant A", 5000, 220)];
+  const early = [arm("Control", 300, 9), arm("Variant A", 300, 15)];
+  const ended = { status: "completed" as const, endedAt: "2026-10-06T09:00:00.000Z" };
+
+  it("offers every version, preselecting only a recommendation", () => {
+    const live = buildResultsModel(input({ arms: winning })).winnerChoice;
+    expect(live.ending).toBe(true);
+    expect(live.recommendedKey).toBe("v-Variant A");
+    expect(live.options.map((o) => [o.key, o.recommended, o.caveat === null])).toEqual([
+      ["control", false, false],
+      ["v-Variant A", true, true],
+    ]);
+    const unsure = buildResultsModel(input({ arms: early })).winnerChoice;
+    expect(unsure.recommendedKey).toBeNull();
+    expect(unsure.options.every((o) => o.caveat !== null)).toBe(true);
+  });
+
+  it("shows a recommended choice as the winner, with the next step for a Split URL test", () => {
+    const m = buildResultsModel(
+      input({
+        ...ended,
+        type: "split",
+        controlUrl: "https://acme.com/pricing",
+        arms: [
+          arm("Control", 5000, 150, { url: "https://acme.com/pricing" }),
+          arm("Variant A", 5000, 220, { url: "https://acme.com/pricing-v2" }),
+        ],
+        decision: {
+          armKey: "v-Variant A",
+          basis: "recommended",
+          chosenBy: "Dana",
+          chosenAt: "2026-10-06T09:00:00.000Z",
+        },
+      }),
+    );
+    expect(m.verdict.title).toBe("Variant A won");
+    expect(m.verdict.nextStep).toMatch(/visitors to acme\.com\/pricing get acme\.com\/pricing-v2/);
+    expect(m.rows.map((r) => [r.isBest, r.bestLabel])).toEqual([
+      [false, "Winner"],
+      [true, "Winner"],
+    ]);
+    expect(m.winnerChoice.currentKey).toBe("v-Variant A");
+    expect(m.winnerChoice.ending).toBe(false);
+  });
+
+  it("shows a manual choice as a call, never a win, with an A/B test's changes to make", () => {
+    const m = buildResultsModel(
+      input({
+        ...ended,
+        arms: early,
+        decision: {
+          armKey: "v-Variant A",
+          basis: "manual",
+          chosenBy: "Dana",
+          chosenAt: "2026-10-06T09:00:00.000Z",
+        },
+      }),
+    );
+    expect(m.verdict.title).toBe("Variant A chosen as the winner");
+    expect(m.verdict.body).toMatch(/not a statistically reliable result/);
+    expect(m.verdict.nextStep).toMatch(/^Make Variant A’s changes on fernwoodsupply\.com/);
+    expect(m.rows[1]!.bestLabel).toBe("Chosen");
+  });
+
+  it("keeping Control needs no change, and a live experiment ignores a stale decision", () => {
+    const kept = buildResultsModel(
+      input({
+        ...ended,
+        arms: early,
+        decision: { armKey: null, basis: "manual", chosenBy: null, chosenAt: NOW },
+      }),
+    );
+    expect(kept.verdict.nextStep).toMatch(/^Keep your page as it is/);
+    expect(kept.rows[0]!.isBest).toBe(true);
+
+    const live = buildResultsModel(
+      input({
+        arms: winning,
+        decision: { armKey: null, basis: "manual", chosenBy: null, chosenAt: NOW },
+      }),
+    );
+    expect(live.verdict.nextStep).toBeNull();
+    expect(live.rows[1]!.bestLabel).toBe("Likely winner");
   });
 });

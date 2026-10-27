@@ -71,6 +71,7 @@ model User {
   knownDevices       KnownSignInDevice[]
   websitesCreated    Website[]                @relation("WebsiteCreatedBy")
   experimentsCreated Experiment[]             @relation("ExperimentCreatedBy")
+  winnersChosen      Experiment[]             @relation("ExperimentWinnerChosenBy")
   activities         ExperimentActivity[]
   sheetsConnected    SheetsConnection[]       @relation("SheetsConnectedBy")
 
@@ -255,6 +256,12 @@ enum ExperimentActivityType {
   ENDED
   EDITED
   RESULT_READY
+  WINNER_CHOSEN
+}
+
+enum WinnerBasis {
+  RECOMMENDED
+  MANUAL
 }
 
 /// Opt-out-able emails. Security emails are not listed because they cannot be turned off.
@@ -542,16 +549,30 @@ model Experiment {
   endedAt       DateTime?
   /// Latch for the RESULT_READY activity and email, so each fires once.
   resultReadyAt DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
 
-  website     Website              @relation(fields: [websiteId], references: [id], onDelete: Cascade)
-  createdBy   User?                @relation("ExperimentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  variants    ExperimentVariant[]
-  assignments Assignment[]
-  events      Event[]
-  conversions Conversion[]
-  activities  ExperimentActivity[]
+  /// The version the team decided to keep, chosen when ending the experiment or afterwards.
+  /// Decided ⇔ `winnerChosenAt` is set; then a null `winnerVariantId` means Control. Routely does
+  /// not serve the winner — the customer updates their own site (`lib/verdict.ts`).
+  winnerChosenAt   DateTime?
+  winnerVariantId  String?
+  /// Whether the choice was Routely's gated recommendation or the team's own call, worked out on the
+  /// server from the frozen results when it was made.
+  winnerBasis      WinnerBasis?
+  winnerChosenById String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  website        Website              @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  createdBy      User?                @relation("ExperimentCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  // Variants of a launched experiment are never deleted, so SetNull (which would read as Control)
+  // only ever fires while the experiment itself is being deleted.
+  winnerVariant  ExperimentVariant?   @relation("ExperimentWinner", fields: [winnerVariantId], references: [id], onDelete: SetNull)
+  winnerChosenBy User?                @relation("ExperimentWinnerChosenBy", fields: [winnerChosenById], references: [id], onDelete: SetNull)
+  variants       ExperimentVariant[]
+  assignments    Assignment[]
+  events         Event[]
+  conversions    Conversion[]
+  activities     ExperimentActivity[]
 
   // Serves the SDK config endpoint: "active experiments for this website".
   @@index([websiteId, status])
@@ -586,6 +607,7 @@ model ExperimentVariant {
   assignments Assignment[]
   events      Event[]
   conversions Conversion[]
+  wonIn       Experiment[] @relation("ExperimentWinner")
 
   @@index([experimentId, position])
   @@map("experiment_variants")

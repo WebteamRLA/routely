@@ -78,7 +78,8 @@ person never deletes a workspace's data.
 | `ExperimentType` | `SPLIT_URL`, `AB_TEST` |
 | `DeviceType` | `DESKTOP`, `MOBILE`, `TABLET` — an empty `targetDevices` means every device |
 | `MemberRole` | `OWNER`, `ADMIN`, `EDITOR`, `VIEWER` |
-| `ExperimentActivityType` | `CREATED`, `LAUNCHED`, `PAUSED`, `RESUMED`, `ENDED`, `EDITED`, `RESULT_READY` |
+| `ExperimentActivityType` | `CREATED`, `LAUNCHED`, `PAUSED`, `RESUMED`, `ENDED`, `EDITED`, `RESULT_READY`, `WINNER_CHOSEN` (meta `{ variantId, name, basis }`) |
+| `WinnerBasis` | `RECOMMENDED` (the pick was Routely's gated recommendation), `MANUAL` (the team's call) — set by the server on `experiments.winnerBasis` |
 | `NotificationKind` | `RESULT_READY`, `TRACKING_STOPPED`, `SHEETS_SYNC_FAILED`, `EXPERIMENT_PAUSED` |
 | `TrackingCheckResult` | `OK`, `MISSING`, `ERROR` |
 | `UrlMatchType` | `EXACT`, `PREFIX` |

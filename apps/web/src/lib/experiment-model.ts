@@ -42,13 +42,18 @@ import {
   armProgress,
   completedOutcomeSentence,
   conversionsStillNeeded,
+  decisionBadge,
+  decisionVerdict,
   experimentVerdict,
   formatChance,
   formatLift,
   formatRate1,
   formatRate2,
+  manualChoiceCaveat,
   pauseResultLabel,
+  recommendedArm,
   showCumulativeChart,
+  type WinnerBasis,
   winnerBadge,
 } from "@/lib/verdict";
 
@@ -107,10 +112,29 @@ export interface ResultsInput {
   now: string;
   arms: ArmInput[];
   series: SeriesInput;
+  /** The winner the team chose (`Experiment.winner*`); null until one is chosen. */
+  decision: DecisionInput | null;
+}
+
+export interface DecisionInput {
+  /** The chosen arm's `ArmInput.key`: null for Control. */
+  armKey: string | null;
+  basis: WinnerBasis;
+  /** Who chose it; null for a deleted member, and always on the public share page. */
+  chosenBy: string | null;
+  /** ISO instant. */
+  chosenAt: string;
 }
 
 export type ActivityType =
-  "CREATED" | "LAUNCHED" | "PAUSED" | "RESUMED" | "ENDED" | "EDITED" | "RESULT_READY";
+  | "CREATED"
+  | "LAUNCHED"
+  | "PAUSED"
+  | "RESUMED"
+  | "ENDED"
+  | "EDITED"
+  | "RESULT_READY"
+  | "WINNER_CHOSEN";
 
 export interface ActivityInput {
   id: string;
@@ -122,6 +146,8 @@ export interface ActivityInput {
   at: string;
   /** EDITED: the fields that changed, when the writer recorded them. */
   fields: string[];
+  /** WINNER_CHOSEN: the version and whether it was the recommendation. */
+  winner?: { name: string; basis: WinnerBasis } | null;
 }
 
 export interface UrlCheckInput {
@@ -423,8 +449,16 @@ export function buildResultsModel(input: ResultsInput, options: ModelOptions = {
   const analysis = analyzeResults(
     input.arms.map((a) => ({ name: a.name, visitors: a.visitors, conversions: a.conversions })),
   );
-  const { hasData, totalVisitors: totV, totalConversions: totC, winner } = analysis;
+  const { hasData, totalVisitors: totV, totalConversions: totC } = analysis;
   const colors = input.arms.map((a, i) => armColor(i === 0 ? 0 : a.colorIndex));
+  const decision = isDone ? input.decision : null;
+  const decidedIndex = decision
+    ? Math.max(
+        0,
+        input.arms.findIndex((a) => a.key === decision.armKey),
+      )
+    : -1;
+  const recommended = recommendedArm(analysis);
 
   // Header
   const where =
@@ -453,14 +487,23 @@ export function buildResultsModel(input: ResultsInput, options: ModelOptions = {
   };
 
   // Verdict
-  const v = experimentVerdict(analysis, {
-    status,
-    endedLabel: formatMonthDay(m.endedAt ?? m.now, tz),
-    days: m.days,
-  });
+  const v = decision
+    ? decisionVerdict(analysis, {
+        armIndex: decidedIndex,
+        basis: decision.basis,
+        chosenBy: decision.chosenBy,
+        chosenLabel: formatMonthDay(new Date(decision.chosenAt), tz),
+      })
+    : experimentVerdict(analysis, {
+        status,
+        endedLabel: formatMonthDay(m.endedAt ?? m.now, tz),
+        days: m.days,
+      });
   const verdict = {
     ...v,
     ...VERDICT_TONES[v.kind],
+    /** What to do with the chosen version — Routely does not serve it. */
+    nextStep: decision ? nextStep(input, decidedIndex) : null,
     progress: analysis.arms.map((a, i) => {
       const p = armProgress(a);
       return {
@@ -508,8 +551,8 @@ export function buildResultsModel(input: ResultsInput, options: ModelOptions = {
     name: a.name,
     color: colors[i]!,
     desc: input.arms[i]!.lines.join(" · "),
-    isBest: winner !== null && a.index === winner.index,
-    bestLabel: winnerBadge(status),
+    isBest: decision ? a.index === decidedIndex : recommended?.index === a.index,
+    bestLabel: decision ? decisionBadge(decision.basis) : winnerBadge(status),
     vis: formatNumber(a.visitors),
     share: hasData ? formatRate1(a.visitors / totV) : `${input.arms[i]!.pct}%`,
     conv: formatNumber(a.conversions),
@@ -574,7 +617,39 @@ export function buildResultsModel(input: ResultsInput, options: ModelOptions = {
     resumeFacts,
     resumeBody: `Visitors will start seeing ${bothOrAll(input.arms.length)} again with the same split. Results continue from where they stopped.`,
     endFacts,
+    winnerChoice: {
+      /** Ending a live experiment with the choice, or (re)recording one on an ended experiment. */
+      ending: !isDone,
+      recommendedKey: recommended ? armKeyOf(input.arms[recommended.index]!) : null,
+      currentKey: decision ? armKeyOf(input.arms[decidedIndex]!) : null,
+      options: analysis.arms.map((a, i) => ({
+        key: armKeyOf(input.arms[i]!),
+        name: a.name,
+        color: colors[i]!,
+        rate: hasData ? formatRate2(a.rate) : "—",
+        chance: i === 0 ? null : hasData ? formatChance(a.chance) : null,
+        recommended: recommended?.index === i,
+        /** Why the data does not back this choice; null for the recommendation. */
+        caveat: manualChoiceCaveat(analysis, i),
+      })),
+    },
   };
+}
+
+/** The value `chooseWinnerAction` takes for an arm. */
+function armKeyOf(arm: ArmInput): string {
+  return arm.key ?? "control";
+}
+
+/** After a winner is chosen: what the customer has to change on their own site. */
+function nextStep(input: ResultsInput, armIndex: number): string {
+  const after = "Routely shows everyone the original page now that the experiment has ended.";
+  if (armIndex <= 0) return "Keep your page as it is — everyone already sees the original again.";
+  const arm = input.arms[armIndex]!;
+  if (input.type === "split") {
+    return `Update your site so visitors to ${shortUrl(input.controlUrl)} get ${shortUrl(arm.url ?? "")}: replace the page or redirect it. ${after}`;
+  }
+  return `Make ${arm.name}’s changes on ${shortUrl(input.controlUrl)}: ${arm.lines.join("; ")}. ${after}`;
 }
 
 export type ResultsModel = ReturnType<typeof buildResultsModel>;
@@ -724,6 +799,12 @@ function activityLabel(entry: ActivityInput): string {
     }
     case "RESULT_READY":
       return `Every version passed ${GATE}`;
+    case "WINNER_CHOSEN": {
+      const name = entry.winner?.name ?? "A version";
+      return entry.winner?.basis === "manual"
+        ? `${name} chosen by ${who} (a judgement call, not a reliable result)`
+        : `${name} chosen as the winner by ${who}`;
+    }
   }
 }
 
@@ -899,7 +980,11 @@ export function buildReviewModel(
     health = {
       tone: "info",
       title: `Completed on ${formatMonthDay(m.endedAt ?? m.now, tz)}`,
-      text: `This experiment has ended and visitors see the original page again. ${completedOutcomeSentence(analysis)}`,
+      text: `This experiment has ended and visitors see the original page again. ${
+        input.decision
+          ? `${input.arms.find((a) => a.key === input.decision!.armKey)?.name ?? "Control"} was chosen to keep.`
+          : completedOutcomeSentence(analysis)
+      }`,
     };
   } else if (status === "paused") {
     if (!enough) {

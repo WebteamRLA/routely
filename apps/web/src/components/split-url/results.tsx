@@ -12,11 +12,11 @@ import {
   RESULT_DAYS,
   colorOf,
   fmt,
-  phi,
   shortUrl,
   type SplitState,
 } from "@/lib/mock/split-url";
 import { routes } from "@/lib/routes";
+import { analyzeResults, formatChance, rowVerdict, wizardVerdict } from "@/lib/verdict";
 import { cn } from "@/lib/utils";
 
 import { Detail } from "./dialogs";
@@ -120,28 +120,24 @@ export function Results({
   const totC = data.reduce((x, r) => x + r.c, 0);
   const base = at(0);
   const baseRate = base.v ? base.c / base.v : 0;
+  // Every chance, pill and verdict from lib/verdict.ts — the same gate and Bayesian chance as the
+  // experiment's own page. The seeded data is only the counts.
+  const analysis = analyzeResults(
+    arms.map((a, i) => ({
+      name: a.name.trim() || "Variant",
+      visitors: at(i).v,
+      conversions: at(i).c,
+    })),
+  );
   const rows = arms.map((a, i) => {
     const r = at(i);
     const rate = r.v ? r.c / r.v : null;
     const isC = i === 0;
     const lift = !isC && rate != null && baseRate ? rate / baseRate - 1 : null;
-    let chance: number | null = null;
-    if (!isC && r.v && base.v && rate != null) {
-      const se = Math.sqrt((baseRate * (1 - baseRate)) / base.v + (rate * (1 - rate)) / r.v);
-      chance = se ? phi((rate - baseRate) / se) : 0.5;
-    }
-    const verdict =
-      chance == null
-        ? ""
-        : chance >= 0.95
-          ? "Likely better"
-          : chance <= 0.05
-            ? "Likely worse"
-            : "Not significant yet";
+    const chance = isC ? null : (analysis.arms[i]?.chance ?? null);
+    const verdict = rowVerdict(analysis.arms[i]!, analysis);
     return {
       id: a.id,
-      rawChance: chance,
-      rawLift: lift,
       name: a.name.trim() || "Unnamed variant",
       url: shortUrl(a.url),
       color: colorOf(a),
@@ -156,7 +152,7 @@ export function Results({
           ? "—"
           : (lift >= 0 ? "+" : "−") + Math.abs(lift * 100).toFixed(1) + "%",
       liftFg: isC || lift == null ? "#6B7280" : lift >= 0 ? "#166534" : "#B91C1C",
-      chance: isC ? "—" : chance == null ? "—" : (chance * 100).toFixed(1) + "%",
+      chance: isC ? "—" : chance == null ? "—" : formatChance(chance),
       verdict,
       verdictBg:
         verdict === "Likely better"
@@ -172,32 +168,9 @@ export function Results({
             : "#4B5563",
     };
   });
-  // The variant most likely to beat Control (first wins a tie, as in the reference).
-  let top: { name: string; chance: number; lift: number | null } | null = null;
-  for (const r of rows)
-    if (r.rawChance != null && (!top || r.rawChance > top.chance))
-      top = {
-        name: r.name === "Unnamed variant" ? "Variant" : r.name,
-        chance: r.rawChance,
-        lift: r.rawLift,
-      };
-  const significant = !!top && top.chance >= 0.95;
-  const others = rows.filter((r, i) => i > 0 && r.name !== (top && top.name));
-  const verdictBody =
-    significant && top
-      ? top.name +
-        " is converting " +
-        Math.abs((top.lift || 0) * 100).toFixed(1) +
-        "% better than Control, with a " +
-        (top.chance * 100).toFixed(1) +
-        "% chance to beat it." +
-        (others.length
-          ? " " +
-            others.map((o) => o.name).join(" and ") +
-            (others.length === 1 ? " isn’t" : " aren’t") +
-            " significantly different yet."
-          : "")
-      : "None of the variants is clearly better or worse than Control yet. Keep the experiment running to collect more data.";
+  const wv = wizardVerdict(analysis, "split");
+  const significant = wv.kind === "win";
+  const verdictBody = wv.body;
   const dist = arms.map((a, i) => {
     const pct = hasData ? (totV ? (at(i).v / totV) * 100 : 0) : d.pct(a.id);
     return {
@@ -290,11 +263,7 @@ export function Results({
             <TrendUpIcon />
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="text-[15px] font-semibold text-[#111827]">
-              {significant && top
-                ? top.name + " is likely better than Control"
-                : "No clear winner yet"}
-            </span>
+            <span className="text-[15px] font-semibold text-[#111827]">{wv.title}</span>
             <span className="text-[14px] leading-5 text-pretty text-[#374151]">{verdictBody}</span>
           </div>
         </div>

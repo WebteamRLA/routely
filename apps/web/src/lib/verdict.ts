@@ -341,7 +341,14 @@ export interface ResultsAnalysis {
   enough: boolean;
   /** Variant with the highest chance (first wins ties); null with no data or no variants. */
   best: ArmResult | null;
-  /** `best` when `enough` and its chance ≥ 0.95. */
+  /** Once `enough`: every variant whose chance to beat Control is ≥ 0.95. Empty before the gate. */
+  likelyBetter: ArmResult[];
+  /**
+   * The recommended version: `best`, when `enough`, its chance to beat Control is ≥ 0.95 **and**
+   * its chance to beat every other variant is ≥ 0.95 too. With several variants, beating Control
+   * is not enough — two variants can both beat it while being indistinguishable from each other,
+   * and naming either one would be a coin toss presented as a result.
+   */
   winner: ArmResult | null;
   /** `enough`, no winner, and every variant's chance ≤ 0.05. */
   controlWins: boolean;
@@ -388,7 +395,13 @@ export function analyzeResults(input: readonly ArmCounts[]): ResultsAnalysis {
     if (best === null || arm.chance > (best.chance ?? 0)) best = arm;
   }
 
-  const winner = enough && best !== null && (best.chance ?? 0) >= WIN_CHANCE ? best : null;
+  const likelyBetter = enough ? variants.filter((arm) => (arm.chance ?? 0) >= WIN_CHANCE) : [];
+  const winner =
+    best !== null &&
+    likelyBetter.includes(best) &&
+    variants.every((other) => other === best || chanceToBeatControl(other, best) >= WIN_CHANCE)
+      ? best
+      : null;
   const controlWins =
     enough &&
     winner === null &&
@@ -405,6 +418,7 @@ export function analyzeResults(input: readonly ArmCounts[]): ResultsAnalysis {
     hasData,
     enough,
     best,
+    likelyBetter,
     winner,
     controlWins,
   };
@@ -519,6 +533,7 @@ function plural(n: number, one: string, many: string): string {
  * | 1 | no visitors | collect | "Collecting data" |
  * | 2 | winner      | win     | "<W> won" / "<W> is likely better than Control" |
  * | 3 | controlWins | win     | "Control is likely better" |
+ * | 3b| likelyBetter, no winner | flat | "<B> and <C> are likely better than Control" — no single winner |
  * | 4 | enough      | flat    | "No clear winner" / "No clear winner yet" |
  * | 5 | completed   | wait    | "Ended before a result" |
  * | 6 | otherwise   | wait    | "Not enough data to call a winner yet" |
@@ -562,6 +577,10 @@ export function experimentVerdict(analysis: ResultsAnalysis, ctx: VerdictContext
     };
   }
 
+  if (analysis.likelyBetter.length > 0) {
+    return { kind: "flat", ...noSingleWinner(analysis, isDone) };
+  }
+
   if (analysis.enough) {
     const rates = arms.map((a) => `${a.name} ${formatRate2(a.rate)}`).join(" vs ");
     const bestText = best
@@ -592,6 +611,139 @@ export function experimentVerdict(analysis: ResultsAnalysis, ctx: VerdictContext
         : "Early differences often disappear, so keep the experiment running."
     }`,
   };
+}
+
+/**
+ * Some variants beat Control but none is clearly ahead of the rest (`likelyBetter` without a
+ * `winner`). Naming one would be a coin toss, so the copy names the group and the closest call.
+ */
+function noSingleWinner(analysis: ResultsAnalysis, isDone: boolean): Omit<Verdict, "kind"> {
+  const group = analysis.likelyBetter;
+  const best = analysis.best!;
+  const rival = analysis.variants
+    .filter((arm) => arm !== best)
+    .map((arm) => ({ arm, chance: chanceToBeatControl(arm, best) }))
+    .sort((a, b) => a.chance - b.chance)[0];
+  const names = joinNames(group.map((arm) => arm.name));
+  const verb = group.length === 1 ? "is" : "are";
+  const close = rival
+    ? ` ${best.name} has only a ${formatChance(rival.chance)} chance to beat ${rival.arm.name}, so no single version is clearly best.`
+    : "";
+  return {
+    title: `${names} ${verb} likely better than Control`,
+    body: `Every version has enough data.${close} ${
+      isDone
+        ? "Routely didn’t name a winner."
+        : "Keep the experiment running to separate them, or choose a winner yourself."
+    }`,
+  };
+}
+
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names.join("");
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Choosing a winner
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Whether a chosen version was Routely's recommendation (`recommended`) or the team's own call
+ * (`manual`). Recorded when the choice is made (`Experiment.winnerBasis`); results are frozen once
+ * an experiment ends, so it stays true.
+ */
+export type WinnerBasis = "recommended" | "manual";
+
+/**
+ * What Routely recommends keeping: the gated winner, or Control when every variant is likely
+ * worse. Null whenever the data cannot single one out — not enough of it, no clear difference, or
+ * several variants tied ahead of Control.
+ */
+export function recommendedArm(analysis: ResultsAnalysis): ArmResult | null {
+  return analysis.winner ?? (analysis.controlWins ? analysis.control : null);
+}
+
+export function winnerBasis(analysis: ResultsAnalysis, armIndex: number): WinnerBasis {
+  return recommendedArm(analysis)?.index === armIndex ? "recommended" : "manual";
+}
+
+/**
+ * Why choosing this arm is not backed by the data, or null when it is the recommendation. Shown
+ * in the choose-winner dialog before the choice and on the results afterwards — a manual pick is
+ * never presented as a result.
+ */
+export function manualChoiceCaveat(analysis: ResultsAnalysis, armIndex: number): string | null {
+  const recommended = recommendedArm(analysis);
+  if (recommended?.index === armIndex) return null;
+  if (!analysis.hasData) return "There’s no data yet, so this choice isn’t based on results.";
+  if (!analysis.enough) {
+    return `Not every version has reached ${GATE_SENTENCE}, so the data can’t tell the versions apart yet.`;
+  }
+  if (recommended) {
+    return recommended.isControl
+      ? "Every variant is likely worse than Control, so the data points the other way."
+      : `The data favours ${recommended.name}, with a ${formatChance(recommended.chance)} chance to beat Control.`;
+  }
+  return "No version is clearly better than the others, so the data doesn’t single one out.";
+}
+
+export interface WinnerDecision {
+  armIndex: number;
+  basis: WinnerBasis;
+  /** "Dana Lee"; null when the member has since been deleted or the reader may not see names. */
+  chosenBy: string | null;
+  /** "Oct 27". */
+  chosenLabel: string;
+}
+
+/**
+ * The verdict once a winner has been chosen. A recommended choice reads as a result ("<W> won");
+ * a manual one says whose call it was and why the data does not back it — never "won".
+ */
+export function decisionVerdict(analysis: ResultsAnalysis, decision: WinnerDecision): Verdict {
+  const arm = analysis.arms[decision.armIndex] ?? analysis.control;
+  const when = `on ${decision.chosenLabel}`;
+  const chose = (what: string) =>
+    decision.chosenBy ? `${decision.chosenBy} chose ${what} ${when}` : `${what} was chosen ${when}`;
+  if (decision.basis === "recommended") {
+    const evidence = arm.isControl
+      ? `Every variant was likely worse than Control, which converted at ${formatRate2(arm.rate)}.`
+      : `${arm.name} converted ${((arm.lift ?? 0) * 100).toFixed(1)}% better than Control (${formatRate2(arm.rate)} vs ${formatRate2(analysis.control.rate)}), with a ${formatChance(arm.chance)} chance to beat it, after every version passed ${GATE_SENTENCE}.`;
+    return {
+      kind: "win",
+      title: arm.isControl ? "Control won" : `${arm.name} won`,
+      body: `${evidence} ${chose(decision.chosenBy ? "it" : "It")} as the winner, as Routely recommended.`,
+    };
+  }
+  const caveat = manualChoiceCaveat(analysis, decision.armIndex) ?? "";
+  return {
+    kind: "flat",
+    title: `${arm.name} chosen as the winner`,
+    body: `${chose(arm.name)}. ${caveat} This is a judgement call, not a statistically reliable result.`,
+  };
+}
+
+/** A stored choice (`Experiment.winner*`) as the notes take it; null when none was made. */
+export function storedDecision(
+  stored: {
+    winnerChosenAt: Date | null;
+    winnerVariantId: string | null;
+    winnerBasis: "RECOMMENDED" | "MANUAL" | null;
+  },
+  variantIds: readonly string[],
+): Pick<WinnerDecision, "armIndex" | "basis"> | null {
+  if (!stored.winnerChosenAt || !stored.winnerBasis) return null;
+  const at = stored.winnerVariantId === null ? -1 : variantIds.indexOf(stored.winnerVariantId);
+  return {
+    armIndex: at + 1,
+    basis: stored.winnerBasis === "RECOMMENDED" ? "recommended" : "manual",
+  };
+}
+
+/** The table badge on the chosen row: earned ("Winner") or the team's call ("Chosen"). */
+export function decisionBadge(basis: WinnerBasis): "Winner" | "Chosen" {
+  return basis === "recommended" ? "Winner" : "Chosen";
 }
 
 /** The arm with the highest rate; Control wins ties (it comes first). */
@@ -632,16 +784,17 @@ export function wizardVerdict(analysis: ResultsAnalysis, type: "ab" | "split"): 
   }
 
   if (winner) {
-    const others = analysis.variants.filter((a) => a !== winner).map((a) => a.name);
     return {
       kind: "win",
       title: `${winner.name} is likely better than Control`,
       body:
         `${winner.name} is converting ${Math.abs((winner.lift ?? 0) * 100).toFixed(1)}% better than Control, with a ${formatChance(winner.chance)} chance to beat it.` +
-        (others.length
-          ? ` ${others.join(" and ")}${others.length === 1 ? " isn’t" : " aren’t"} significantly different yet.`
-          : ""),
+        (analysis.variants.length > 1 ? " It’s also likely ahead of every other variant." : ""),
     };
+  }
+
+  if (analysis.likelyBetter.length > 0) {
+    return { kind: "flat", ...noSingleWinner(analysis, false) };
   }
 
   if (analysis.controlWins) {
@@ -727,6 +880,7 @@ export function armProgress(arm: Pick<ArmCounts, "visitors" | "conversions">): A
  * | running           | !enough           | "collecting data" |
  * | paused            | !enough           | "paused before a result" |
  * | running or paused | enough            | "+0.6 pts vs control" (best variant − control, 1 dp, U+2212) |
+ * | completed         | winner chosen     | recommended: "variant won" / "<name> won" / "control won"; manual: "<name> chosen" / "control kept" |
  * | completed         | winner            | "variant won" (multi-variant: "<name> won") |
  * | completed         | controlWins       | "control won" |
  * | completed         | enough, no winner | "no clear winner" |
@@ -738,8 +892,16 @@ export function resultNote(
   analysis: ResultsAnalysis,
   status: ResultStatus,
   surface: "list" | "project",
+  decision: Pick<WinnerDecision, "armIndex" | "basis"> | null = null,
 ): string {
   if (status === "draft") return surface === "list" ? "" : "no result yet";
+
+  if (status === "completed" && decision) {
+    const arm = analysis.arms[decision.armIndex] ?? analysis.control;
+    if (decision.basis === "manual") return arm.isControl ? "control kept" : `${arm.name} chosen`;
+    if (arm.isControl) return "control won";
+    return analysis.variants.length === 1 ? "variant won" : `${arm.name} won`;
+  }
   if (!analysis.hasData) return surface === "list" ? "no data yet" : "no result yet";
 
   if (status === "completed") {

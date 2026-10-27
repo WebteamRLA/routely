@@ -7,6 +7,7 @@ import type {
   MemberRole,
   Prisma,
   SiteProtocol,
+  WinnerBasis,
 } from "@/generated/prisma/client";
 import { type DbClient, db } from "@/server/db";
 import {
@@ -221,6 +222,9 @@ export interface ProjectExperimentRecord {
   pausedAt: Date | null;
   endedAt: Date | null;
   updatedAt: Date;
+  winnerChosenAt: Date | null;
+  winnerVariantId: string | null;
+  winnerBasis: WinnerBasis | null;
   variants: {
     id: string;
     position: number;
@@ -254,6 +258,9 @@ export function listProjectExperiments(
       pausedAt: true,
       endedAt: true,
       updatedAt: true,
+      winnerChosenAt: true,
+      winnerVariantId: true,
+      winnerBasis: true,
       variants: {
         orderBy: { position: "asc" },
         select: { id: true, position: true, name: true, url: true, changes: true, weight: true },

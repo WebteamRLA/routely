@@ -21,7 +21,7 @@ import { routes } from "@/lib/routes";
 import { armShares } from "@/lib/traffic";
 import { normalizeUrl } from "@/lib/url";
 import { utcDayKey } from "@/lib/utc-day";
-import { type ArmDayCounts, cumulativeSeries, resultStatusOf } from "@/lib/verdict";
+import { type ArmDayCounts, cumulativeSeries, resultStatusOf, storedDecision } from "@/lib/verdict";
 import { findRole } from "@/server/auth/workspace";
 import { notFound } from "@/server/errors";
 import * as assignmentRepo from "@/server/repositories/assignment.repository";
@@ -125,6 +125,8 @@ function resultsInput(
   rows: analyticsService.DatedArmRow[],
   resumedAt: Date | null,
   now: Date,
+  /** Who chose the winner — null on the public share page, which names no teammates. */
+  chosenBy: string | null,
 ): ResultsInput {
   const published = launchedAt(experiment);
   const end = experiment.status === "COMPLETED" ? (experiment.endedAt ?? now) : now;
@@ -160,7 +162,24 @@ function resultsInput(
       visitors: series.arms.map((arm) => arm.visitors),
       conversions: series.arms.map((arm) => arm.conversions),
     },
+    decision:
+      experiment.winnerChosenAt && experiment.winnerBasis
+        ? {
+            armKey: experiment.winnerVariantId,
+            basis: experiment.winnerBasis === "RECOMMENDED" ? "recommended" : "manual",
+            chosenBy,
+            chosenAt: experiment.winnerChosenAt.toISOString(),
+          }
+        : null,
   };
+}
+
+/** WINNER_CHOSEN's `{ name, basis }`, as `chooseWinner` writes it. */
+function winnerOf(meta: unknown): ActivityInput["winner"] {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
+  const { name, basis } = meta as Record<string, unknown>;
+  if (typeof name !== "string") return null;
+  return { name, basis: basis === "RECOMMENDED" ? "recommended" : "manual" };
 }
 
 /** The run's window for the cumulative chart: launch day through the end (or now). */
@@ -193,6 +212,7 @@ function activityInput(rows: resultsRepo.ActivityRow[]): ActivityInput[] {
     system: row.actorId === null && row.type === "RESULT_READY",
     at: row.createdAt.toISOString(),
     fields: fieldsOf(row.meta),
+    winner: row.type === "WINNER_CHOSEN" ? winnerOf(row.meta) : null,
   }));
 }
 
@@ -250,23 +270,25 @@ export async function getExperimentDetail(
   const now = options.now ?? new Date();
   const timeZone = safeTimeZone(options.timeZone);
 
-  const [assigned, converted, rows, activity, tracking, createdByName] = await Promise.all([
-    assignmentRepo.countAssignmentsByVariant(experiment.id),
-    conversionRepo.countConversionsByVariant(experiment.id),
-    analyticsService.getArmRowsByDay(
-      actorUserId,
-      seriesRange(experiment, now),
-      undefined,
-      experiment.id,
-    ),
-    resultsRepo.listActivity(actorUserId, experiment.id),
-    trackingCheckService.getExperimentTracking(actorUserId, experiment.id),
-    experiment.createdById ? resultsRepo.findDisplayName(experiment.createdById) : null,
-  ]);
+  const [assigned, converted, rows, activity, tracking, createdByName, chosenByName] =
+    await Promise.all([
+      assignmentRepo.countAssignmentsByVariant(experiment.id),
+      conversionRepo.countConversionsByVariant(experiment.id),
+      analyticsService.getArmRowsByDay(
+        actorUserId,
+        seriesRange(experiment, now),
+        undefined,
+        experiment.id,
+      ),
+      resultsRepo.listActivity(actorUserId, experiment.id),
+      trackingCheckService.getExperimentTracking(actorUserId, experiment.id),
+      experiment.createdById ? resultsRepo.findDisplayName(experiment.createdById) : null,
+      experiment.winnerChosenById ? resultsRepo.findDisplayName(experiment.winnerChosenById) : null,
+    ]);
 
   const resumed = [...activity].reverse().find((row) => row.type === "RESUMED");
   const arms = armsOf(experiment, { assigned, converted });
-  const input = resultsInput(launched, arms, rows, resumed?.createdAt ?? null, now);
+  const input = resultsInput(launched, arms, rows, resumed?.createdAt ?? null, now, chosenByName);
 
   const urlChecks: UrlCheckInput[] = tracking.map((entry) => ({
     url: entry.url,
@@ -358,7 +380,7 @@ export async function getSharedResults(
     resultsRepo.latestResumedAt(experiment.id),
   ]);
   const arms = armsOf(experiment, { assigned, converted });
-  const input = resultsInput(launched, arms, rows, resumedAt, now);
+  const input = resultsInput(launched, arms, rows, resumedAt, now, null);
   return buildExperimentModel(input, null, { timeZone: safeTimeZone(options.timeZone) });
 }
 
@@ -457,6 +479,10 @@ async function toListItems(
           arm(null, "Control"),
           ...experiment.variants.map((variant) => arm(variant.id, variant.name)),
         ],
+        decision: storedDecision(
+          experiment,
+          experiment.variants.map((variant) => variant.id),
+        ),
         changedByViewerJustNow:
           last !== undefined &&
           last.actorId === actorUserId &&

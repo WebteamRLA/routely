@@ -21,6 +21,9 @@ const LIST_SELECT = {
   controlUrl: true,
   trafficAllocation: true,
   updatedAt: true,
+  winnerChosenAt: true,
+  winnerVariantId: true,
+  winnerBasis: true,
   variants: {
     orderBy: { position: "asc" as const },
     select: { id: true, name: true, url: true },
