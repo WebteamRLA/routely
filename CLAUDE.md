@@ -150,7 +150,8 @@ must be labelled as such wherever it appears.
 | `/login` | `(auth)` | Google **and** email + password sign-in |
 | `/signup` | `(auth)` | Password sign-up. `?invite=<token>` joins the inviting workspace instead of creating one |
 | `/forgot-password`, `/reset-password/[token]` | `(auth)` | Reset by email link (1 h, single use). Reset signs out everywhere |
-| `/verify-email/[token]` | `(auth)` | Spends the 24 h verification link on arrival |
+| `/verify-email` | `(auth)` | Type the 6-digit code from "Verify your email". The account comes from the `routely-verify` cookie (or an older session), never the URL |
+| `/verify-email/[token]` | `(auth)` | The same email's link: a button spends it and signs the account in (not spent on arrival — mail scanners) |
 | `/invite/[token]` | — | **Public.** Accept a team invite; the token (looked up by hash) is the credential |
 | `/settings/email/confirm` | — | **Route handler.** Spends an email-change link, 303 → `/settings?emailChanged=`. Needs no session — `proxy.ts` lets it through |
 | `/dashboard` | `(app)` | Workspace overview: 3 stat cards + projects with sparklines |
@@ -892,7 +893,8 @@ Settings), plus the undesigned sign-up, forgot/reset password, verify-email and 
 Working:
 
 - **Accounts** — Google and email + password sign-in on database sessions; sign-up (with invite);
-  email verification (24 h link; unverified password accounts see a banner with "Resend link");
+  email verification **before the account opens** (2026-10-27: a 6-digit code — 5 guesses — and a
+  link in one email, either signs in; `docs/AUTH.md`);
   forgot/reset password (1 h, signs out everywhere); profile with email change confirmed from the new
   inbox; set/change password; "Where you're signed in" with revoke; new-device sign-in email;
   notification preferences. Rate limits on password sign-in, sign-up, reset, password change and

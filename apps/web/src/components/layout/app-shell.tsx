@@ -8,7 +8,6 @@ import { CloseIcon, MenuIcon } from "@/components/layout/nav-icons";
 import { SidebarAccount } from "@/components/layout/sidebar-account";
 import { PRIMARY_NAV, WORKSPACE_NAV } from "@/components/layout/nav-items";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
-import { VerifyEmailBanner } from "@/components/layout/verify-email-banner";
 import { cn } from "@/lib/utils";
 import type { SessionUser } from "@/server/auth/session";
 
@@ -33,16 +32,7 @@ const iconButton = cn(
  * its own header, so a bar there would be an empty strip. Below 1200px it is not a leftover —
  * there is no docked sidebar, so the menu button and wordmark have nowhere else to live.
  */
-export function AppShell({
-  user,
-  verifyEmail = false,
-  children,
-}: {
-  user: SessionUser;
-  /** A password account that hasn't confirmed its address yet: shows the resend banner. */
-  verifyEmail?: boolean;
-  children: ReactNode;
-}) {
+export function AppShell({ user, children }: { user: SessionUser; children: ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pathname = usePathname();
 
@@ -149,10 +139,7 @@ export function AppShell({
          * card, would be squashed instead of scrolled.
          */}
         <main className="min-h-0 flex-1 overflow-y-auto bg-white px-8 pt-6 pb-7 max-[1321px]:px-6 max-[641px]:px-4 max-[641px]:pt-5 max-[641px]:pb-8">
-          <div className="flex w-full flex-col gap-6">
-            {verifyEmail ? <VerifyEmailBanner email={user.email} /> : null}
-            {children}
-          </div>
+          <div className="flex w-full flex-col gap-6">{children}</div>
         </main>
       </div>
     </div>

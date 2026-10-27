@@ -246,7 +246,7 @@ export default function PrivacyPolicyPage() {
               items={[
                 "Account information: for as long as your account exists.",
                 "Sign-in sessions: until you sign out, revoke them, reset your password, or 30 days without renewal.",
-                "Password-reset links expire after 1 hour, email-verification links after 24 hours, team invitations after 7 days.",
+                "Password-reset links expire after 1 hour, email-verification codes and links after 24 hours, team invitations after 7 days.",
                 "Daily visitor counts: 400 days, then deleted automatically.",
                 "Experiments and their visitor data: until the customer deletes the experiment or its project, which deletes everything beneath it.",
                 "Google Sheets connection: until it is disconnected.",
@@ -290,6 +290,11 @@ export default function PrivacyPolicyPage() {
                     </Code>,
                     "Remembers where to return after signing in",
                     "Browser session",
+                  ],
+                  [
+                    <Code key="c">routely-verify</Code>,
+                    "Lets this browser enter the code that verifies a new account’s email",
+                    "24 hours",
                   ],
                   [
                     <Code key="c">routely-invite</Code>,

@@ -195,6 +195,7 @@ export function AuthField({
   error,
   hint,
   aside,
+  className,
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & {
   id: string;
@@ -218,8 +219,8 @@ export function AuthField({
         id={id}
         aria-invalid={error ? true : undefined}
         aria-describedby={help ? helpId : undefined}
-        className={cn(input, "h-11 text-[15px]")}
         {...props}
+        className={cn(input, "h-11 text-[15px]", className)}
       />
       {help ? (
         <p

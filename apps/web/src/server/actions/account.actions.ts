@@ -6,8 +6,13 @@ import { redirect } from "next/navigation";
 
 import { AFTER_SIGN_IN, routes } from "@/lib/routes";
 import { startPasswordSession } from "@/server/auth/password-session";
-import { requireUser } from "@/server/auth/session";
-import { isAppError, toPublicError } from "@/server/errors";
+import { getSession, requireUser } from "@/server/auth/session";
+import {
+  clearPendingVerification,
+  setPendingVerification,
+  verifyingUserId,
+} from "@/server/auth/verify-cookie";
+import { AppError, isAppError, toPublicError } from "@/server/errors";
 import { clientAddress } from "@/server/http/rate-limit";
 import * as account from "@/server/services/account.service";
 
@@ -88,19 +93,26 @@ export async function signInWithPasswordAction(
 ): Promise<AuthFormState> {
   const email = text(formData, "email");
   const callbackUrl = safeCallbackUrl(text(formData, "callbackUrl"));
+  let verifyTarget: string | null = null;
 
   try {
     const { userId } = await account.authenticatePassword(
       { email, password: text(formData, "password") },
       await ip(),
     );
-    const { origin } = await startPasswordSession(userId);
-    await account.noteSignIn(userId, origin);
+    // Right password, unverified address: no session until the emailed code or link is used.
+    if (await account.requireVerificationAtSignIn(userId)) {
+      await setPendingVerification(userId);
+      verifyTarget = verifyPagePath(callbackUrl);
+    } else {
+      const { origin } = await startPasswordSession(userId);
+      await account.noteSignIn(userId, origin);
+    }
   } catch (error) {
     return failed(error, { email });
   }
 
-  redirect(callbackUrl);
+  redirect(verifyTarget ?? callbackUrl);
 }
 
 export async function signUpAction(
@@ -118,11 +130,17 @@ export async function signUpAction(
       invite,
       await ip(),
     );
-    const { origin } = await startPasswordSession(userId);
-    await account.noteSignIn(userId, origin);
+    if (!joinedWorkspace) {
+      // A new address has to be proved before the account opens: the email carries a code and a
+      // link, and this browser may type the code. An invite already proved the inbox.
+      await setPendingVerification(userId);
+      target = verifyPagePath(invite ? `/invite/${encodeURIComponent(invite)}` : target);
+    } else {
+      const { origin } = await startPasswordSession(userId);
+      await account.noteSignIn(userId, origin);
+    }
     // An invite this account could not use (sent to another address, or no longer valid): its page
     // explains why, rather than the dashboard silently showing a workspace the user didn't expect.
-    if (invite && !joinedWorkspace) target = `/invite/${encodeURIComponent(invite)}`;
   } catch (error) {
     return failed(error, { name, email });
   }
@@ -180,8 +198,60 @@ export async function updateProfileAction(input: {
   });
 }
 
-export async function resendVerificationAction(): Promise<ActionResult<{ email: string }>> {
-  return run(async () => account.resendVerification((await requireUser()).id));
+// --- Email verification ------------------------------------------------------------------------
+
+function verifyPagePath(callbackUrl: string): string {
+  return callbackUrl === AFTER_SIGN_IN
+    ? routes.verifyEmailCode
+    : `${routes.verifyEmailCode}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+}
+
+/** Verified: sign this browser in (unless it already is, as that account) and go on. */
+async function openAccount(userId: string): Promise<void> {
+  await clearPendingVerification();
+  if ((await getSession())?.user.id === userId) return;
+  const { origin } = await startPasswordSession(userId);
+  await account.noteSignIn(userId, origin);
+}
+
+export async function verifyCodeAction(
+  _previous: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const code = text(formData, "code");
+  const callbackUrl = safeCallbackUrl(text(formData, "callbackUrl"));
+  try {
+    const userId = await verifyingUserId();
+    if (!userId) throw new AppError("UNAUTHENTICATED", "Sign in again to get a new code.");
+    await account.verifyEmailCode(userId, code);
+    await openAccount(userId);
+  } catch (error) {
+    return failed(error, { code });
+  }
+  redirect(callbackUrl);
+}
+
+export async function resendCodeAction(
+  _previous: AuthFormState,
+  _formData: FormData,
+): Promise<AuthFormState> {
+  try {
+    const userId = await verifyingUserId();
+    if (!userId) throw new AppError("UNAUTHENTICATED", "Sign in again to get a new code.");
+    const { email } = await account.resendVerification(userId);
+    return { status: "success", message: `We sent a new code to ${email}.` };
+  } catch (error) {
+    return failed(error);
+  }
+}
+
+/** The emailed link's button: spends the token, verifies, signs in. */
+export async function verifyLinkAction(formData: FormData): Promise<void> {
+  const token = text(formData, "token");
+  const userId = await account.verifyEmail(token);
+  if (!userId) redirect(routes.verifyEmail(token));
+  await openAccount(userId);
+  redirect(AFTER_SIGN_IN);
 }
 
 export async function resendEmailChangeAction(): Promise<ActionResult<{ pendingEmail: string }>> {

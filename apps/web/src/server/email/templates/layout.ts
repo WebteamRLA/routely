@@ -29,6 +29,8 @@ export interface EmailContent {
   preheader: string;
   heading: string;
   paragraphs: readonly Paragraph[];
+  /** A one-time code to type, set large above the button. Digits only. */
+  code?: string;
   /** The single primary button. Its URL is also written out in full in both bodies. */
   action?: { label: string; url: string };
   /** Small print under the button: expiry, "if this wasn't you", and the like. */
@@ -132,6 +134,7 @@ export function renderEmail(subject: string, content: EmailContent): RenderedEma
 
   const textParts: string[] = [content.heading, ""];
   for (const paragraph of content.paragraphs) textParts.push(paragraphText(paragraph), "");
+  if (content.code) textParts.push(`Your code: ${content.code}`, "");
   if (content.action && actionUrl) textParts.push(`${content.action.label}:`, actionUrl, "");
   for (const note of content.notes ?? []) textParts.push(paragraphText(note), "");
   if (content.footer?.length) {
@@ -148,6 +151,10 @@ export function renderEmail(subject: string, content: EmailContent): RenderedEma
       p(paragraphHtml(paragraph), "font-size:15px;line-height:24px;color:#374151;"),
     )
     .join("");
+
+  const code = content.code
+    ? `<p style="margin:8px 0 24px;font-size:32px;line-height:40px;font-weight:700;letter-spacing:8px;color:#111827;font-family:Menlo,Consolas,monospace;">${escapeHtml(content.code)}</p>`
+    : "";
 
   const button =
     content.action && actionUrl
@@ -183,6 +190,7 @@ export function renderEmail(subject: string, content: EmailContent): RenderedEma
     `<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:32px 28px;">` +
     `<h1 style="margin:0 0 16px;font-size:20px;line-height:28px;font-weight:600;color:#111827;">${escapeHtml(content.heading)}</h1>` +
     body +
+    code +
     button +
     notes +
     footer +

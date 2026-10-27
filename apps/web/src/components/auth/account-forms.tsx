@@ -19,13 +19,16 @@ import { cn } from "@/lib/utils";
 import {
   type AuthFormState,
   requestPasswordResetAction,
+  resendCodeAction,
   resetPasswordAction,
   signUpAction,
+  verifyCodeAction,
+  verifyLinkAction,
 } from "@/server/actions/account.actions";
 
 /**
- * The account screens the design does not include (D12): sign-up, forgot password, reset
- * password. Each is a plain form posting a Server Action, so it works without JavaScript; the
+ * The account screens the design does not include (D12): sign-up, email verification, forgot
+ * password, reset password. Each is a plain form posting a Server Action, so it works without JavaScript; the
  * server's messages are shown beside the fields they concern.
  */
 
@@ -166,6 +169,133 @@ export function SignUpView({
       </form>
 
       <AuthSwitch prompt="Already have an account?" href={loginHref} label="Sign in" />
+    </AuthShell>
+  );
+}
+
+// --- Verify email ------------------------------------------------------------------------------
+
+/** "Send a new code" — its own form, so it works without JavaScript and never submits the code. */
+function ResendCode({ onDark = false }: { onDark?: boolean }) {
+  const [state, formAction] = useActionState(resendCodeAction, IDLE);
+  return (
+    <form action={formAction} className="flex flex-col gap-3">
+      {state.status === "success" ? (
+        <AuthAlert tone="success" title={state.message ?? "We sent a new code."} />
+      ) : null}
+      <Banner state={state} />
+      {onDark ? <AuthSubmit label="Send a code" pendingLabel="Sending…" /> : <ResendButton />}
+    </form>
+  );
+}
+
+function ResendButton() {
+  const { pending } = useFormStatus();
+  return (
+    <p className="m-0 -mt-1 text-center text-sm leading-5 text-[#4B5563]">
+      Didn’t get it? Check spam, or{" "}
+      <button
+        type="submit"
+        disabled={pending}
+        className={cn(
+          "cursor-pointer border-0 bg-transparent p-0 text-sm font-semibold text-[#0060AD] hover:underline disabled:cursor-progress disabled:opacity-60",
+          authFocusRing,
+        )}
+      >
+        {pending ? "sending…" : "send a new code"}
+      </button>
+    </p>
+  );
+}
+
+/**
+ * `/verify-email`: the six-digit code from "Verify your email". When no code can be typed (an
+ * older account, or this one expired or ran out of tries) it offers to send one instead.
+ */
+export function VerifyCodeView({
+  email,
+  codeLive,
+  callbackUrl,
+  supportEmail,
+}: {
+  email: string;
+  codeLive: boolean;
+  callbackUrl: string;
+  supportEmail: string | null;
+}) {
+  const [state, formAction] = useActionState(verifyCodeAction, IDLE);
+  const fe = state.fieldErrors ?? {};
+
+  if (!codeLive) {
+    return (
+      <AuthShell
+        title="Verify your email"
+        description={`Your account opens once you confirm ${email}. We’ll email you a 6-digit code and a link.`}
+        supportEmail={supportEmail}
+        footnote="none"
+      >
+        <ResendCode onDark />
+        <AuthSwitch prompt="Wrong account?" href={routes.login} label="Back to sign in" />
+      </AuthShell>
+    );
+  }
+
+  return (
+    <AuthShell
+      title="Check your email"
+      description={`We sent a 6-digit code to ${email}. Enter it below, or use the link in the same email.`}
+      supportEmail={supportEmail}
+      footnote="none"
+    >
+      <form action={formAction} noValidate className="flex flex-col gap-4">
+        <input type="hidden" name="callbackUrl" value={callbackUrl} />
+        <Banner state={fe["code"] ? IDLE : state} />
+        <AuthField
+          id="ve-code"
+          name="code"
+          label="Verification code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          pattern="[0-9 -]*"
+          placeholder="123456"
+          maxLength={9}
+          autoFocus
+          defaultValue={state.values?.["code"] ?? ""}
+          key={`c:${state.values?.["code"] ?? ""}`}
+          error={fe["code"]}
+          hint="The code expires in 24 hours."
+          className="h-12 text-center font-mono text-[22px] tracking-[0.4em]"
+        />
+        <AuthSubmit label="Verify and continue" pendingLabel="Verifying…" />
+      </form>
+      <ResendCode />
+      <AuthSwitch prompt="Wrong account?" href={routes.login} label="Back to sign in" />
+    </AuthShell>
+  );
+}
+
+/**
+ * `/verify-email/<token>`: one button rather than verifying on arrival, so a mail scanner that
+ * opens every link cannot spend it (and open a session nobody asked for).
+ */
+export function VerifyLinkView({
+  token,
+  supportEmail,
+}: {
+  token: string;
+  supportEmail: string | null;
+}) {
+  return (
+    <AuthShell
+      title="Verify your email"
+      description="Confirm this address to open your Routely account."
+      supportEmail={supportEmail}
+      footnote="none"
+    >
+      <form action={verifyLinkAction} className="contents">
+        <input type="hidden" name="token" value={token} />
+        <AuthSubmit label="Verify and continue" pendingLabel="Verifying…" />
+      </form>
     </AuthShell>
   );
 }

@@ -5,4 +5,4 @@
  * Change `LEGAL_UPDATED` whenever either page's substance changes.
  */
 export const LEGAL_OPERATOR = "Right Left Agency";
-export const LEGAL_UPDATED = "October 26, 2026";
+export const LEGAL_UPDATED = "October 27, 2026";

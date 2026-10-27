@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 
+import { VerifyLinkView } from "@/components/auth/account-forms";
 import { AuthMessage } from "@/components/auth/auth-message";
 import { env } from "@/env";
-import { AFTER_SIGN_IN } from "@/lib/routes";
+import { AFTER_SIGN_IN, routes } from "@/lib/routes";
 import { getSession } from "@/server/auth/session";
-import { verifyEmail } from "@/server/services/account.service";
+import { peekVerificationLink } from "@/server/services/account.service";
 
 export const metadata: Metadata = {
   title: "Verify your email",
@@ -13,30 +14,31 @@ export const metadata: Metadata = {
 };
 
 /**
- * The link in "Verify your email". Following it is the whole action, so the token is spent on
- * arrival; a second visit (or a mail scanner's prefetch first) reports the link as used, and the
- * address stays verified either way.
+ * The link in "Verify your email". Arriving only checks it; the button spends it, verifies the
+ * address and signs the account in (`verifyLinkAction`) — so a mail scanner's prefetch cannot use
+ * it up. A used or expired link explains itself and points onward.
  */
-export default async function VerifyEmailPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function VerifyEmailLinkPage({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}) {
   const { token } = await params;
-  const [outcome, session] = await Promise.all([verifyEmail(token), getSession()]);
-  const next = session
-    ? { href: AFTER_SIGN_IN, label: "Go to your dashboard" }
-    : { href: "/login", label: "Sign in" };
+  const [userId, session] = await Promise.all([peekVerificationLink(token), getSession()]);
+  const supportEmail = env.SUPPORT_EMAIL ?? null;
 
-  return outcome === "verified" ? (
-    <AuthMessage
-      title="Your email is verified"
-      description="Thanks — your Routely account is all set. You can now invite teammates."
-      action={next}
-      supportEmail={env.SUPPORT_EMAIL ?? null}
-    />
-  ) : (
+  if (userId) return <VerifyLinkView token={token} supportEmail={supportEmail} />;
+
+  return (
     <AuthMessage
       title="This link has expired or was already used"
-      description="Verification links work once, for 24 hours. If your email is already verified, there’s nothing more to do."
-      action={next}
-      supportEmail={env.SUPPORT_EMAIL ?? null}
+      description="Verification links work once, for 24 hours. If your email is already verified, sign in; otherwise sign in to get a new code."
+      action={
+        session
+          ? { href: AFTER_SIGN_IN, label: "Go to your dashboard" }
+          : { href: routes.login, label: "Sign in" }
+      }
+      supportEmail={supportEmail}
     />
   );
 }

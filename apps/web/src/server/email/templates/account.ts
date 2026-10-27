@@ -42,23 +42,26 @@ function formatWhen(at: Date): string {
 
 export interface VerifyEmailInput {
   name: string | null;
+  /** The six-digit code typed on `/verify-email`. */
+  code: string;
   /** `/verify-email/<token>` — absolute. */
   verifyUrl: string;
-  /** Lifetime of the link, for the copy. */
+  /** Lifetime of the code and the link, for the copy. */
   expiresInHours: number;
 }
 
 export function verifyEmailTemplate(input: VerifyEmailInput): RenderedEmail {
-  return renderEmail("Verify your email for Routely", {
-    preheader: "Confirm this address to finish setting up your Routely account.",
+  return renderEmail(`${input.code} is your Routely verification code`, {
+    preheader: "Enter this code, or use the link, to open your Routely account.",
     heading: "Verify your email",
     paragraphs: [
       greeting(input.name),
-      "Confirm that this is your email address to finish setting up your Routely account. Until you do, you can't invite teammates.",
+      "Enter this code on the verification page to open your Routely account:",
     ],
-    action: { label: "Verify email", url: input.verifyUrl },
+    code: input.code,
+    action: { label: "Verify email and sign in", url: input.verifyUrl },
     notes: [
-      `This link expires in ${input.expiresInHours} hours.`,
+      `The code and the link expire in ${input.expiresInHours} hours.`,
       "If you didn't create a Routely account, you can ignore this email.",
     ],
   });

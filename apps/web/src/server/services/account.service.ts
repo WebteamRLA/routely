@@ -18,6 +18,12 @@ import { NOTIFICATION_KINDS, NOTIFICATION_SETTINGS } from "@/lib/notifications";
 import { hashPassword, needsRehash, verifyAgainstDummy, verifyPassword } from "@/lib/password";
 import { routes } from "@/lib/routes";
 import { parseUserAgent } from "@/lib/user-agent";
+import {
+  MAX_CODE_ATTEMPTS,
+  hashVerificationCode,
+  newVerificationCode,
+  normalizeCode,
+} from "@/lib/verify-code";
 import { createPersonalWorkspace } from "@/server/auth/workspace";
 import { db } from "@/server/db";
 import { type EmailMessage, sendEmailAfter } from "@/server/email/resend";
@@ -239,31 +245,97 @@ export async function signUp(
   return result;
 }
 
+/** Sends "Verify your email" with a fresh code and link; any earlier code and link stop working. */
 async function sendVerification(userId: string, name: string | null, email: string) {
   const { raw, hash } = newToken();
-  await tokens.replaceVerificationToken(
-    userId,
-    hash,
-    new Date(Date.now() + VERIFY_TTL_HOURS * HOUR),
-  );
+  const code = newVerificationCode();
+  const expires = new Date(Date.now() + VERIFY_TTL_HOURS * HOUR);
+  await db.$transaction(async (tx) => {
+    await tokens.replaceVerificationToken(userId, hash, expires, tx);
+    await tokens.replaceVerificationCode(userId, hashVerificationCode(userId, code), expires, tx);
+  });
   send(
     email,
     verifyEmailTemplate({
       name,
+      code,
       verifyUrl: link(routes.verifyEmail(raw)),
       expiresInHours: VERIFY_TTL_HOURS,
     }),
   );
 }
 
-/** `/verify-email/<token>`. Spends the token and marks the address verified. */
-export async function verifyEmail(rawToken: string): Promise<"verified" | "invalid"> {
+async function markVerified(userId: string): Promise<void> {
+  await db.$transaction(async (tx) => {
+    await users.markEmailVerified(userId, new Date(), tx);
+    await tokens.clearVerification(userId, tx);
+  });
+}
+
+/** The account a live `/verify-email/<token>` link belongs to, without spending it. */
+export async function peekVerificationLink(rawToken: string): Promise<string | null> {
   const parsed = tokenSchema.safeParse(rawToken);
-  if (!parsed.success) return "invalid";
+  if (!parsed.success) return null;
+  return tokens.peekVerificationToken(hashToken(parsed.data), new Date());
+}
+
+/**
+ * The link's button. Spends the token and marks the address verified; returns the account so the
+ * caller can sign it in — following the link proves the inbox, as a password reset link does.
+ */
+export async function verifyEmail(rawToken: string): Promise<string | null> {
+  const parsed = tokenSchema.safeParse(rawToken);
+  if (!parsed.success) return null;
   const userId = await tokens.consumeVerificationToken(hashToken(parsed.data), new Date());
-  if (!userId) return "invalid";
-  await users.markEmailVerified(userId, new Date());
-  return "verified";
+  if (!userId) return null;
+  await markVerified(userId);
+  return userId;
+}
+
+const CODE_WRONG = "That code isn’t right. Check the latest email from Routely.";
+const CODE_SPENT = "This code has expired or was tried too many times. Send a new one.";
+
+/** `/verify-email`: the six-digit code. `userId` comes from the pending cookie or the session. */
+export async function verifyEmailCode(userId: string, input: string): Promise<void> {
+  const code = normalizeCode(input);
+  if (!code) throw validationFailed(CODE_WRONG, { code: ["Enter the 6-digit code."] });
+  const outcome = await tokens.tryVerificationCode(
+    userId,
+    hashVerificationCode(userId, code),
+    new Date(),
+    MAX_CODE_ATTEMPTS,
+  );
+  if (outcome === "wrong") throw validationFailed(CODE_WRONG, { code: [CODE_WRONG] });
+  if (outcome === "spent") throw validationFailed(CODE_SPENT, { code: [CODE_SPENT] });
+  await markVerified(userId);
+}
+
+/** What `/verify-email` shows: the address the code went to, and whether one can be typed now. */
+export async function verificationStatus(
+  userId: string,
+): Promise<{ email: string; verified: boolean; codeLive: boolean } | null> {
+  const user = await users.findUserById(userId);
+  if (!user) return null;
+  const verified = !(await needsEmailVerification(userId));
+  const live = verified
+    ? null
+    : await tokens.liveVerificationCode(userId, new Date(), MAX_CODE_ATTEMPTS);
+  return { email: user.email, verified, codeLive: !!live };
+}
+
+/**
+ * A password sign-in to an account that has not verified its address: no session, but a fresh code
+ * by email — unless one went out in the last minute, which is still in the inbox. Returns whether
+ * the account needs verifying at all.
+ */
+export async function requireVerificationAtSignIn(userId: string): Promise<boolean> {
+  if (!(await needsEmailVerification(userId))) return false;
+  const live = await tokens.liveVerificationCode(userId, new Date(), MAX_CODE_ATTEMPTS);
+  if (live && Date.now() - live.createdAt.getTime() < MINUTE) return true;
+  if (!rateLimit(`verify-day:${userId}`, 5, DAY).allowed) return true;
+  const user = await users.findUserById(userId);
+  if (user) await sendVerification(user.id, user.name, user.email);
+  return true;
 }
 
 /**
@@ -274,12 +346,12 @@ export async function verifyEmail(rawToken: string): Promise<"verified" | "inval
 export async function needsEmailVerification(userId: string): Promise<boolean> {
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { emailVerified: true, _count: { select: { accounts: true } } },
+    select: { emailVerified: true, passwordHash: true, _count: { select: { accounts: true } } },
   });
-  return !!user && !user.emailVerified && user._count.accounts === 0;
+  return !!user && !!user.passwordHash && !user.emailVerified && user._count.accounts === 0;
 }
 
-/** The app banner's "Resend link": a fresh link (the previous one stops working). 1 a minute, 5 a day. */
+/** "Send a new code": a fresh code and link (the previous ones stop working). 1 a minute, 5 a day. */
 export async function resendVerification(actorUserId: string): Promise<{ email: string }> {
   const user = await users.findUserById(actorUserId);
   if (!user) throw notFound();
@@ -289,13 +361,13 @@ export async function resendVerification(actorUserId: string): Promise<{ email: 
     `verify-min:${actorUserId}`,
     1,
     MINUTE,
-    "We just sent a link. Wait a minute before asking for another.",
+    "We just sent a code. Wait a minute before asking for another.",
   );
   limitOrThrow(
     `verify-day:${actorUserId}`,
     5,
     DAY,
-    "You’ve asked for too many confirmation links today. Try again tomorrow.",
+    "You’ve asked for too many codes today. Try again tomorrow.",
   );
   await sendVerification(user.id, user.name, user.email);
   return { email: user.email };
@@ -465,7 +537,7 @@ export async function updateProfile(
       `email-change-day:${actorUserId}`,
       5,
       DAY,
-      "You’ve asked for too many confirmation links today. Try again tomorrow.",
+      "You’ve asked for too many codes today. Try again tomorrow.",
     );
   }
 
@@ -507,13 +579,13 @@ export async function resendEmailChange(actorUserId: string): Promise<{ pendingE
     `email-change-min:${actorUserId}`,
     1,
     MINUTE,
-    "We just sent a link. Wait a minute before asking for another.",
+    "We just sent a code. Wait a minute before asking for another.",
   );
   limitOrThrow(
     `email-change-day:${actorUserId}`,
     5,
     DAY,
-    "You’ve asked for too many confirmation links today. Try again tomorrow.",
+    "You’ve asked for too many codes today. Try again tomorrow.",
   );
 
   const { raw, hash } = newToken();

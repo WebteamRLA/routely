@@ -47,6 +47,83 @@ export async function consumeVerificationToken(
   return row.identifier.slice(VERIFY_IDENTIFIER_PREFIX.length);
 }
 
+/** The live link's user id, without spending it — the link page shows a button first. */
+export async function peekVerificationToken(
+  tokenHash: string,
+  now: Date,
+  client: DbClient = db,
+): Promise<string | null> {
+  const row = await client.verificationToken.findFirst({
+    where: {
+      token: tokenHash,
+      identifier: { startsWith: VERIFY_IDENTIFIER_PREFIX },
+      expires: { gt: now },
+    },
+  });
+  return row ? row.identifier.slice(VERIFY_IDENTIFIER_PREFIX.length) : null;
+}
+
+/** Once the address is verified, by link or by code, the other one is void too. */
+export async function clearVerification(userId: string, client: DbClient = db): Promise<void> {
+  await client.verificationToken.deleteMany({
+    where: { identifier: `${VERIFY_IDENTIFIER_PREFIX}${userId}` },
+  });
+  await client.emailVerificationCode.deleteMany({ where: { userId } });
+}
+
+// --- Email verification code -------------------------------------------------------------------
+
+export async function replaceVerificationCode(
+  userId: string,
+  codeHash: string,
+  expiresAt: Date,
+  client: DbClient = db,
+): Promise<void> {
+  await client.emailVerificationCode.upsert({
+    where: { userId },
+    create: { userId, codeHash, expiresAt },
+    update: { codeHash, expiresAt, attempts: 0, createdAt: new Date() },
+  });
+}
+
+/** When the live code was sent, or null when there is none to type. */
+export async function liveVerificationCode(
+  userId: string,
+  now: Date,
+  maxAttempts: number,
+  client: DbClient = db,
+): Promise<{ createdAt: Date } | null> {
+  return client.emailVerificationCode.findFirst({
+    where: { userId, expiresAt: { gt: now }, attempts: { lt: maxAttempts } },
+    select: { createdAt: true },
+  });
+}
+
+/**
+ * One guess at the code. The attempt is claimed first — an increment guarded by the limit — and
+ * only then compared, so a burst of concurrent guesses cannot get past `maxAttempts`. A right
+ * guess deletes the row (single use); `"spent"` means no code is left to guess against.
+ */
+export async function tryVerificationCode(
+  userId: string,
+  codeHash: string,
+  now: Date,
+  maxAttempts: number,
+  client: DbClient = db,
+): Promise<"ok" | "wrong" | "spent"> {
+  const { count } = await client.emailVerificationCode.updateMany({
+    where: { userId, expiresAt: { gt: now }, attempts: { lt: maxAttempts } },
+    data: { attempts: { increment: 1 } },
+  });
+  if (count !== 1) return "spent";
+  const { count: matched } = await client.emailVerificationCode.deleteMany({
+    where: { userId, codeHash },
+  });
+  if (matched === 1) return "ok";
+  const left = await liveVerificationCode(userId, now, maxAttempts, client);
+  return left ? "wrong" : "spent";
+}
+
 // --- Password reset ----------------------------------------------------------------------------
 
 export async function createPasswordReset(

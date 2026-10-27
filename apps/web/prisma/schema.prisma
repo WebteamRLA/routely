@@ -66,6 +66,7 @@ model User {
   invitesSent        WorkspaceInvite[]        @relation("InvitesSent")
   emailChanges       EmailChangeRequest[]
   passwordResets     PasswordResetToken[]
+  verificationCodes  EmailVerificationCode[]
   notificationPrefs  NotificationPreference[]
   knownDevices       KnownSignInDevice[]
   websitesCreated    Website[]                @relation("WebsiteCreatedBy")
@@ -148,6 +149,24 @@ model EmailChangeRequest {
 
   @@index([userId])
   @@map("email_change_requests")
+}
+
+/// The six-digit code in "Verify your email", typed on `/verify-email` — the other way to verify
+/// besides the link. One live code per user; issuing a new one replaces it. Only a hash is stored,
+/// and every guess spends one of `attempts` *before* it is compared, so concurrent guesses cannot
+/// exceed the limit. A million possible codes against five guesses is the security margin.
+model EmailVerificationCode {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  /// SHA-256 of `<userId>:<code>`.
+  codeHash  String
+  attempts  Int      @default(0)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verification_codes")
 }
 
 model PasswordResetToken {

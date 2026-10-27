@@ -29,6 +29,7 @@ const ALL: Record<string, { email: RenderedEmail; link?: string }> = {
   verify: {
     email: verifyEmailTemplate({
       name: EVIL,
+      code: "012345",
       verifyUrl: `${APP}/verify-email/tok1`,
       expiresInHours: 24,
     }),
@@ -190,12 +191,32 @@ describe("invite", () => {
   });
 });
 
+describe("verifyEmailTemplate", () => {
+  it("puts the code in the subject and both bodies, beside the link", () => {
+    const email = verifyEmailTemplate({
+      name: "Ada",
+      code: "012345",
+      verifyUrl: `${APP}/verify-email/tok1`,
+      expiresInHours: 24,
+    });
+    expect(email.subject).toBe("012345 is your Routely verification code");
+    expect(email.text).toContain("Your code: 012345");
+    expect(email.html).toContain(">012345</p>");
+    expect(email.text).toContain(`${APP}/verify-email/tok1`);
+  });
+});
+
 describe("layout guards", () => {
   it("refuses a non-http link", () => {
     expect(() => safeUrl("javascript:alert(1)")).toThrow();
     expect(() => safeUrl("/relative")).toThrow();
     expect(() =>
-      verifyEmailTemplate({ name: null, verifyUrl: "javascript:alert(1)", expiresInHours: 24 }),
+      verifyEmailTemplate({
+        name: null,
+        code: "012345",
+        verifyUrl: "javascript:alert(1)",
+        expiresInHours: 24,
+      }),
     ).toThrow();
   });
 

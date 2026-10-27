@@ -14,6 +14,8 @@ export const routes = {
   /** Public legal pages, linked from every sign-in screen's footnote. */
   privacyPolicy: "/privacy-policy",
   termsOfService: "/terms-of-service",
+  /** Where a new password account types the code from "Verify your email". */
+  verifyEmailCode: "/verify-email",
   /** Links in emails — the raw token only ever travels here. */
   resetPassword: (token: string) => `/reset-password/${encodeURIComponent(token)}`,
   verifyEmail: (token: string) => `/verify-email/${encodeURIComponent(token)}`,

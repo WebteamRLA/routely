@@ -141,7 +141,8 @@ owner — is spent exactly once.
 
 | Token | Table | Lifetime | On use |
 | --- | --- | --- | --- |
-| Email verification | `verification_tokens` (Auth.js's table, `identifier = "verify-email:<userId>"`, so it can never collide with an Auth.js email-provider token) | 24 h | `/verify-email/[token]` spends it on arrival and sets `emailVerified`. A new link replaces the old one |
+| Email verification link | `verification_tokens` (Auth.js's table, `identifier = "verify-email:<userId>"`, so it can never collide with an Auth.js email-provider token) | 24 h | `/verify-email/[token]` only checks it on arrival; its **button** (`verifyLinkAction`) spends it, sets `emailVerified` and signs the account in — a mail scanner's prefetch cannot use it up. A new email replaces the old link |
+| Email verification code | `email_verification_codes` (one row per user, SHA-256 of `<userId>:<code>`) | 24 h, **5 guesses** | Six digits, sent in the same email as the link and typed on `/verify-email`. Each guess claims an attempt (guarded increment) *before* comparing, so concurrent guesses cannot exceed five. Verifying by either one voids the other |
 | Password reset | `password_reset_tokens` | 1 h | `/reset-password/[token]` sets the password, marks the address verified, voids every other reset link and **deletes every session** of the account; "Your password was changed" is emailed |
 | Email change | `email_change_requests` | 24 h | `GET /settings/email/confirm?token=` switches `users.email` (re-checking nobody took it meanwhile), marks it verified and tells the **old** address. Needs no session — the token proves the new inbox. A later request supersedes an earlier one |
 | Invite | `workspace_invites` | 7 days | `/invite/[token]`; accepting sets the membership, makes it current and sets `emailVerified` when the invite's address is the account's. At most one *pending* invite per (workspace, email) — a partial unique index |
@@ -155,10 +156,19 @@ everything out.
 
 "Verified" means `emailVerified` is set **or** the account has a linked Google account (Google
 proved the inbox at sign-in; Google sign-ups are also stamped `emailVerified` by the adapter). The
-same rule is used by the unverified banner, by `team.service` (only a verified member can send
-invites) and by `notification.service` (only verified members receive notifications). A password
-account that has not followed its link sees `components/layout/verify-email-banner.tsx` at the top
-of every page, with "Resend link".
+same rule is used by the `(app)` layout, by `team.service` (only a verified member can send
+invites) and by `notification.service` (only verified members receive notifications).
+
+**A password account does not open until its address is verified** (user request, 2026-10-27).
+Sign-up creates the account and workspace but **no session**: it emails a six-digit code and a link,
+sets the `routely-verify` cookie and lands on `/verify-email`. The code or the link signs the account
+in. A password sign-in to an unverified account does the same (a fresh code, unless one went out in
+the last minute). The `routely-verify` cookie (`server/auth/verify-cookie.ts`, HMAC over the user id
+and a 24 h expiry, key derived from `AUTH_SECRET`) is what lets a browser type a code — the page never
+takes the account from the URL or the form, so someone who only knows an address has nowhere to guess.
+Sign-up through a valid invite skips all this (the invite proved the inbox). A session from before
+codes existed, on an unverified account, is redirected to `/verify-email` by the `(app)` layout, which
+then offers "Send a code".
 
 ### Rate limits
 
@@ -170,7 +180,7 @@ the exception: it counts rows, so it holds across instances.
 | Password sign-in | 10 per 15 min per (IP, email) **and** 50 per 15 min per IP |
 | Sign-up | 10 per hour per IP |
 | Forgot password | 20 per hour per IP; 3 per 15 min per address, **silently** (the page says the same either way) |
-| Resend verification / email-change link | 1 a minute **and** 5 a day per account |
+| Resend verification code / email-change link | 1 a minute **and** 5 a day per account; a sign-in to an unverified account re-sends at most once a minute |
 | Start an email change | 5 a day per account |
 | Change password | 10 per 15 min per account |
 | Invites | 10 addresses per batch; 50 a day per workspace (database count) |
@@ -364,5 +374,6 @@ user intact.
 6. **Google cannot be added to a password account.** Account linking stays off (above), so
    "Continue with Google" for an address that already has a password account is refused. The other
    direction works: a Google account can add a password in Settings or through "Forgot password".
-7. **Without `RESEND_API_KEY` in production, nothing is sent and nothing is logged.** Sign-up still
-   works, but the account cannot be verified, reset or invited until a key is configured.
+7. **Without `RESEND_API_KEY` in production, nothing is sent and nothing is logged.** A new password
+   account then never receives its code and **cannot open at all**, so the key is required wherever
+   password sign-up is offered.
