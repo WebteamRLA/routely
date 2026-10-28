@@ -208,9 +208,9 @@ export function HelpGuides({ guides }: { guides: readonly Guide[] }) {
       <nav aria-label="Contents" className="sticky top-6 flex flex-col gap-3 max-[1201px]:hidden">
         {guides.map((guide) => (
           <div key={guide.slug} className="flex flex-col gap-0.5">
-            <span className="px-2 text-xs leading-4 font-semibold tracking-[0.04em] text-[#6B7280] uppercase">
+            <h3 className="m-0 mb-0.5 px-2 text-sm leading-5 font-semibold text-[#111827]">
               {guide.title}
-            </span>
+            </h3>
             {guide.sections.map((section) => (
               <Link
                 key={section.id}
