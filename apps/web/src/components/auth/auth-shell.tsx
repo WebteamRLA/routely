@@ -55,7 +55,7 @@ export function AuthShell({
             aria-labelledby="rt-lg-title"
             className="flex w-full max-w-[400px] flex-col gap-8 max-[641px]:gap-7"
           >
-            <div role="img" aria-label="Routely">
+            <div role="img" aria-label="Routely" className="flex justify-center">
               <div className="inline-flex h-[52px] items-center gap-3 text-[#111827]">
                 <Image
                   src="/routely-mark.png"
@@ -72,7 +72,7 @@ export function AuthShell({
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-2 text-center">
               <h1
                 id="rt-lg-title"
                 className="m-0 text-[26px] leading-[34px] font-semibold tracking-[-0.02em] text-[#111827] max-[641px]:text-2xl max-[641px]:leading-8"
@@ -87,7 +87,7 @@ export function AuthShell({
             {children}
 
             {footnote === "legal" ? (
-              <p className="m-0 text-xs leading-[18px] text-pretty text-[#6B7280]">
+              <p className="m-0 text-center text-xs leading-[18px] text-pretty text-[#6B7280]">
                 By continuing, you agree to Routely’s{" "}
                 <Link href={routes.termsOfService} className={authTextLink}>
                   Terms of Service
