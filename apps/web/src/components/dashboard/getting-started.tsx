@@ -126,7 +126,7 @@ function Step({
       <span
         aria-hidden
         className={cn(
-          "mt-px inline-flex size-6 flex-[0_0_24px] items-center justify-center rounded-full text-xs font-semibold tabular-nums",
+          "inline-flex size-6 flex-[0_0_24px] items-center justify-center rounded-full text-xs font-semibold tabular-nums",
           step.done
             ? "bg-[#DCFCE7] text-[#166534]"
             : step.skipped
@@ -141,7 +141,7 @@ function Step({
       <div className="flex min-w-0 flex-auto flex-col gap-1">
         <span
           className={cn(
-            "text-sm leading-5 font-semibold",
+            "text-sm leading-6 font-semibold",
             step.done || step.skipped ? "text-[#6B7280]" : "text-[#111827]",
           )}
         >

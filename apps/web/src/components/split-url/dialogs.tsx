@@ -259,7 +259,7 @@ export function InstallModal({
                 <StepNum n={1} />
                 <div className="flex min-w-0 flex-auto flex-col gap-2.5 pt-0.5">
                   <span className="text-[14px] leading-[22px] font-semibold text-[#111827]">
-                    Copy the script
+                    Copy the script and paste it into the header
                   </span>
                   <div className="flex flex-col overflow-hidden rounded-[12px] border border-[#EEF0F3] bg-[#F3F4F6]">
                     <div className="flex items-center justify-between gap-2 border-b border-[#E5E7EB] py-1.5 pr-2 pl-3.5">
@@ -286,30 +286,8 @@ export function InstallModal({
                   </div>
                 </div>
               </li>
-              <li className="relative flex items-start gap-3">
-                <StepRail />
-                <StepNum n={2} />
-                <div className="flex min-w-0 flex-col gap-0.5 pt-0.5">
-                  <span className="text-[14px] leading-[22px] font-semibold text-[#111827]">
-                    Paste it into the page head
-                  </span>
-                  <span className="text-[14px] leading-5 text-pretty text-[#4B5563]">
-                    Put it inside the{" "}
-                    <code
-                      className={cn(
-                        MONO,
-                        "rounded-[5px] bg-[#F3F4F6] px-1.5 py-px text-[13px] text-[#B91C1C]",
-                      )}
-                    >
-                      &lt;head&gt;
-                    </code>{" "}
-                    of every page in this experiment, as high as you can and before other scripts,
-                    so visitors are redirected without a flicker.
-                  </span>
-                </div>
-              </li>
               <li className="flex items-start gap-3">
-                <StepNum n={3} />
+                <StepNum n={2} />
                 <div className="flex min-w-0 flex-col gap-0.5 pt-0.5">
                   <span className="text-[14px] leading-[22px] font-semibold text-[#111827]">
                     Publish your changes

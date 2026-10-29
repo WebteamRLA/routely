@@ -12,13 +12,19 @@ export interface Shot {
   alt: string;
   width: number;
   height: number;
+  /**
+   * A crop of a dialog: the image carries the dialog's own border and rounded corners (the corners
+   * are transparent), so it is shown without a second frame.
+   */
+  dialog?: boolean;
 }
 
-const shot = (name: string, width: number, height: number, alt: string): Shot => ({
+const shot = (name: string, width: number, height: number, alt: string, dialog = false): Shot => ({
   src: `/guides/${name}.webp`,
   alt,
   width,
   height,
+  dialog,
 });
 
 export const SHOTS = {
@@ -28,12 +34,14 @@ export const SHOTS = {
     1120,
     798,
     "The New project dialog with Project name and Website address",
+    true,
   ),
   trackingCode: shot(
     "tracking-code",
     1360,
     1440,
     "The tracking code dialog: copy the script and paste it into the page head",
+    true,
   ),
   abSetup: shot(
     "ab-setup",
@@ -43,5 +51,5 @@ export const SHOTS = {
   ),
   splitSetup: shot("split-setup", 1600, 1385, "Split URL wizard step 1: Control and variant URLs"),
   results: shot("results", 1600, 1385, "An experiment's Results tab with a likely winner"),
-  winnerDialog: shot("winner-dialog", 1120, 1044, "The Choose the winner dialog"),
+  winnerDialog: shot("winner-dialog", 1120, 1044, "The Choose the winner dialog", true),
 } as const;
