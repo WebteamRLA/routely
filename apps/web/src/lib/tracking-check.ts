@@ -32,13 +32,7 @@ export interface TrackingObservation {
   wrongSiteId: boolean;
   /** The other projects' ids found on the page, to name in the message. */
   otherSiteIds?: string[];
-  /** The code was found only past the page cache (`pixel.service.inspectPage`). */
-  staleCache?: boolean;
 }
-
-/** Shown on an OK check whose page is still cached without the code. */
-export const STALE_CACHE_DETAIL =
-  "The code is on your site, but your server’s cache is still showing visitors an older copy of this page. Visitors get the code when the cache refreshes; clear your server cache to make it immediate.";
 
 export function decideTrackingCheck(observation: TrackingObservation): {
   result: TrackingCheckVerdict;
@@ -46,11 +40,7 @@ export function decideTrackingCheck(observation: TrackingObservation): {
   detail: string | null;
 } {
   if (observation.pageLoaded && observation.scriptFound) {
-    return {
-      result: "OK",
-      method: "html",
-      detail: observation.staleCache ? STALE_CACHE_DETAIL : null,
-    };
+    return { result: "OK", method: "html", detail: null };
   }
   if (observation.seenRecently) {
     return {

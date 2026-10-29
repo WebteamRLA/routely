@@ -233,16 +233,6 @@ describe("pixel check rows", () => {
     ]);
   });
 
-  it("counts code found only past the page cache as installed, and says the cache is behind", () => {
-    const stale = { ...base, staleCache: true };
-    expect(verifyFromResult(stale)).toBe("found");
-    expect(checkRows("found", stale, ctx)[1]).toMatchObject({
-      title: "Pixel found — cache not refreshed yet",
-      tone: "ok",
-    });
-    expect(checkTips("found", stale)).toBeNull();
-  });
-
   it("words a missing script, another project's script and a page that didn't load", () => {
     const missing = { ...base, scriptFound: false, antiFlickerFound: false };
     expect(verifyFromResult(missing)).toBe("missing");

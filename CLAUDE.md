@@ -853,14 +853,6 @@ second dev server in `apps/web` will not start. Test with `npm run build` and
 `npx next start -p 31xx` (in `apps/web`), stop it by PID — and run only one `npm run build` at a
 time, since they share `apps/web/.next`.
 
-**Host page caches serve pages from before the snippet was pasted.** Both install checks (the
-tracking dialog's Verify and the launch's tracking checks) go through `pixel.service.inspectPage`:
-when the plain URL loads without this project's ID, it fetches once more with
-`?_routely_check=<ts>` (`lib/cache-buster.ts`), which skips Nginx/Varnish/LiteSpeed caches. Found
-there → counts as installed with `staleCache` ("cache not refreshed yet") — user decision
-2026-10-29, because customers can't purge a server cache on every change. Don't drop the second
-fetch as redundant.
-
 **`next start` is `NODE_ENV=production`, and that changes behaviour.** `server/http/safe-fetch.ts`
 refuses private addresses and `*.localhost` unless `NODE_ENV !== "production"`, so pixel and tracking
 checks against a local test site fail under `next start` that pass under `next dev`. Email is the

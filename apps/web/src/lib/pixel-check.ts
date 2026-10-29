@@ -23,8 +23,6 @@ export interface PixelCheckResult {
   wrongSiteId: boolean;
   /** Other projects' IDs found in the page, so a mismatch can name them. */
   foundSiteIds?: string[];
-  /** Found only past the page cache: installed, the cache still serves an older copy. */
-  staleCache?: boolean;
   /** ISO time of the project's last SDK hit, or null when none has arrived. */
   lastSeenAt: string | null;
 }
@@ -106,17 +104,6 @@ export function checkRows(
     text: `${shortUrl} responded normally.`,
     tone: "ok",
   };
-
-  if (result.scriptFound && result.staleCache) {
-    return [
-      loaded,
-      {
-        title: "Pixel found — cache not refreshed yet",
-        text: "Your site has the code, but your server’s cache is still showing visitors an older copy of this page. Visitors get the code when the cache refreshes; clear your server cache to make it immediate.",
-        tone: "ok",
-      },
-    ];
-  }
 
   if (result.scriptFound) {
     return [
