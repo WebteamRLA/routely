@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { experimentsCaption, rankProjects, sparkPaths } from "./dashboard";
-import { checkHeader, checkRows, showTips, verifyFromResult } from "./pixel-check";
+import { checkHeader, checkRows, checkTips, verifyFromResult } from "./pixel-check";
 import {
   type ExperimentRowInput,
   actionHref,
@@ -249,7 +249,14 @@ describe("pixel check rows", () => {
     expect(checkHeader("missing", down, { shortUrl: "acme.com/", domain: "acme.com" }).title).toBe(
       "We couldn’t load acme.com/",
     );
-    expect(showTips("missing", missing)).toBe(true);
-    expect(showTips("missing", down)).toBe(false);
+    expect(checkTips("missing", missing)?.title).toBe("Things to check");
+    expect(checkTips("missing", down)).toBeNull();
+    // Another project's ID: usually a stale cache, so the tips lead with clearing it.
+    const other = checkTips("missing", { ...missing, wrongSiteId: true });
+    expect(other?.title).toBe("Clear your website and server cache");
+    expect(other?.items.join(" ")).toMatch(/website cache.*server cache/s);
+    expect(other?.items).toHaveLength(3);
+    expect(other?.moreFixes).toBe(false);
+    expect(checkTips("missing", missing)?.moreFixes).toBe(true);
   });
 });

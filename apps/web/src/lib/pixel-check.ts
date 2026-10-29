@@ -149,7 +149,38 @@ export function checkHeader(
   return { title: "Verification status", label: "Not checked yet", kind: "idle" };
 }
 
-/** The "Things to check" tips belong to a page that loaded without our script. */
-export function showTips(verify: PixelVerify, result: PixelCheckResult | null): boolean {
-  return verify === "missing" && (!result || result.pageLoaded);
+export interface CheckTips {
+  title: string;
+  items: string[];
+  /** Show "More fixes for a missing pixel" under the tips. */
+  moreFixes: boolean;
+}
+
+/**
+ * The tips under a failed check, for a page that loaded without this project's script; null
+ * otherwise. Another project's ID usually means a cache still serving an older copy of the page
+ * (a re-created project gets a new ID), so that case leads with clearing the caches.
+ */
+export function checkTips(verify: PixelVerify, result: PixelCheckResult | null): CheckTips | null {
+  if (verify !== "missing" || (result && !result.pageLoaded)) return null;
+  if (result?.wrongSiteId) {
+    return {
+      title: "Clear your website and server cache",
+      items: [
+        "Your site may still be serving an old cached copy with an earlier Routely code.",
+        "Clear your website cache in your caching plugin — for example LiteSpeed Cache → Purge All, WP Rocket or W3 Total Cache.",
+        "Clear your server cache in your hosting panel, and your CDN (such as Cloudflare) if you use one.",
+      ],
+      moreFixes: false,
+    };
+  }
+  return {
+    title: "Things to check",
+    items: [
+      "Make sure your changes are published, not just saved as a draft.",
+      "If you use a caching plugin or CDN, clear the cache and check again.",
+      "Check that a cookie banner isn’t blocking the code until visitors accept.",
+    ],
+    moreFixes: true,
+  };
 }

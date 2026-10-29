@@ -10,7 +10,7 @@ import {
   checkHeader,
   checkRows,
   shortCheckUrl,
-  showTips,
+  checkTips,
   verifyFromResult,
 } from "@/lib/pixel-check";
 import { pixelCheckUrl, pixelDefaultUrl, pixelUrlError } from "@/lib/projects";
@@ -478,6 +478,7 @@ function VerifyStep({
     ...TONES[c.tone],
   }));
   const head = checkHeader(verify, result, { shortUrl, domain });
+  const tips = checkTips(verify, result);
 
   const styles = {
     found: {
@@ -626,17 +627,19 @@ function VerifyStep({
             </li>
           ))}
         </ul>
-        {showTips(verify, result) ? (
+        {tips ? (
           <div className="flex flex-col gap-1.5 border-t border-[#FECACA] bg-[#FEF2F2] px-4 pt-3 pb-3.5">
-            <span className="text-[13px] font-semibold text-[#111827]">Things to check</span>
+            <span className="text-[13px] font-semibold text-[#111827]">{tips.title}</span>
             <ul className="m-0 flex list-disc flex-col gap-1 py-0 pr-0 pl-[18px] text-[13px] leading-[19px] text-[#374151]">
-              <li>Make sure your changes are published, not just saved as a draft.</li>
-              <li>If you use a caching plugin or CDN, clear the cache and check again.</li>
-              <li>Check that a cookie banner isn’t blocking the code until visitors accept.</li>
+              {tips.items.map((tip) => (
+                <li key={tip}>{tip}</li>
+              ))}
             </ul>
-            <HelpLink anchor="tracking-not-found" newTab>
-              More fixes for a missing pixel
-            </HelpLink>
+            {tips.moreFixes ? (
+              <HelpLink anchor="tracking-not-found" newTab>
+                More fixes for a missing pixel
+              </HelpLink>
+            ) : null}
           </div>
         ) : null}
       </section>

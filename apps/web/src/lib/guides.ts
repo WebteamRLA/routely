@@ -326,7 +326,9 @@ export const GUIDES: readonly Guide[] = [
               },
               {
                 q: "“Different Project ID”",
-                a: ["Replace the old code with this project’s code."],
+                a: [
+                  "Clear your website cache (your caching plugin) and your server cache (your hosting panel, and CDN if you use one) — an old cached copy often still carries an earlier code. If it still shows, replace the old code with this project’s code.",
+                ],
               },
             ],
           },
