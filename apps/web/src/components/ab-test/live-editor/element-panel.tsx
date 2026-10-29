@@ -14,6 +14,16 @@ import {
   toHexColor,
 } from "@/lib/editor-protocol";
 import { ACCENT } from "@/lib/mock/ab-test";
+import {
+  BOX_UNITS,
+  type BoxUnit,
+  type SideParts,
+  type Sides,
+  formatBox,
+  joinSide,
+  parseBox,
+  splitSide,
+} from "@/lib/box-sides";
 import { FONT_WEIGHTS, TEXT_ALIGNS, isBoxValue, isFontSize } from "@/lib/style-values";
 import { cn } from "@/lib/utils";
 import type { VisualChange } from "@/validation/visual-change";
@@ -126,6 +136,221 @@ function StyleText({
         <span className={hint}>{original ? "Original: " + original : rule}</span>
       )}
     </PanelBlock>
+  );
+}
+
+const SIDE_NAMES = ["Top", "Right", "Bottom", "Left"] as const;
+
+/** How far each unit's slider reaches (the number box goes further). */
+const SLIDER: Record<BoxUnit, { max: number; step: number }> = {
+  px: { max: 200, step: 1 },
+  "%": { max: 100, step: 1 },
+  em: { max: 10, step: 0.1 },
+  rem: { max: 10, step: 0.1 },
+};
+
+/**
+ * Padding or margin the way Gutenberg's box control does it: one value for every side, with a
+ * link button that splits it into top, right, bottom and left. Each side is a number and a unit
+ * (`auto` too, for margin). What is stored is still the CSS shorthand, written by
+ * `lib/box-sides.ts` and checked by `isBoxValue` like any other value.
+ */
+function BoxControl({
+  id,
+  title,
+  value,
+  original,
+  allowAuto,
+  onEdit,
+}: {
+  id: string;
+  title: string;
+  value: string | undefined;
+  original: string | undefined;
+  allowAuto: boolean;
+  onEdit(value: string | undefined): void;
+}) {
+  const sides: Sides = parseBox(value) ?? parseBox(original) ?? ["0", "0", "0", "0"];
+  const parts = sides.map(splitSide);
+  const [linked, setLinked] = useState(() => sides.every((side) => side === sides[0]));
+  const units: (BoxUnit | "auto")[] = allowAuto ? [...BOX_UNITS, "auto"] : [...BOX_UNITS];
+
+  const commit = (next: SideParts[]) => {
+    const css = formatBox(next.map((p) => joinSide(p, allowAuto)) as Sides);
+    if (isBoxValue(css, allowAuto)) onEdit(css);
+  };
+  const all = parts[0]!;
+  const slider = all.unit === "auto" ? null : SLIDER[all.unit];
+
+  return (
+    <PanelBlock gap={6}>
+      <div className="flex items-center justify-between gap-2">
+        <span id={id} className={label}>
+          {title}
+        </span>
+        <div className="flex items-center gap-1">
+          {value !== undefined ? (
+            <button
+              type="button"
+              onClick={() => onEdit(undefined)}
+              className="h-7 cursor-pointer rounded-md border-0 bg-transparent px-1.5 text-[12px] font-medium text-[#0060AD] hover:bg-[#F3F4F6] focus-visible:outline-2 focus-visible:outline-[#0091FF]"
+            >
+              Reset
+            </button>
+          ) : null}
+          <button
+            type="button"
+            aria-pressed={!linked}
+            aria-label={
+              linked
+                ? `Set ${title.toLowerCase()} per side`
+                : `Same ${title.toLowerCase()} on all sides`
+            }
+            title={linked ? "Unlink sides" : "Link sides"}
+            onClick={() => {
+              if (!linked) commit([all, all, all, all]);
+              setLinked(!linked);
+            }}
+            className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md border-0 focus-visible:outline-2 focus-visible:outline-[#0091FF]"
+            style={{
+              background: linked ? "transparent" : "#E6F4FF",
+              color: linked ? "#4B5563" : "#0060AD",
+            }}
+          >
+            <LinkSidesIcon linked={linked} />
+          </button>
+        </div>
+      </div>
+      {linked ? (
+        <div className="flex items-center gap-2.5">
+          <SideInput
+            label={`${title}, all sides`}
+            parts={all}
+            units={units}
+            allowNegative={allowAuto}
+            onChange={(p) => commit([p, p, p, p])}
+            className="w-[124px] flex-none"
+          />
+          {slider ? (
+            <input
+              type="range"
+              aria-label={`${title} slider`}
+              min={0}
+              max={slider.max}
+              step={slider.step}
+              value={Math.min(Math.max(Number.parseFloat(all.num) || 0, 0), slider.max)}
+              onChange={(e) => commit(Array(4).fill({ ...all, num: e.target.value }))}
+              className="min-w-0 flex-auto cursor-pointer accent-[#0070C9]"
+            />
+          ) : null}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-2.5 gap-y-2">
+          {SIDE_NAMES.map((name, i) => (
+            <div key={name} className="flex min-w-0 flex-col gap-1">
+              <span className="text-[11px] font-medium text-[#6B7280]">{name}</span>
+              <SideInput
+                label={`${title} ${name.toLowerCase()}`}
+                parts={parts[i]!}
+                units={units}
+                allowNegative={allowAuto}
+                onChange={(p) => commit(parts.map((q, j) => (j === i ? p : q)))}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <span className={hint}>{original ? "Original: " + original : "Not set on the page."}</span>
+    </PanelBlock>
+  );
+}
+
+/**
+ * A number and its unit in one box. What is typed is kept while it is mid-edit (empty, "1.", "-"),
+ * so the field never snaps back under the cursor; a finite number becomes an edit at once.
+ */
+function SideInput({
+  label: ariaLabel,
+  parts,
+  units,
+  allowNegative,
+  onChange,
+  className,
+}: {
+  label: string;
+  parts: SideParts;
+  units: (BoxUnit | "auto")[];
+  allowNegative: boolean;
+  onChange(parts: SideParts): void;
+  className?: string;
+}) {
+  const [typed, setTyped] = useState<string | null>(null);
+  const auto = parts.unit === "auto";
+  return (
+    <div
+      className={cn(
+        cls.input,
+        "flex h-9 min-w-0 items-center focus-within:border-[#0091FF] focus-within:shadow-[0_0_0_3px_#0091FF1F]",
+        className,
+      )}
+    >
+      <input
+        type="number"
+        inputMode="decimal"
+        aria-label={ariaLabel}
+        disabled={auto}
+        min={allowNegative ? undefined : 0}
+        step="any"
+        value={auto ? "" : (typed ?? parts.num)}
+        placeholder={auto ? "auto" : "0"}
+        onChange={(e) => {
+          const text = e.target.value;
+          setTyped(text);
+          if (text !== "" && Number.isFinite(Number.parseFloat(text))) {
+            onChange({ ...parts, num: text });
+          }
+        }}
+        onBlur={() => setTyped(null)}
+        className="h-full min-w-0 flex-auto [appearance:textfield] border-0 bg-transparent pl-2.5 text-[14px] text-[#111827] outline-none disabled:text-[#9CA3AF] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+      />
+      <select
+        aria-label={`${ariaLabel} unit`}
+        value={parts.unit}
+        onChange={(e) =>
+          onChange({
+            num: parts.num || "0",
+            unit: e.target.value as BoxUnit | "auto",
+          })
+        }
+        className="h-full flex-none cursor-pointer rounded-r-lg border-0 border-l border-[#E5E7EB] bg-transparent pr-1 pl-1.5 text-[12px] text-[#4B5563] outline-none"
+      >
+        {units.map((u) => (
+          <option key={u} value={u}>
+            {u}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function LinkSidesIcon({ linked }: { linked: boolean }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+      {linked ? null : <path d="m3 3 18 18" />}
+    </svg>
   );
 }
 
@@ -423,24 +648,20 @@ export function LiveElementPanel({
       </Section>
 
       <Section title="Dimensions">
-        <StyleText
+        <BoxControl
           id={ids + "padding"}
           title="Padding"
           value={set.padding}
           original={now.padding}
-          placeholder="16px 24px"
-          valid={(v) => isBoxValue(v, false)}
-          rule="One to four sizes (top right bottom left), like 16px or 16px 24px."
+          allowAuto={false}
           onEdit={(v) => onEdit("padding", v)}
         />
-        <StyleText
+        <BoxControl
           id={ids + "margin"}
           title="Margin"
           value={set.margin}
           original={now.margin}
-          placeholder="0 auto"
-          valid={(v) => isBoxValue(v, true)}
-          rule="One to four sizes or auto, like 0 auto."
+          allowAuto
           onEdit={(v) => onEdit("margin", v)}
         />
       </Section>

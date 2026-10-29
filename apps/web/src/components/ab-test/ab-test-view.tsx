@@ -372,7 +372,6 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
     if (s.launching) return;
     set({ modal: null });
   };
-  const pixelKey = s.ctx.pixelKey;
   const snippet = s.ctx.snippet;
   const copySnippet = () => {
     try {
@@ -777,7 +776,6 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
         open={s.modal === "install"}
         s={s}
         d={d}
-        pixelKey={pixelKey}
         snippet={snippet}
         onClose={closeModal}
         onStep={(n) => {

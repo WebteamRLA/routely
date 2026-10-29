@@ -35,7 +35,6 @@ export function InstallModal({
   open,
   s,
   d,
-  pixelKey,
   snippet,
   onClose,
   onStep,
@@ -45,7 +44,6 @@ export function InstallModal({
   open: boolean;
   s: AbState;
   d: Derived;
-  pixelKey: string;
   snippet: string;
   onClose(): void;
   onStep(n: 1 | 2): void;
@@ -246,10 +244,7 @@ export function InstallModal({
                     Copy the script and paste it into the header
                   </span>
                   <div className="flex flex-col overflow-hidden rounded-xl border border-[#EEF0F3] bg-[#F3F4F6]">
-                    <div className="flex items-center justify-between gap-2 border-b border-[#E5E7EB] py-1.5 pr-2 pl-3.5">
-                      <span className="text-[12px] text-[#6B7280]">
-                        Routely tracking script · {pixelKey}
-                      </span>
+                    <div className="flex items-center justify-end gap-2 border-b border-[#E5E7EB] py-1.5 pr-2 pl-3.5">
                       <button
                         type="button"
                         onClick={onCopy}
