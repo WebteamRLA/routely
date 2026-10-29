@@ -40,8 +40,6 @@ export interface InstallationCheck {
   antiFlickerFound: boolean;
   /** A Routely snippet is present, but for a different website. */
   wrongSiteId: boolean;
-  /** Every other website's site id the page carries (public — they are in its source). */
-  otherSiteIds: string[];
   /**
    * The website's real `lastSeenAt` — when the SDK last reported a page hit. Null when nothing has
    * reported yet. The install dialogs no longer show it (their "Events received" row was removed,

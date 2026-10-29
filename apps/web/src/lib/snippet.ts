@@ -68,6 +68,15 @@ export interface AntiFlickerOptions {
  * applied to `body` itself — it then covers the viewport regardless of document height, and
  * the host page's box model never participates, so lifting it cannot reflow the page.
  */
+/**
+ * Asks page optimisers to leave both tags alone. Caching plugins delay or defer scripts to speed
+ * up first paint — exactly wrong here: a delayed snippet lets the control page render before the
+ * redirect decision, so visitors see it flash and then switch (seen on a LiteSpeed site,
+ * 2026-10-29). `data-no-optimize` and `data-no-defer` are LiteSpeed Cache's opt-outs (several
+ * other WordPress optimisers read them too); `data-cfasync="false"` is Cloudflare Rocket Loader's.
+ */
+export const OPTIMIZER_OPT_OUT = 'data-no-optimize="1" data-no-defer="1" data-cfasync="false"';
+
 export function buildAntiFlickerSnippet({
   timeoutMs = DEFAULT_ANTI_FLICKER_MS,
   background = DEFAULT_ANTI_FLICKER_BACKGROUND,
@@ -78,7 +87,7 @@ export function buildAntiFlickerSnippet({
     `background:${background}!important;z-index:2147483647!important}`;
 
   return `<!-- Routely anti-flickering script -->
-<script>
+<script ${OPTIMIZER_OPT_OUT}>
 var routelyTimeout = ${timeoutMs};
 !function(d,w,i,t){try{var h=d.head||d.getElementsByTagName("head")[0];if(!h||d.getElementById(i))return;var s=d.createElement("style");s.id=i;s.appendChild(d.createTextNode("${css}"));h.appendChild(s);var done=false;w.__routelyReveal=function(){if(done)return;done=true;try{s.parentNode&&s.parentNode.removeChild(s)}catch(e){}};setTimeout(w.__routelyReveal,t)}catch(e){}}(document,window,"routely-cloak",routelyTimeout);
 </script>`;
@@ -93,7 +102,7 @@ var routelyTimeout = ${timeoutMs};
  */
 export function buildSnippet({ sdkUrl, publicSiteId }: SnippetOptions): string {
   return `<!-- Routely tracking script (place in <head>) -->
-<script src="${escapeAttribute(sdkUrl)}" data-site-id="${escapeAttribute(publicSiteId)}"></script>`;
+<script src="${escapeAttribute(sdkUrl)}" data-site-id="${escapeAttribute(publicSiteId)}" ${OPTIMIZER_OPT_OUT}></script>`;
 }
 
 /**

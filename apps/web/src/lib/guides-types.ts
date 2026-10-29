@@ -78,6 +78,7 @@ export const GUIDE_OF = {
   "tracking-not-found": "troubleshooting",
   "launch-blocked": "troubleshooting",
   "editor-wont-load": "troubleshooting",
+  "page-flicker": "troubleshooting",
 } as const satisfies Record<string, GuideSlug>;
 export type GuideAnchor = keyof typeof GUIDE_OF;
 

@@ -373,6 +373,23 @@ export const GUIDES: readonly Guide[] = [
         ],
       },
       {
+        id: "page-flicker",
+        title: "Control page shows before the variant",
+        blocks: [
+          {
+            kind: "faq",
+            items: [
+              {
+                q: "Visitors see the original page, then switch",
+                a: [
+                  "A caching or speed plugin is delaying the Routely code, so the page shows before Routely can decide. In the plugin, exclude “routely” and “sdk.js” from delayed/deferred JavaScript (LiteSpeed Cache: Page Optimization → Tuning), copy the tracking code again, and clear your website and server cache.",
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      {
         id: "no-visitors",
         title: "No visitors",
         blocks: [

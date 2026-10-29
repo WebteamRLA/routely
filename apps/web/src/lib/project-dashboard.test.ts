@@ -211,7 +211,7 @@ describe("dashboard helpers", () => {
 });
 
 describe("pixel check rows", () => {
-  const ctx = { shortUrl: "acme.com/", key: "rt_this" };
+  const ctx = { shortUrl: "acme.com/" };
   const base = {
     pageLoaded: true,
     loadError: null,
@@ -240,12 +240,9 @@ describe("pixel check rows", () => {
     expect(checkRows("missing", { ...missing, wrongSiteId: true }, ctx)[1]!.title).toBe(
       "Different Project ID",
     );
-    // Names both IDs when the page's is known, so the mismatch can be compared directly.
-    expect(
-      checkRows("missing", { ...missing, wrongSiteId: true, foundSiteIds: ["rt_old"] }, ctx)[1]!
-        .text,
-    ).toBe(
-      "Your page has the code for project rt_old, but this project’s ID is rt_this. Copy this project’s script from step 1 and replace the old code.",
+    // Says to clear the caches, without naming IDs (user request).
+    expect(checkRows("missing", { ...missing, wrongSiteId: true }, ctx)[1]!.text).toMatch(
+      /Clear your website and server cache/,
     );
     const down = { ...missing, pageLoaded: false, loadError: "acme.com returned HTTP 500." };
     expect(checkRows("missing", down, ctx)[0]).toMatchObject({

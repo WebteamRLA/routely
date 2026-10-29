@@ -21,8 +21,6 @@ export interface PixelCheckResult {
   scriptFound: boolean;
   antiFlickerFound: boolean;
   wrongSiteId: boolean;
-  /** Other projects' IDs found in the page, so a mismatch can name them. */
-  foundSiteIds?: string[];
   /** ISO time of the project's last SDK hit, or null when none has arrived. */
   lastSeenAt: string | null;
 }
@@ -56,26 +54,13 @@ export function shortCheckUrl(url: string, domain: string): string {
   );
 }
 
-/**
- * Names both IDs — the one on the page and this project's — so the mismatch can be seen at a
- * glance (a deleted and re-created project gets a new ID; its old code still carries the old one).
- */
-function differentIdText(found: string[], key: string): string {
-  const fix = "Copy this project’s script from step 1 and replace the old code.";
-  if (found.length === 0 || !key) {
-    return `The page has a Routely script for another project. ${fix}`;
-  }
-  const theirs = found.length === 1 ? found[0] : found.join(", ");
-  return `Your page has the code for project ${theirs}, but this project’s ID is ${key}. ${fix}`;
-}
-
 /** The check rows for the dialog's current state. */
 export function checkRows(
   verify: PixelVerify,
   result: PixelCheckResult | null,
-  ctx: { shortUrl: string; key: string },
+  ctx: { shortUrl: string },
 ): CheckRow[] {
-  const { shortUrl, key } = ctx;
+  const { shortUrl } = ctx;
   if (verify === "idle" || verify === "checking" || !result) {
     const tone: CheckTone = verify === "checking" ? "running" : "pending";
     return [
@@ -123,7 +108,7 @@ export function checkRows(
       loaded,
       {
         title: "Different Project ID",
-        text: differentIdText(result.foundSiteIds ?? [], key),
+        text: "Your site is still showing an old saved copy of this page with an earlier code. Clear your website and server cache, then check again.",
         tone: "fail",
       },
     ];
