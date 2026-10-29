@@ -296,6 +296,10 @@ export interface PixelCheckData {
   scriptFound: boolean;
   antiFlickerFound: boolean;
   wrongSiteId: boolean;
+  /** Other projects' IDs the page carries — named in the "Different Project ID" row. */
+  foundSiteIds: string[];
+  /** Found past the page cache only: installed, but visitors still get an older cached copy. */
+  staleCache: boolean;
   /** The project's real last hit — never a fabricated "just now" (spec §8 row 10). */
   lastSeenAt: string | null;
 }
@@ -320,6 +324,8 @@ export async function verifyProjectPixelAction(input: {
       scriptFound: check.scriptFound,
       antiFlickerFound: check.antiFlickerFound,
       wrongSiteId: check.wrongSiteId,
+      foundSiteIds: check.otherSiteIds,
+      staleCache: check.staleCache,
       lastSeenAt: check.lastSeenAt ? check.lastSeenAt.toISOString() : null,
     };
   });

@@ -211,7 +211,7 @@ describe("dashboard helpers", () => {
 });
 
 describe("pixel check rows", () => {
-  const ctx = { shortUrl: "acme.com/" };
+  const ctx = { shortUrl: "acme.com/", key: "rt_this" };
   const base = {
     pageLoaded: true,
     loadError: null,
@@ -233,12 +233,29 @@ describe("pixel check rows", () => {
     ]);
   });
 
+  it("counts code found only past the page cache as installed, and says the cache is behind", () => {
+    const stale = { ...base, staleCache: true };
+    expect(verifyFromResult(stale)).toBe("found");
+    expect(checkRows("found", stale, ctx)[1]).toMatchObject({
+      title: "Pixel found — cache not refreshed yet",
+      tone: "ok",
+    });
+    expect(checkTips("found", stale)).toBeNull();
+  });
+
   it("words a missing script, another project's script and a page that didn't load", () => {
     const missing = { ...base, scriptFound: false, antiFlickerFound: false };
     expect(verifyFromResult(missing)).toBe("missing");
     expect(checkRows("missing", missing, ctx)[1]!.title).toBe("Pixel not found");
     expect(checkRows("missing", { ...missing, wrongSiteId: true }, ctx)[1]!.title).toBe(
       "Different Project ID",
+    );
+    // Names both IDs when the page's is known, so the mismatch can be compared directly.
+    expect(
+      checkRows("missing", { ...missing, wrongSiteId: true, foundSiteIds: ["rt_old"] }, ctx)[1]!
+        .text,
+    ).toBe(
+      "Your page has the code for project rt_old, but this project’s ID is rt_this. Copy this project’s script from step 1 and replace the old code.",
     );
     const down = { ...missing, pageLoaded: false, loadError: "acme.com returned HTTP 500." };
     expect(checkRows("missing", down, ctx)[0]).toMatchObject({

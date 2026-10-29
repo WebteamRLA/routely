@@ -21,6 +21,10 @@ export interface PixelCheckResult {
   scriptFound: boolean;
   antiFlickerFound: boolean;
   wrongSiteId: boolean;
+  /** Other projects' IDs found in the page, so a mismatch can name them. */
+  foundSiteIds?: string[];
+  /** Found only past the page cache: installed, the cache still serves an older copy. */
+  staleCache?: boolean;
   /** ISO time of the project's last SDK hit, or null when none has arrived. */
   lastSeenAt: string | null;
 }
@@ -54,13 +58,26 @@ export function shortCheckUrl(url: string, domain: string): string {
   );
 }
 
+/**
+ * Names both IDs — the one on the page and this project's — so the mismatch can be seen at a
+ * glance (a deleted and re-created project gets a new ID; its old code still carries the old one).
+ */
+function differentIdText(found: string[], key: string): string {
+  const fix = "Copy this project’s script from step 1 and replace the old code.";
+  if (found.length === 0 || !key) {
+    return `The page has a Routely script for another project. ${fix}`;
+  }
+  const theirs = found.length === 1 ? found[0] : found.join(", ");
+  return `Your page has the code for project ${theirs}, but this project’s ID is ${key}. ${fix}`;
+}
+
 /** The check rows for the dialog's current state. */
 export function checkRows(
   verify: PixelVerify,
   result: PixelCheckResult | null,
-  ctx: { shortUrl: string },
+  ctx: { shortUrl: string; key: string },
 ): CheckRow[] {
-  const { shortUrl } = ctx;
+  const { shortUrl, key } = ctx;
   if (verify === "idle" || verify === "checking" || !result) {
     const tone: CheckTone = verify === "checking" ? "running" : "pending";
     return [
@@ -90,6 +107,17 @@ export function checkRows(
     tone: "ok",
   };
 
+  if (result.scriptFound && result.staleCache) {
+    return [
+      loaded,
+      {
+        title: "Pixel found — cache not refreshed yet",
+        text: "Your site has the code, but your server’s cache is still showing visitors an older copy of this page. Visitors get the code when the cache refreshes; clear your server cache to make it immediate.",
+        tone: "ok",
+      },
+    ];
+  }
+
   if (result.scriptFound) {
     return [
       loaded,
@@ -108,7 +136,7 @@ export function checkRows(
       loaded,
       {
         title: "Different Project ID",
-        text: "The page has a Routely script for another project. Copy this project’s script and replace it.",
+        text: differentIdText(result.foundSiteIds ?? [], key),
         tone: "fail",
       },
     ];

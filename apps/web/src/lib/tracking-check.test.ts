@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { TRACKING_CHECK_MAX_AGE_MS, decideTrackingCheck, isFreshOk } from "./tracking-check";
+import {
+  TRACKING_CHECK_MAX_AGE_MS,
+  decideTrackingCheck,
+  isFreshOk,
+  STALE_CACHE_DETAIL,
+} from "./tracking-check";
 
 const base = {
   pageLoaded: true,
@@ -16,6 +21,14 @@ describe("decideTrackingCheck", () => {
       result: "OK",
       method: "html",
       detail: null,
+    });
+  });
+
+  it("is OK when the code is found only past the page cache, and says the cache is behind", () => {
+    expect(decideTrackingCheck({ ...base, scriptFound: true, staleCache: true })).toEqual({
+      result: "OK",
+      method: "html",
+      detail: STALE_CACHE_DETAIL,
     });
   });
 

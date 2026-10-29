@@ -1,8 +1,9 @@
 import "server-only";
 
 import { env } from "@/env";
+import { withCacheBuster } from "@/lib/cache-buster";
 import { can, rolesWith } from "@/lib/permissions";
-import { detectSnippet } from "@/lib/snippet-detect";
+import { type SnippetDetection, detectSnippet } from "@/lib/snippet-detect";
 import { isSameSite } from "@/lib/url";
 import { forbidden, notFound, rateLimited, validationFailed } from "@/server/errors";
 import { rateLimit } from "@/server/http/rate-limit";
@@ -40,6 +41,13 @@ export interface InstallationCheck {
   antiFlickerFound: boolean;
   /** A Routely snippet is present, but for a different website. */
   wrongSiteId: boolean;
+  /** Every other website's site id the page carries (public — they are in its source). */
+  otherSiteIds: string[];
+  /**
+   * The plain URL (what visitors get) didn't carry the code, but the page fetched past its cache
+   * did: the code is installed and a host cache is still serving an older copy. Counts as found.
+   */
+  staleCache: boolean;
   /**
    * The website's real `lastSeenAt` — when the SDK last reported a page hit. Null when nothing has
    * reported yet. The install dialogs no longer show it (their "Events received" row was removed,
@@ -112,6 +120,46 @@ export function readFetch(result: SafeFetchResult): {
   };
 }
 
+const NO_SNIPPET: SnippetDetection = {
+  scriptFound: false,
+  antiFlickerFound: false,
+  wrongSiteId: false,
+  otherSiteIds: [],
+};
+
+/**
+ * Fetches a page of `domain` and looks for `publicSiteId` in it — shared by the install check and
+ * the launch's tracking checks.
+ *
+ * When the page loads without the code, it is fetched once more past any page cache
+ * (`withCacheBuster`). Host caches routinely keep serving a page from before the snippet was
+ * pasted, which no customer can purge on every change; if WordPress itself already serves the
+ * code, it is installed (user decision 2026-10-29), and `staleCache` says the cache is behind.
+ */
+export async function inspectPage(
+  url: string,
+  domain: string,
+  publicSiteId: string,
+): Promise<{
+  fetched: ReturnType<typeof readFetch>;
+  detection: SnippetDetection;
+  staleCache: boolean;
+}> {
+  const options = { allowUrl: sameSitePolicy(domain), allowPrivate: allowPrivateFetch() };
+  const fetched = readFetch(await safeFetch(url, options));
+  if (!fetched.pageLoaded) return { fetched, detection: NO_SNIPPET, staleCache: false };
+
+  const detection = detectSnippet(fetched.html, publicSiteId);
+  if (detection.scriptFound) return { fetched, detection, staleCache: false };
+
+  const fresh = readFetch(await safeFetch(withCacheBuster(url), options));
+  const freshDetection = fresh.pageLoaded ? detectSnippet(fresh.html, publicSiteId) : null;
+  if (freshDetection?.scriptFound) {
+    return { fetched, detection: freshDetection, staleCache: true };
+  }
+  return { fetched, detection, staleCache: false };
+}
+
 /**
  * Checks whether a page carries this website's snippet.
  *
@@ -150,20 +198,15 @@ export async function verifyInstallation(
     throw rateLimited("Too many checks in a minute. Wait a moment and try again.");
   }
 
-  const fetched = readFetch(
-    await safeFetch(url, {
-      allowUrl: sameSitePolicy(website.domain),
-      allowPrivate: allowPrivateFetch(),
-    }),
+  const { fetched, detection, staleCache } = await inspectPage(
+    url,
+    website.domain,
+    website.publicSiteId,
   );
 
   if (fetched.refused) {
     throw validationFailed(fetched.refused, { url: [fetched.refused] });
   }
-
-  const detection = fetched.pageLoaded
-    ? detectSnippet(fetched.html, website.publicSiteId)
-    : { scriptFound: false, antiFlickerFound: false, wrongSiteId: false, otherSiteIds: [] };
 
   // Recorded so the answer survives the dialog being closed. Only a success is written: a
   // failed check may mean the snippet is missing, but it may equally mean the page was slow,
@@ -183,6 +226,7 @@ export async function verifyInstallation(
     httpStatus: fetched.httpStatus,
     loadError: fetched.loadError,
     ...detection,
+    staleCache,
     lastSeenAt: website.lastSeenAt,
     finalUrl: fetched.finalUrl,
   };

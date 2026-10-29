@@ -472,7 +472,7 @@ function VerifyStep({
     pending: { iconBg: "#F3F4F6", fg: "#9CA3AF", icon: "pending" },
     running: { iconBg: ACCENT_TINT, fg: ACCENT_INK, icon: "running" },
   } as const;
-  const checks = checkRows(verify, result, { shortUrl }).map((c) => ({
+  const checks = checkRows(verify, result, { shortUrl, key: project.key }).map((c) => ({
     title: c.title,
     text: c.text,
     ...TONES[c.tone],
