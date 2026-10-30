@@ -503,7 +503,7 @@ feature rather than stopping the server.
    extra request (`/api/v1/assign`) before the redirect decision, inside the anti-flicker window. Assignment is stable per device, not per person. Device targeting is decided in
    the browser and cannot be verified by the server.
 4. **Redirect flicker is mitigated, not eliminated** on slow connections; the cloak times out
-   at `routelyTimeout` (1250 ms by default) in favour of showing the Control page. Sites that do
+   at `routelyTimeout` (3000 ms by default) in favour of showing the Control page. Sites that do
    not paste the anti-flickering script keep the flicker entirely. An A/B variant's overlay is
    bounded the same way.
 5. **In-memory rate limiting and throttles** (per process). Multiple instances multiply every

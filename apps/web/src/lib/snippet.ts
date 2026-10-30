@@ -25,8 +25,13 @@ export interface SnippetOptions {
   publicSiteId: string;
 }
 
-/** How long the anti-flicker overlay may hide the page, in milliseconds. */
-export const DEFAULT_ANTI_FLICKER_MS = 1250;
+/**
+ * How long the anti-flicker overlay may hide the page, in milliseconds. 3000 (user decision
+ * 2026-10-29, was 1250) matches the SDK's own request timeout (`DEFAULT_TIMEOUT_MS` in
+ * `packages/sdk/src/transport.ts`), so the control page is never revealed while the SDK is still
+ * waiting for its decision; a fast visitor's overlay still lifts as soon as the decision lands.
+ */
+export const DEFAULT_ANTI_FLICKER_MS = 3000;
 
 /** Colour painted over the page while a redirect decision is pending. */
 export const DEFAULT_ANTI_FLICKER_BACKGROUND = "#fff";
@@ -96,13 +101,15 @@ var routelyTimeout = ${timeoutMs};
 /**
  * The tracking tag.
  *
- * Loaded synchronously — no `async`, no `defer` — and placed in `<head>`, so the redirect
- * decision happens before the browser paints the control page. That ordering is the reason
- * the installation instructions insist on `<head>` rather than treating it as a preference.
+ * Loaded `async` in `<head>` (user decision 2026-10-29, as Mida does): the anti-flicker cover
+ * above it already hides the page until the SDK decides or `routelyTimeout` fires, so the tag
+ * itself need not block — and a slow or unreachable SDK host can no longer stall the page while it
+ * is parsed. The SDK copes with running after parsing (`findScript` falls back to
+ * `script[data-site-id]`; `apply.ts` `onReady` runs at once on a loaded document).
  */
 export function buildSnippet({ sdkUrl, publicSiteId }: SnippetOptions): string {
   return `<!-- Routely tracking script (place in <head>) -->
-<script src="${escapeAttribute(sdkUrl)}" data-site-id="${escapeAttribute(publicSiteId)}" ${OPTIMIZER_OPT_OUT}></script>`;
+<script async src="${escapeAttribute(sdkUrl)}" data-site-id="${escapeAttribute(publicSiteId)}" ${OPTIMIZER_OPT_OUT}></script>`;
 }
 
 /**

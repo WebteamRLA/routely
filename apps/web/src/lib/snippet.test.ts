@@ -15,8 +15,11 @@ describe("buildInstallSnippet", () => {
     for (const tag of tags) expect(tag).toContain(OPTIMIZER_OPT_OUT);
   });
 
-  it("stays synchronous, with the anti-flicker block first", () => {
-    expect(snippet).not.toMatch(/<script[^>]*\s(async|defer)[\s>=]/);
+  it("loads the tracking tag async, behind an inline anti-flicker block that comes first", () => {
+    const [cover, tracking] = snippet.match(/<script[^>]*>/g) ?? [];
+    expect(cover).not.toMatch(/\s(async|defer|src)[\s>=]/);
+    expect(tracking).toMatch(/^<script async src="https:\/\/cdn\.example\.com\/sdk\.js"/);
+    expect(tracking).not.toMatch(/\sdefer[\s>=]/);
     expect(snippet.indexOf("routelyTimeout")).toBeLessThan(snippet.indexOf("data-site-id"));
   });
 

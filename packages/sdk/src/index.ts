@@ -3,7 +3,7 @@
  *
  * A dependency-free browser bundle installed with a single tag:
  *
- *   <script src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
+ *   <script async src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
  *
  * It is framework-independent because it asks nothing of the host page beyond a `<script>`
  * element — no bundler, no npm package, no lifecycle to hook into. That is what makes the same

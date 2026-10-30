@@ -10,7 +10,7 @@ A single, dependency-free browser bundle. No npm package for customers to instal
 graph, no build step on their side — installation is one tag:
 
 ```html
-<script src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
+<script async src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
 ```
 
 The install screen pairs it with a short inline anti-flickering script above it, which is
@@ -164,8 +164,8 @@ approximate.
   are never attached, and the CDN origin has no cookies of its own.
 - **Break the page.** Every failure path — storage denied, network blocked, malformed
   response, timeout — ends with the SDK doing nothing. Nothing throws into the host page.
-- **Block the page.** The tag loads synchronously (so a future redirect can be decided before
-  paint), but the work is asynchronous and never gates rendering.
+- **Block the page.** The tag loads `async` (since 2026-10-29; the inline anti-flicker cover hides
+  the page until a redirect is decided), and the work is asynchronous and never gates rendering.
 
 ---
 
@@ -350,13 +350,13 @@ both blocks together and they are copied as one.
 ```html
 <!-- Routely anti-flickering script -->
 <script>
-var routelyTimeout = 1250;
+var routelyTimeout = 3000;
 !function(d,w,i,t){ /* … creates #routely-cloak, publishes w.__routelyReveal, clears after t */ }
 (document,window,"routely-cloak",routelyTimeout);
 </script>
 
 <!-- Routely tracking script (place in <head>) -->
-<script src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
+<script async src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
 ```
 
 The SDK's only involvement is ending the wait early: it calls `window.__routelyReveal()` the
@@ -372,7 +372,8 @@ exact flash the script exists to remove.
 | Visual editor session | Immediately — the editor needs to see the page |
 
 In every case the snippet's own `routelyTimeout` still bounds the wait: the SDK can lift the overlay
-earlier, never hold it longer. The default is 1250 ms (`DEFAULT_ANTI_FLICKER_MS`); the design's
+earlier, never hold it longer. The default is 3000 ms (`DEFAULT_ANTI_FLICKER_MS`, raised from 1250
+on 2026-10-29 to match the SDK's request timeout); the design's
 snippet used 2 s and a different markup, and the real one was kept (decision D10).
 
 Three reasons it lives in the page rather than the bundle:
@@ -402,7 +403,7 @@ covers the viewport regardless of document height and the host box model never p
 config held at 900 ms the overlay is painting at 300 ms and 600 ms and is *never* lifted, the
 visitor going straight to the variant; with no matching experiment the SDK lifts it at 904 ms,
 as soon as the configuration lands; and **with the tracking script removed entirely the snippet
-lifts itself at exactly 1250 ms.** (Measured before v4; the A/B hold has not been re-measured
+lifts itself at exactly 1250 ms**, the default at the time. (Measured before v4; the A/B hold has not been re-measured
 the same way.)
 
 ---
