@@ -230,7 +230,43 @@ describe("pixel check rows", () => {
     expect(rows.map((r) => [r.title, r.tone])).toEqual([
       ["Page loaded", "ok"],
       ["Pixel found", "ok"],
+      ["Anti-flicker script found", "ok"],
     ]);
+  });
+
+  it("keeps the optional anti-flicker script apart from the tracking code", () => {
+    const rows = checkRows("found", { ...base, antiFlickerFound: false }, ctx);
+    expect(verifyFromResult({ ...base, antiFlickerFound: false })).toBe("found");
+    expect(rows.at(-1)).toMatchObject({ title: "No anti-flicker script", tone: "pending" });
+    expect(rows.at(-1)!.text).toMatch(/^Optional/);
+  });
+
+  it("verifies code found past a stale server cache, and says the cache is behind", () => {
+    const stale = { ...base, staleCache: true };
+    expect(verifyFromResult(stale)).toBe("found");
+    expect(checkRows("found", stale, ctx)[1]!.text).toMatch(/server’s cache is still showing/);
+    expect(checkTips("found", stale)).toBeNull();
+  });
+
+  it("warns about a delayed snippet and a second project's code, without failing the check", () => {
+    const rows = checkRows(
+      "found",
+      { ...base, delayedBy: "LiteSpeed Cache", alsoOtherProject: true },
+      ctx,
+    );
+    expect(rows.filter((r) => r.tone === "warn").map((r) => r.title)).toEqual([
+      "Another project’s code is also here",
+      "The code is delayed",
+    ]);
+  });
+
+  it("tells a genuine mismatch from a cached one", () => {
+    const missing = { ...base, scriptFound: false, antiFlickerFound: false, wrongSiteId: true };
+    const genuine = { ...missing, mismatchConfirmed: true };
+    expect(checkRows("missing", genuine, ctx)[1]!.text).toMatch(/another project.*replace/i);
+    expect(checkTips("missing", genuine)?.title).toBe("Replace the Routely code");
+    expect(checkRows("missing", missing, ctx)[1]!.text).toMatch(/old saved copy/);
+    expect(checkTips("missing", missing)?.title).toBe("Clear your website and server cache");
   });
 
   it("words a missing script, another project's script and a page that didn't load", () => {

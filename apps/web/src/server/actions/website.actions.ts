@@ -296,6 +296,14 @@ export interface PixelCheckData {
   scriptFound: boolean;
   antiFlickerFound: boolean;
   wrongSiteId: boolean;
+  /** Installed, but a server cache still shows visitors an older copy (`lib/install-check.ts`). */
+  staleCache: boolean;
+  /** Another project's ID on a copy no cache answered: a genuine mismatch. */
+  mismatchConfirmed: boolean;
+  /** This project's code and another project's are both on the page. */
+  alsoOtherProject: boolean;
+  /** What delays the Routely code, if anything. */
+  delayedBy: string | null;
   /** The project's real last hit — never a fabricated "just now" (spec §8 row 10). */
   lastSeenAt: string | null;
 }
@@ -320,6 +328,10 @@ export async function verifyProjectPixelAction(input: {
       scriptFound: check.scriptFound,
       antiFlickerFound: check.antiFlickerFound,
       wrongSiteId: check.wrongSiteId,
+      staleCache: check.staleCache,
+      mismatchConfirmed: check.mismatchConfirmed,
+      alsoOtherProject: check.alsoOtherProject,
+      delayedBy: check.delayedBy,
       lastSeenAt: check.lastSeenAt ? check.lastSeenAt.toISOString() : null,
     };
   });

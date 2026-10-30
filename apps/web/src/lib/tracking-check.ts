@@ -32,6 +32,21 @@ export interface TrackingObservation {
   wrongSiteId: boolean;
   /** The other projects' ids found on the page, to name in the message. */
   otherSiteIds?: string[];
+  /** Found only past the page cache (`lib/install-check.ts`). */
+  staleCache?: boolean;
+  /** The other project's ID was on a copy no cache answered: a real mismatch, not a stale page. */
+  mismatchConfirmed?: boolean;
+  /** What delays the Routely code, if anything. */
+  delayedBy?: string | null;
+}
+
+/** On an OK check whose page a server cache still serves without the code. */
+export const STALE_CACHE_DETAIL =
+  "This project’s code is on your site, but your server’s cache is still showing visitors an older copy of this page. Visitors get the code when the cache refreshes; clear your server cache to update it now.";
+
+/** On an OK check whose Routely code an optimiser or consent tool runs late. */
+export function delayedDetail(by: string): string {
+  return `${by} delays the Routely code, so visitors may see this page before a redirect. Exclude “routely” from its delayed or deferred JavaScript.`;
 }
 
 export function decideTrackingCheck(observation: TrackingObservation): {
@@ -40,7 +55,15 @@ export function decideTrackingCheck(observation: TrackingObservation): {
   detail: string | null;
 } {
   if (observation.pageLoaded && observation.scriptFound) {
-    return { result: "OK", method: "html", detail: null };
+    return {
+      result: "OK",
+      method: "html",
+      detail: observation.staleCache
+        ? STALE_CACHE_DETAIL
+        : observation.delayedBy
+          ? delayedDetail(observation.delayedBy)
+          : null,
+    };
   }
   if (observation.seenRecently) {
     return {
@@ -62,23 +85,26 @@ export function decideTrackingCheck(observation: TrackingObservation): {
     result: "MISSING",
     method: null,
     detail: observation.wrongSiteId
-      ? wrongProjectDetail(observation.otherSiteIds ?? [])
+      ? wrongProjectDetail(observation.otherSiteIds ?? [], observation.mismatchConfirmed ?? false)
       : "The page loaded, but the Routely code isn't on it.",
   };
 }
 
 /**
- * Names the Project ID the page carries: after a snippet is replaced, a caching plugin or CDN
- * often keeps serving the old page, and the ID is how a customer tells the two cases apart.
+ * Names the Project ID the page carries. `confirmed`: it was on a copy no cache answered, so the
+ * site's code really is another project's — say to replace it, and nothing about caches. Not
+ * confirmed: every copy came from a cache, so it may be an old page — clear the caches first.
  */
-export function wrongProjectDetail(found: readonly string[]): string {
+export function wrongProjectDetail(found: readonly string[], confirmed = false): string {
   const ids = found.slice(0, 2).join(" and ");
-  return (
-    "This page has the Routely snippet for a different project" +
-    (ids ? " (Project ID " + ids + ")" : "") +
-    ". Replace it with this project’s snippet. If you already did, a caching plugin or CDN may" +
-    " still be serving the old page: clear its cache and check again."
-  );
+  const named = ids ? " (Project ID " + ids + ")" : "";
+  return confirmed
+    ? "This page has the Routely snippet for a different project" +
+        named +
+        ". Replace it with this project’s snippet."
+    : "This page shows the Routely snippet for a different project" +
+        named +
+        ", from a cached copy. Clear your website and server cache and check again; if it still shows, replace it with this project’s snippet.";
 }
 
 /** True when a stored check is OK and recent enough to stand in for a fresh one. */

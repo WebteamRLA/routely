@@ -10,6 +10,10 @@
  *    (2026-10-27) — a server-side fetch runs no JavaScript, so it could never cause an event.
  *  - The design has no screen for a page that failed to load or a snippet carrying another
  *    project's id; both get their own rows here (spec §2.3 "NEW copy needed").
+ *  - Each failure reason gets its own words (`lib/install-check.ts` tells them apart): a stale
+ *    server cache is installed, with a note; another project's code seen fresh from the site is a
+ *    snippet to replace, never "clear your cache"; one seen only on cached copies is the cache.
+ *  - The optional anti-flicker block has its own row, apart from the tracking code's status.
  */
 
 export type PixelVerify = "idle" | "checking" | "found" | "missing";
@@ -21,11 +25,19 @@ export interface PixelCheckResult {
   scriptFound: boolean;
   antiFlickerFound: boolean;
   wrongSiteId: boolean;
+  /** Installed, but a server cache still shows visitors an older copy. */
+  staleCache?: boolean;
+  /** Another project's ID on a copy no cache answered: the site's code really is another's. */
+  mismatchConfirmed?: boolean;
+  /** This project's code and another project's are both on the page. */
+  alsoOtherProject?: boolean;
+  /** What delays the Routely code, if anything. */
+  delayedBy?: string | null;
   /** ISO time of the project's last SDK hit, or null when none has arrived. */
   lastSeenAt: string | null;
 }
 
-export type CheckTone = "ok" | "fail" | "pending" | "running";
+export type CheckTone = "ok" | "fail" | "warn" | "pending" | "running";
 
 export interface CheckRow {
   title: string;
@@ -91,26 +103,60 @@ export function checkRows(
   };
 
   if (result.scriptFound) {
-    return [
+    const rows: CheckRow[] = [
       loaded,
-      {
-        title: "Pixel found",
-        text: result.antiFlickerFound
-          ? "The Routely code is in the page’s <head>, with the anti-flicker snippet above it."
-          : "The Routely code is in the page’s <head>.",
-        tone: "ok",
-      },
+      result.staleCache
+        ? {
+            title: "Pixel found",
+            text: "This project’s code is on your site. Your server’s cache is still showing visitors an older copy of this page; they get the code when the cache refreshes. Clear your server cache to update it now.",
+            tone: "ok",
+          }
+        : { title: "Pixel found", text: "The Routely code is in the page’s <head>.", tone: "ok" },
     ];
+    if (result.alsoOtherProject) {
+      rows.push({
+        title: "Another project’s code is also here",
+        text: "Remove the other Routely code so only this project’s runs on the page.",
+        tone: "warn",
+      });
+    }
+    if (result.delayedBy) {
+      rows.push({
+        title: "The code is delayed",
+        text: `${result.delayedBy} runs the Routely code late, so visitors may see this page before a redirect. Exclude “routely” from its delayed or deferred JavaScript.`,
+        tone: "warn",
+      });
+    }
+    rows.push(
+      result.antiFlickerFound
+        ? {
+            title: "Anti-flicker script found",
+            text: "It hides the page until Routely decides, so visitors don’t see a flash.",
+            tone: "ok",
+          }
+        : {
+            title: "No anti-flicker script",
+            text: "Optional. Without it, visitors may briefly see this page before a redirect.",
+            tone: "pending",
+          },
+    );
+    return rows;
   }
 
   if (result.wrongSiteId) {
     return [
       loaded,
-      {
-        title: "Different Project ID",
-        text: "Your site is still showing an old saved copy of this page with an earlier code. Clear your website and server cache, then check again.",
-        tone: "fail",
-      },
+      result.mismatchConfirmed
+        ? {
+            title: "Different Project ID",
+            text: "Your site has the Routely code of another project. Copy this project’s code from step 1 and replace it.",
+            tone: "fail",
+          }
+        : {
+            title: "Different Project ID",
+            text: "Your site is still showing an old saved copy of this page with an earlier code. Clear your website and server cache, then check again.",
+            tone: "fail",
+          },
     ];
   }
 
@@ -163,6 +209,17 @@ export interface CheckTips {
  */
 export function checkTips(verify: PixelVerify, result: PixelCheckResult | null): CheckTips | null {
   if (verify !== "missing" || (result && !result.pageLoaded)) return null;
+  if (result?.wrongSiteId && result.mismatchConfirmed) {
+    return {
+      title: "Replace the Routely code",
+      items: [
+        "A project that is deleted and created again gets a new ID, so its old code no longer matches.",
+        "Copy this project’s code from step 1 and paste it in place of the old one. Keep only one Routely code on the page.",
+        "Then clear your website and server cache, so visitors get the new code too.",
+      ],
+      moreFixes: false,
+    };
+  }
   if (result?.wrongSiteId) {
     return {
       title: "Clear your website and server cache",

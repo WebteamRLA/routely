@@ -1,6 +1,13 @@
 import "server-only";
 
 import { env } from "@/env";
+import {
+  type InstallFinding,
+  type PageLook,
+  cacheState,
+  combineLooks,
+  withCacheBuster,
+} from "@/lib/install-check";
 import { can, rolesWith } from "@/lib/permissions";
 import { detectSnippet } from "@/lib/snippet-detect";
 import { isSameSite } from "@/lib/url";
@@ -40,6 +47,17 @@ export interface InstallationCheck {
   antiFlickerFound: boolean;
   /** A Routely snippet is present, but for a different website. */
   wrongSiteId: boolean;
+  /** Every other website's site id the page carries (public — they are in its source). */
+  otherSiteIds: string[];
+  /** Found only past the page cache: installed, but visitors still get an older cached copy. */
+  staleCache: boolean;
+  /** The other project's ID was on a copy no cache answered: the site's code really is another
+   * project's, not a stale page. */
+  mismatchConfirmed: boolean;
+  /** This project's code and another project's are both on the page. */
+  alsoOtherProject: boolean;
+  /** What delays the Routely code (an optimiser or consent tool), if anything. */
+  delayedBy: string | null;
   /**
    * The website's real `lastSeenAt` — when the SDK last reported a page hit. Null when nothing has
    * reported yet. The install dialogs no longer show it (their "Events received" row was removed,
@@ -75,6 +93,7 @@ export function readFetch(result: SafeFetchResult): {
   refused: string | null;
   html: string;
   finalUrl: string;
+  cacheHeaders: Record<string, string>;
 } {
   if (!result.ok) {
     const refused =
@@ -90,6 +109,7 @@ export function readFetch(result: SafeFetchResult): {
       refused,
       html: "",
       finalUrl: result.url,
+      cacheHeaders: {},
     };
   }
   if (result.status >= 400) {
@@ -100,6 +120,7 @@ export function readFetch(result: SafeFetchResult): {
       refused: null,
       html: "",
       finalUrl: result.finalUrl,
+      cacheHeaders: result.cacheHeaders,
     };
   }
   return {
@@ -109,7 +130,91 @@ export function readFetch(result: SafeFetchResult): {
     refused: null,
     html: result.body,
     finalUrl: result.finalUrl,
+    cacheHeaders: result.cacheHeaders,
   };
+}
+
+const NO_SNIPPET = {
+  scriptFound: false,
+  antiFlickerFound: false,
+  wrongSiteId: false,
+  otherSiteIds: [],
+  delayedBy: null,
+};
+
+/**
+ * Fetches a page of `domain` and decides whether it carries `publicSiteId` — the one fetch path
+ * for the install check and the launch's tracking checks (rules in `lib/install-check.ts`).
+ *
+ * The page is fetched as visitors get it; only when this project's ID isn't on that copy is it
+ * fetched once more past any page cache. Every check logs its evidence (public site ids, cache
+ * headers, statuses — no query strings, cookies or bodies), so a "Different Project ID" can be
+ * traced to a stale cache or a genuinely wrong snippet from the server logs.
+ */
+export async function inspectPage(
+  url: string,
+  website: { id: string; domain: string; publicSiteId: string },
+): Promise<{ fetched: ReturnType<typeof readFetch>; finding: InstallFinding }> {
+  const options = { allowUrl: sameSitePolicy(website.domain), allowPrivate: allowPrivateFetch() };
+  const fetched = readFetch(await safeFetch(url, options));
+  const look = (f: ReturnType<typeof readFetch>): PageLook => ({
+    loaded: f.pageLoaded,
+    detection: f.pageLoaded ? detectSnippet(f.html, website.publicSiteId) : NO_SNIPPET,
+    cache: cacheState(f.cacheHeaders),
+  });
+  const served = look(fetched);
+
+  let freshFetch: ReturnType<typeof readFetch> | null = null;
+  if (served.loaded && !served.detection.scriptFound) {
+    freshFetch = readFetch(await safeFetch(withCacheBuster(url), options));
+  }
+  const fresh = freshFetch ? look(freshFetch) : null;
+  const finding = combineLooks(served, fresh);
+
+  console.info(
+    "[routely] install-check",
+    JSON.stringify({
+      websiteId: website.id,
+      expected: website.publicSiteId,
+      page: pathOf(fetched.finalUrl),
+      served: evidence(fetched, served),
+      fresh: freshFetch && fresh ? evidence(freshFetch, fresh) : null,
+      result: finding.scriptFound
+        ? finding.staleCache
+          ? "installed-stale-cache"
+          : "installed"
+        : finding.wrongSiteId
+          ? finding.mismatchConfirmed
+            ? "other-project"
+            : "other-project-cached"
+          : fetched.pageLoaded
+            ? "missing"
+            : "not-loaded",
+    }),
+  );
+
+  return { fetched, finding };
+}
+
+function evidence(f: ReturnType<typeof readFetch>, look: PageLook) {
+  return {
+    status: f.httpStatus,
+    cache: look.cache,
+    cacheHeaders: f.cacheHeaders,
+    found: look.detection.scriptFound,
+    otherIds: look.detection.otherSiteIds,
+    delayedBy: look.detection.delayedBy,
+  };
+}
+
+/** Host and path only: a customer's query string is theirs, and not needed to read the log. */
+function pathOf(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.host + parsed.pathname;
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -150,26 +255,17 @@ export async function verifyInstallation(
     throw rateLimited("Too many checks in a minute. Wait a moment and try again.");
   }
 
-  const fetched = readFetch(
-    await safeFetch(url, {
-      allowUrl: sameSitePolicy(website.domain),
-      allowPrivate: allowPrivateFetch(),
-    }),
-  );
+  const { fetched, finding } = await inspectPage(url, website);
 
   if (fetched.refused) {
     throw validationFailed(fetched.refused, { url: [fetched.refused] });
   }
 
-  const detection = fetched.pageLoaded
-    ? detectSnippet(fetched.html, website.publicSiteId)
-    : { scriptFound: false, antiFlickerFound: false, wrongSiteId: false, otherSiteIds: [] };
-
   // Recorded so the answer survives the dialog being closed. Only a success is written: a
   // failed check may mean the snippet is missing, but it may equally mean the page was slow,
   // behind a login, or cached — none of which is evidence that a previously confirmed
   // installation has gone away, so a failure must not erase one.
-  if (detection.scriptFound) {
+  if (finding.scriptFound) {
     await websiteRepo.markPixelVerified(
       website.id,
       actorUserId,
@@ -182,7 +278,14 @@ export async function verifyInstallation(
     pageLoaded: fetched.pageLoaded,
     httpStatus: fetched.httpStatus,
     loadError: fetched.loadError,
-    ...detection,
+    scriptFound: finding.scriptFound,
+    antiFlickerFound: finding.antiFlickerFound,
+    wrongSiteId: finding.wrongSiteId,
+    otherSiteIds: finding.otherSiteIds,
+    staleCache: finding.staleCache,
+    mismatchConfirmed: finding.mismatchConfirmed,
+    alsoOtherProject: finding.alsoOtherProject,
+    delayedBy: finding.delayedBy,
     lastSeenAt: website.lastSeenAt,
     finalUrl: fetched.finalUrl,
   };

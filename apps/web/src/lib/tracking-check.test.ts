@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { TRACKING_CHECK_MAX_AGE_MS, decideTrackingCheck, isFreshOk } from "./tracking-check";
+import {
+  TRACKING_CHECK_MAX_AGE_MS,
+  decideTrackingCheck,
+  isFreshOk,
+  STALE_CACHE_DETAIL,
+} from "./tracking-check";
 
 const base = {
   pageLoaded: true,
@@ -43,7 +48,29 @@ describe("decideTrackingCheck", () => {
     expect(
       decideTrackingCheck({ ...base, wrongSiteId: true, otherSiteIds: ["rt_old1", "rt_old2"] })
         .detail,
-    ).toMatch(/Project ID rt_old1 and rt_old2.*clear its cache/);
+    ).toMatch(/Project ID rt_old1 and rt_old2.*cached copy.*Clear your website and server cache/);
+  });
+
+  it("says to replace a mismatched snippet seen fresh from the site, without blaming a cache", () => {
+    const detail = decideTrackingCheck({
+      ...base,
+      wrongSiteId: true,
+      otherSiteIds: ["rt_old1"],
+      mismatchConfirmed: true,
+    }).detail;
+    expect(detail).toMatch(/Project ID rt_old1\)\. Replace it/);
+    expect(detail).not.toMatch(/cache/i);
+  });
+
+  it("is OK when the code is found past a stale cache, and says so; notes a delayed snippet", () => {
+    expect(decideTrackingCheck({ ...base, scriptFound: true, staleCache: true })).toEqual({
+      result: "OK",
+      method: "html",
+      detail: STALE_CACHE_DETAIL,
+    });
+    expect(
+      decideTrackingCheck({ ...base, scriptFound: true, delayedBy: "LiteSpeed Cache" }).detail,
+    ).toMatch(/^LiteSpeed Cache delays the Routely code/);
   });
 
   it("is ERROR when the page did not load and nothing was seen", () => {

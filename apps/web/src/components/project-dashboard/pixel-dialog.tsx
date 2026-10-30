@@ -444,6 +444,7 @@ function VerifyStep({
   const TONES = {
     ok: { iconBg: "#DCFCE7", fg: "#166534", icon: "ok" },
     fail: { iconBg: "#FEE2E2", fg: "#B91C1C", icon: "fail" },
+    warn: { iconBg: "#FEF3C7", fg: "#92400E", icon: "warn" },
     pending: { iconBg: "#F3F4F6", fg: "#9CA3AF", icon: "pending" },
     running: { iconBg: ACCENT_TINT, fg: ACCENT_INK, icon: "running" },
   } as const;
@@ -586,6 +587,9 @@ function VerifyStep({
               >
                 {c.icon === "ok" ? <CheckIcon size={12} width={3} /> : null}
                 {c.icon === "fail" ? <XIcon size={12} width={3} /> : null}
+                {c.icon === "warn" ? (
+                  <span className="text-[12px] leading-none font-bold">!</span>
+                ) : null}
                 {c.icon === "running" ? <Spinner size={12} width={3} /> : null}
                 {c.icon === "pending" ? (
                   <span className="block size-1.5 rounded-full bg-current" />

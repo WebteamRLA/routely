@@ -78,6 +78,11 @@ export type SafeFetchResult =
       /** True when the body was cut off at `maxBytes`. */
       truncated: boolean;
       redirects: number;
+      /**
+       * The final response's cache headers (`CACHE_HEADERS`, lower-cased names) — which cache, if
+       * any, answered. Only these: nothing else from the response is kept.
+       */
+      cacheHeaders: Record<string, string>;
     }
   | {
       ok: false;
@@ -87,6 +92,20 @@ export type SafeFetchResult =
       /** The URL being fetched when it failed. */
       url: string;
     };
+
+/** Headers that say whether a cache answered: host caches (Nginx, Varnish), LiteSpeed, CDNs. */
+const CACHE_HEADERS = [
+  "x-cache",
+  "x-cache-status",
+  "x-proxy-cache",
+  "x-fastcgi-cache",
+  "x-litespeed-cache",
+  "x-qc-cache",
+  "x-sucuri-cache",
+  "x-kinsta-cache",
+  "cf-cache-status",
+  "age",
+] as const;
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
@@ -143,6 +162,16 @@ interface Hop {
   contentType: string | null;
   bytes: Buffer;
   truncated: boolean;
+  cacheHeaders: Record<string, string>;
+}
+
+function pickCacheHeaders(headers: IncomingMessage["headers"]): Record<string, string> {
+  const picked: Record<string, string> = {};
+  for (const name of CACHE_HEADERS) {
+    const value = headers[name];
+    if (value !== undefined) picked[name] = String(value).slice(0, 100);
+  }
+  return picked;
 }
 
 /** One request, no redirect following. Rejects with the socket/lookup error. */
@@ -176,10 +205,18 @@ function requestOnce(
         const status = response.statusCode ?? 0;
         const location = response.headers.location ?? null;
         const contentType = response.headers["content-type"] ?? null;
+        const cacheHeaders = pickCacheHeaders(response.headers);
 
         if (status >= 300 && status < 400) {
           response.resume();
-          resolve({ status, location, contentType, bytes: Buffer.alloc(0), truncated: false });
+          resolve({
+            status,
+            location,
+            contentType,
+            bytes: Buffer.alloc(0),
+            truncated: false,
+            cacheHeaders,
+          });
           return;
         }
 
@@ -202,6 +239,7 @@ function requestOnce(
             contentType,
             bytes: Buffer.concat(chunks),
             truncated,
+            cacheHeaders,
           });
         };
 
@@ -343,6 +381,7 @@ export async function safeFetch(
       bytes: response.bytes,
       truncated: response.truncated,
       redirects: hop,
+      cacheHeaders: response.cacheHeaders,
     };
   }
 

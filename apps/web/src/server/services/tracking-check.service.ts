@@ -2,7 +2,6 @@ import "server-only";
 
 import type { Website } from "@/generated/prisma/client";
 import { can } from "@/lib/permissions";
-import { detectSnippet } from "@/lib/snippet-detect";
 import {
   SEEN_FALLBACK_DAYS,
   TRACKING_CHECK_MAX_AGE_MS,
@@ -14,13 +13,12 @@ import {
 import { isSameSite, normalizeUrl } from "@/lib/url";
 import { utcDayKey } from "@/lib/utc-day";
 import { forbidden, notFound } from "@/server/errors";
-import { safeFetch } from "@/server/http/safe-fetch";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
 import type { ExperimentWithVariants } from "@/server/repositories/experiment.repository";
 import * as pageVisitorDayRepo from "@/server/repositories/page-visitor-day.repository";
 import * as trackingCheckRepo from "@/server/repositories/tracking-check.repository";
 import * as websiteRepo from "@/server/repositories/website.repository";
-import { allowPrivateFetch, readFetch, sameSitePolicy } from "@/server/services/pixel.service";
+import { inspectPage } from "@/server/services/pixel.service";
 
 /**
  * Tracking checks: is the snippet on each page an experiment depends on?
@@ -111,32 +109,28 @@ async function runCheck(website: Website, url: string, now: Date): Promise<UrlCh
     };
   }
 
-  const [fetched, seenRecently] = await Promise.all([
-    safeFetch(url, {
-      allowUrl: sameSitePolicy(website.domain),
-      allowPrivate: allowPrivateFetch(),
-    }).then(readFetch),
+  const [{ fetched, finding }, seenRecently] = await Promise.all([
+    inspectPage(url, website),
     pageVisitorDayRepo.pageSeenSince(website.id, urlKey, windowStart(now, SEEN_FALLBACK_DAYS)),
   ]);
 
-  const detection = fetched.pageLoaded
-    ? detectSnippet(fetched.html, website.publicSiteId)
-    : { scriptFound: false, antiFlickerFound: false, wrongSiteId: false, otherSiteIds: [] };
-
   const verdict = decideTrackingCheck({
     pageLoaded: fetched.pageLoaded,
-    scriptFound: detection.scriptFound,
-    wrongSiteId: detection.wrongSiteId,
-    otherSiteIds: detection.otherSiteIds,
+    scriptFound: finding.scriptFound,
+    wrongSiteId: finding.wrongSiteId,
+    otherSiteIds: finding.otherSiteIds,
     loadError: fetched.loadError,
     seenRecently,
+    staleCache: finding.staleCache,
+    mismatchConfirmed: finding.mismatchConfirmed,
+    delayedBy: finding.delayedBy,
   });
 
   // The snippet found in the page is the same evidence the pixel dialog's Verify records, so the
   // project's tracking badge says Active from here on — a launch (which runs these checks) used to
   // leave a just-installed site reading "Not installed" until its first visitor. Only a find is
   // written: a failed check is not evidence that an earlier installation went away.
-  if (detection.scriptFound) await websiteRepo.recordSnippetFound(website.id, now);
+  if (finding.scriptFound) await websiteRepo.recordSnippetFound(website.id, now);
 
   await trackingCheckRepo.upsertTrackingCheck({
     websiteId: website.id,

@@ -524,10 +524,13 @@ tracking tag — pasted into `<head>`. The same pair works on every platform, wh
 framework-independent:
 
 ```html
-<script src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
+<script async src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
 ```
 
-In `<head>`, no `async`/`defer`, so the redirect decision precedes first paint.
+In `<head>`, **`async`** (user decision 2026-10-29, as Mida does): the inline anti-flicker cover
+above it hides the page until the SDK decides or `routelyTimeout` (default 3000 ms) fires, so the tag
+need not block parsing, and a slow SDK host can no longer stall the page. Installs from before then
+carry a synchronous tag, which still works.
 
 | Module | Responsibility |
 | --- | --- |
@@ -621,8 +624,8 @@ editor in the browser, while the server-side install check (which reads HTML) st
 1. **It never breaks the page.** Every failure path — no storage, no network, malformed
    response, blocked request — ends with the SDK doing nothing. Nothing throws into the host
    page; no promise is left to reject unhandled.
-2. **It never blocks the page.** Loaded synchronously so a redirect can precede paint, but the
-   work is async and never gates rendering.
+2. **It never blocks the page.** Loaded `async` behind the anti-flicker cover, and the work is async
+   and never gates rendering.
 3. **It carries no secret.** The only credential-shaped value is the public site id, visible in
    page source by design.
 
@@ -853,6 +856,18 @@ second dev server in `apps/web` will not start. Test with `npm run build` and
 `npx next start -p 31xx` (in `apps/web`), stop it by PID — and run only one `npm run build` at a
 time, since they share `apps/web/.next`.
 
+**Host page caches serve pages from before the snippet changed.** xCloud's server cache (`x-cache:
+HIT`) kept serving an old snippet for hours on 2026-10-30 although WordPress sent `no-store`. Both
+install checks (the dialog's Verify and the launch's tracking checks) go through
+`pixel.service.inspectPage`: when the page visitors get lacks this project's ID, it is fetched once
+more with `?_routely_check=<ts>`, which any page cache passes to WordPress, and
+`lib/install-check.ts` `combineLooks` decides — this project's ID only on the fresh copy is
+**installed** with a "cache not refreshed" note (user decision 2026-10-30); another project's ID on a
+fresh copy no cache answered is a **genuine mismatch** (never installed, "replace the code", no cache
+advice); another project's ID seen only on cached copies is "clear your caches". Cache headers come
+back from `safeFetch` (`cacheHeaders`, allow-listed) and every check logs its evidence as
+`[routely] install-check {…}`. Don't drop the second fetch as redundant.
+
 **`next start` is `NODE_ENV=production`, and that changes behaviour.** `server/http/safe-fetch.ts`
 refuses private addresses and `*.localhost` unless `NODE_ENV !== "production"`, so pixel and tracking
 checks against a local test site fail under `next start` that pass under `next dev`. Email is the
@@ -983,7 +998,7 @@ Known limitations are listed at the end of each `docs/*.md`. The most significan
 - **Conversions are per-origin** — the assignment lives in `localStorage`, so a goal page on a
   different origin from where the visitor was assigned will not convert
 - **Redirect flicker is bounded, not eliminated** — the pasted anti-flickering script lifts
-  after `routelyTimeout` (1250 ms), so a config request slower than that still flashes the
+  after `routelyTimeout` (3000 ms), so a config request slower than that still flashes the
   control page. Sites that skip that script keep the flicker entirely. An A/B variant's overlay
   is bounded the same way.
 - **Device targeting and every other browser-side decision can be forged** by a modified client;
