@@ -299,11 +299,52 @@ enum PrimaryMetric {
 
 /// Event taxonomy. Values are the literal strings the SDK sends on the wire, so the
 /// ingestion endpoint stores what it receives without a translation table.
+///
+/// `custom` is the exception that proves it: the SDK never sends it as a `type`. The server writes
+/// one when a custom event (`CustomEvent`) lands on a visitor assigned to an experiment whose goal
+/// is that event, so a results page can count raw occurrences per arm with no join.
 enum EventType {
   page_view
   assignment
   time_on_page
   conversion
+  custom
+}
+
+/// What counts as a conversion. URL: the visitor reaches `conversionUrl`. EVENT: the project's
+/// `goalEvent` is received for an assigned visitor.
+enum GoalType {
+  URL
+  EVENT
+}
+
+/// How a custom event is detected on the customer's site.
+enum EventTrackingMethod {
+  /// A click on an existing element, matched with `closest(selector)`.
+  CLICK
+  /// A form submission, confirmed according to `formSuccess`.
+  FORM
+  /// The site calls `window.routely.track(name)` itself.
+  CODE
+}
+
+/// What confirms a form submission. Only SUBMIT cannot tell an accepted form from a rejected one,
+/// which is why the UI labels it "success not verified".
+enum FormSuccessMode {
+  /// The browser submitted the form and no script cancelled it.
+  SUBMIT
+  /// The visitor reaches `successUrl` after submitting.
+  URL
+  /// `successSelector` becomes visible after submitting.
+  ELEMENT
+  /// The form plugin fires `successEvent`.
+  CALLBACK
+}
+
+/// How a project's tracking code was installed.
+enum InstallMethod {
+  MANUAL
+  GTM
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +418,7 @@ model WorkspaceInvite {
 /// A customer property. Owns experiments and visitors, and carries the public site id embedded
 /// in the tracking snippet.
 model Website {
-  id                  String       @id @default(cuid())
+  id                  String         @id @default(cuid())
   /// The tenant key. Replaced `userId`; existing rows were moved into their owner's workspace.
   workspaceId         String
   /// Who added it. Display only — never an authorization input.
@@ -389,10 +430,10 @@ model Website {
   /// else records whether the site is http or https — and every URL the UI prefills (the
   /// install check, experiment URL placeholders) has to guess otherwise. Defaults to https,
   /// which is right for everything except local development.
-  protocol            SiteProtocol @default(HTTPS)
+  protocol            SiteProtocol   @default(HTTPS)
   /// Public identifier embedded in the install snippet ("rt_…"). An identifier, not a secret:
   /// it is visible in page source by design and grants no access beyond appending events.
-  publicSiteId        String       @unique
+  publicSiteId        String         @unique
   /// When the snippet was last confirmed present on a page of this website, by fetching that
   /// page and finding the site id in its HTML. Null until the install check has passed once.
   ///
@@ -401,23 +442,29 @@ model Website {
   /// looked and what we saw, which is all it can honestly claim.
   pixelVerifiedAt     DateTime?
   /// Avatar palette slot, 0–4.
-  colorIndex          Int          @default(0)
+  colorIndex          Int            @default(0)
   /// Last site-wide SDK hit, bumped by a throttled compare-and-set. A freshness timestamp, not a
   /// metric — tracking status is derived from it.
   lastSeenAt          DateTime?
   /// Latch for the "Tracking stops" email, so it is sent once per outage.
   trackingAlertSentAt DateTime?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  /// How the tracking code went on, from the last install check that passed in a real browser.
+  /// Only opens the install dialog on the right tab; nothing else depends on it.
+  installMethod       InstallMethod?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  workspace      Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  createdBy      User?               @relation("WebsiteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  experiments    Experiment[]
-  visitors       Visitor[]
-  events         Event[]
-  visitorDays    WebsiteVisitorDay[]
-  pageDays       PageVisitorDay[]
-  trackingChecks TrackingCheck[]
+  workspace        Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy        User?                 @relation("WebsiteCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  experiments      Experiment[]
+  visitors         Visitor[]
+  events           Event[]
+  visitorDays      WebsiteVisitorDay[]
+  pageDays         PageVisitorDay[]
+  trackingChecks   TrackingCheck[]
+  verifications    InstallVerification[]
+  eventDefinitions EventDefinition[]
+  customEvents     CustomEvent[]
 
   /// At most one Google Sheets destination per website.
   sheetTarget WebsiteSheetTarget?
@@ -481,6 +528,44 @@ model TrackingCheck {
   @@map("tracking_checks")
 }
 
+/// One run of the install check: the customer's page opened in their own browser with
+/// `#_rt_verify=<token>`, and whatever the SDK there reported. A fetch of the page's HTML cannot see
+/// a tag Google Tag Manager injects at runtime, so this is the only proof the code actually ran.
+///
+/// `loadedAt` and `readyAt` are compare-and-set latches written only for this project's own site id,
+/// so a repeated or late signal can never move a run backwards.
+model InstallVerification {
+  id           String        @id @default(cuid())
+  websiteId    String
+  method       InstallMethod
+  url          String
+  /// SHA-256 of the token in the fragment; the raw token exists only in that URL.
+  tokenHash    String        @unique
+  createdById  String?
+  /// createdAt + 10 minutes.
+  expiresAt    DateTime
+  /// What the server saw when the run started (`lib/install-verification.ts` `StaticLook`).
+  staticLook   Json?
+  /// The SDK started on the page and named this project's id.
+  loadedAt     DateTime?
+  /// The SDK finished initialising, its configuration loaded, and this signal reached the backend.
+  readyAt      DateTime?
+  /// Why the SDK reported it could not finish: `config` · `no_site_id`.
+  failReason   String?
+  /// Every other Routely project id the SDK saw on the page.
+  otherSiteIds String[]      @default([])
+  /// How many Routely tags were on the page, from the SDK.
+  tagCount     Int?
+  sdkVersion   String?
+  createdAt    DateTime      @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@index([websiteId, createdAt])
+  @@index([expiresAt])
+  @@map("install_verifications")
+}
+
 // ---------------------------------------------------------------------------
 // Experiments
 // ---------------------------------------------------------------------------
@@ -508,6 +593,11 @@ model Experiment {
   /// Null only while DRAFT, like `controlUrl`.
   conversionUrl       String?
   conversionMatchType UrlMatchType @default(EXACT)
+  /// URL goals use `conversionUrl`; EVENT goals use `goalEventId` and leave it null.
+  goalType            GoalType     @default(URL)
+  /// The project event that counts as a conversion when `goalType` is EVENT. Only DRAFTs can lose
+  /// it: an event used by a launched experiment cannot be deleted (a service rule).
+  goalEventId         String?
 
   /// Control's share of the traffic entered into this experiment, relative to each variant's
   /// `weight`. Weights are **relative**, normalised at draw time — so they carry no redundancy
@@ -568,6 +658,7 @@ model Experiment {
   // only ever fires while the experiment itself is being deleted.
   winnerVariant  ExperimentVariant?   @relation("ExperimentWinner", fields: [winnerVariantId], references: [id], onDelete: SetNull)
   winnerChosenBy User?                @relation("ExperimentWinnerChosenBy", fields: [winnerChosenById], references: [id], onDelete: SetNull)
+  goalEvent      EventDefinition?     @relation(fields: [goalEventId], references: [id], onDelete: SetNull)
   variants       ExperimentVariant[]
   assignments    Assignment[]
   events         Event[]
@@ -578,6 +669,8 @@ model Experiment {
   @@index([websiteId, status])
   // Serves the website detail page: experiments newest-first.
   @@index([websiteId, createdAt])
+  // Serves ingestion's "which running experiments count this event?" and the Event Library's usage.
+  @@index([goalEventId])
   @@map("experiments")
 }
 
@@ -752,6 +845,80 @@ model Conversion {
   @@index([experimentId, occurredAt])
   @@index([visitorId])
   @@map("conversions")
+}
+
+// ---------------------------------------------------------------------------
+// Custom events
+// ---------------------------------------------------------------------------
+
+/// An event a project has set up, in its Event Library. It belongs to the project, not to one
+/// experiment, so it can be the goal of many. Its existence says nothing about whether it works:
+/// a status comes only from `CustomEvent` rows and the SDK's reported problems (`lib/events.ts`).
+model EventDefinition {
+  id              String              @id @default(cuid())
+  websiteId       String
+  /// What `routely.track()` sends and what ingestion matches, exactly as written.
+  name            String
+  description     String?
+  category        String?
+  method          EventTrackingMethod @default(CODE)
+  /// CLICK: the element. FORM: the form (optional for URL and CALLBACK confirmation).
+  selector        String?
+  /// The page the element was chosen on. The SDK checks the selector still resolves here.
+  pageUrl         String?
+  /// Limits listening to pages matching `pageUrl`. Null listens on every page, which a split-URL
+  /// test needs when the same button sits on both versions.
+  pageMatch       UrlMatchType?
+  /// FORM only.
+  formSuccess     FormSuccessMode?
+  successUrl      String?
+  successMatch    UrlMatchType        @default(EXACT)
+  successSelector String?
+  /// The DOM (or jQuery) event a form plugin fires on success, e.g. `wpcf7mailsent`.
+  successEvent    String?
+  /// A problem the SDK reported on a real page: `selector_missing` · `form_ajax`. Cleared when the
+  /// element is seen again, the configuration changes, or the event arrives.
+  issueCode       String?
+  issueUrl        String?
+  issueAt         DateTime?
+  createdById     String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  website     Website      @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+  experiments Experiment[]
+
+  /// One definition per event name per project.
+  @@unique([websiteId, name])
+  @@map("event_definitions")
+}
+
+/// One occurrence of a custom event. Every occurrence is kept, whether or not the visitor is in an
+/// experiment and whether or not the name has a definition, so the Event Library shows what really
+/// arrives. An occurrence only becomes a conversion through a stored assignment (`ingest.service`).
+model CustomEvent {
+  id          String   @id @default(cuid())
+  websiteId   String
+  name        String
+  /// SHA-256 of the name and the SDK's event id. The unique index makes a retried beacon, a second
+  /// copy of the SDK or a repeated `{ id }` a no-op, while a genuine repeat has a new id.
+  eventKey    String
+  /// The SDK's anonymous id. Not a foreign key, for the reason `WebsiteVisitorDay` gives: Visitor
+  /// rows exist only for experiment participants.
+  anonymousId String
+  url         String
+  /// Safe metadata only, validated and filtered by `validation/custom-event.ts`.
+  properties  Json?
+  /// Client clock, clamped server-side.
+  occurredAt  DateTime
+  createdAt   DateTime @default(now())
+
+  website Website @relation(fields: [websiteId], references: [id], onDelete: Cascade)
+
+  @@unique([websiteId, eventKey])
+  /// Counts and last-received per name, for the Event Library.
+  @@index([websiteId, name, occurredAt])
+  @@map("custom_events")
 }
 
 // ---------------------------------------------------------------------------

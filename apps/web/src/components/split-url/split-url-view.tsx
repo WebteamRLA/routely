@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -25,7 +25,7 @@ import {
 } from "@/lib/mock/split-url";
 import { routes } from "@/lib/routes";
 import { cn } from "@/lib/utils";
-import { type WizardCtx, trackingFromChecks } from "@/lib/wizard-draft";
+import { type WizardCtx, type WizardEvent, trackingFromChecks } from "@/lib/wizard-draft";
 import { checkTrackingAction, launchExperimentAction } from "@/server/actions/experiment.actions";
 
 import { InstallModal, LaunchDialog, PauseDialog } from "./dialogs";
@@ -53,7 +53,7 @@ function trackedPages(f: SplitForm) {
   return [
     { id: "control", url: f.controlUrl },
     ...f.variants.map((v) => ({ id: v.id, url: v.url })),
-    { id: "goal", url: f.goalUrl },
+    ...(f.goalType === "EVENT" ? [] : [{ id: "goal", url: f.goalUrl }]),
   ];
 }
 
@@ -129,6 +129,11 @@ export function SplitUrlView({ view, live }: { view: SplitUrlViewName; live?: Sp
     if (isLive) sync.schedule();
     else later("save", 700, () => set({ saving: false, savedLabel: "Draft saved" }));
   };
+
+  const setEvents = useCallback(
+    (events: readonly WizardEvent[]) => set((cur) => ({ ctx: { ...cur.ctx, events } })),
+    [],
+  );
 
   /** Checks the snippet on every page. `force` re-checks pages that passed recently. */
   const checkLive = async (force: boolean) => {
@@ -206,6 +211,7 @@ export function SplitUrlView({ view, live }: { view: SplitUrlViewName; live?: Sp
 
   const act: WizardAct = {
     setForm,
+    setEvents,
     goStep,
     next: () => {
       const ce = s.step < 5 ? d.errs[s.step as 1 | 2 | 3 | 4] : null;

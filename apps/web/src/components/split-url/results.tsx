@@ -74,7 +74,9 @@ export function Success({
             </div>
           ))}
           <div className="h-px bg-[#F3F4F6]" />
-          <span className="text-[13px] text-[#4B5563]">Page visit · {d.goalUrlText}</span>
+          <span className="text-[13px] text-[#4B5563]">
+            {s.form.goalType === "EVENT" ? d.goalUrlText : `Page visit · ${d.goalUrlText}`}
+          </span>
         </div>
         <div className="flex w-full flex-wrap justify-center gap-2.5">
           <button
@@ -316,7 +318,9 @@ export function Results({
                 Version comparison
               </h2>
               <p className="m-0 text-[13px] text-[#6B7280]">
-                {"Goal: Page visit · " + (shortUrl(f.goalUrl) || "conversion page")}
+                {f.goalType === "EVENT"
+                  ? "Goal: " + d.goalUrlText
+                  : "Goal: Page visit · " + (shortUrl(f.goalUrl) || "conversion page")}
               </p>
             </div>
             <span className="text-[13px] text-[#6B7280]">
@@ -637,7 +641,7 @@ export function Results({
           </div>
           <div className="flex flex-col gap-1 border-b border-[#EEF0F3] px-[18px] py-3.5">
             <span className={eyebrow}>Conversion goal</span>
-            <span className="text-[13px] text-[#374151]">Page visit</span>
+            <span className="text-[13px] text-[#374151]">{d.goalKind}</span>
             <span className="truncate text-[13px] text-[#4B5563]">{d.goalUrlText}</span>
           </div>
           <div className="flex flex-col gap-2 px-[18px] py-3.5">

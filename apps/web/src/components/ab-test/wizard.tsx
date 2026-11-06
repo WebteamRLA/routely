@@ -4,6 +4,12 @@ import type { ReactNode } from "react";
 
 import { HelpLink } from "@/components/common/help-link";
 import {
+  CUSTOM_EVENT_HINT,
+  EventGoalFields,
+  GoalTypeOption,
+} from "@/components/split-url/goal-fields";
+import { EventIcon } from "@/components/split-url/ui";
+import {
   AlertCircleIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
@@ -18,7 +24,6 @@ import {
 } from "@/components/rt/icons";
 import {
   ACCENT,
-  ACCENT_INK,
   ACCENT_LINE,
   ACCENT_WASH,
   MAX_VARIANTS,
@@ -26,6 +31,7 @@ import {
   type AbState,
 } from "@/lib/mock/ab-test";
 import { cn } from "@/lib/utils";
+import type { WizardEvent } from "@/lib/wizard-draft";
 
 import {
   BarsIcon,
@@ -45,6 +51,7 @@ import { cls, FieldError, Swatch } from "./ui";
 
 export interface WizardAct {
   setForm(patch: Partial<AbForm>): void;
+  setEvents(events: readonly WizardEvent[]): void;
   goStep(n: number): void;
   next(): void;
   back(): void;
@@ -698,34 +705,49 @@ function Step3({ s, d, act }: P) {
 }
 
 function Step4({ s, d, act }: P) {
+  const f = s.form;
+  const eventGoal = f.goalType === "EVENT";
   return (
     <>
-      <div className="flex flex-col gap-3">
-        <h3 className="m-0 text-[14px] leading-5 font-semibold text-[#111827]">Goal type</h3>
-        <div
-          className="flex items-start gap-3 rounded-xl border-[1.5px] p-4"
-          style={{ borderColor: ACCENT_LINE, background: ACCENT_WASH }}
+      <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
+        <legend className="mb-3 p-0 text-[14px] leading-5 font-semibold text-[#111827]">
+          Goal type
+        </legend>
+        <GoalTypeOption
+          checked={!eventGoal}
+          onSelect={() => act.setForm({ goalType: "URL" })}
+          icon={<EyeIcon size={18} />}
+          title="Page view"
         >
-          <span
-            aria-hidden
-            className="inline-flex size-8 flex-none items-center justify-center rounded-lg border bg-white"
-            style={{ color: ACCENT_INK, borderColor: ACCENT_LINE }}
-          >
-            <EyeIcon size={18} />
-          </span>
-          <span className="flex min-w-0 flex-col gap-1">
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="text-[14px] font-semibold text-[#111827]">Page view</span>
-              <span className="inline-flex h-6 items-center rounded-md border border-[#E5E7EB] bg-white px-2 text-[12px] font-semibold text-[#4B5563]">
-                Only goal type
-              </span>
-            </span>
-            <span className="text-[13px] leading-[19px] text-[#6B7280]">
-              A conversion counts when a visitor from any version views the goal page.
-            </span>
-          </span>
-        </div>
-      </div>
+          A conversion counts when a visitor from any version views the goal page.
+        </GoalTypeOption>
+        <GoalTypeOption
+          checked={eventGoal}
+          onSelect={() => act.setForm({ goalType: "EVENT" })}
+          icon={<EventIcon />}
+          title="Custom event"
+        >
+          {CUSTOM_EVENT_HINT}
+        </GoalTypeOption>
+      </fieldset>
+      {eventGoal ? (
+        <EventGoalFields
+          ctx={s.ctx}
+          selectedId={f.goalEventId}
+          onSelect={(ev) => act.setForm({ goalEventId: ev.id, goalEventName: ev.name })}
+          onEvents={act.setEvents}
+          error={d.e4.event ? <FieldError>{d.e4.event}</FieldError> : null}
+        />
+      ) : (
+        <PageGoalFields s={s} d={d} act={act} />
+      )}
+    </>
+  );
+}
+
+function PageGoalFields({ s, d, act }: P) {
+  return (
+    <>
       <Field>
         <label htmlFor="rt-gu" className="text-[13px] font-medium text-[#374151]">
           Goal page URL
@@ -844,7 +866,7 @@ function Step5({ d, act }: { d: Derived; act: WizardAct }) {
           </div>
           <div className="flex min-w-0 flex-[2_1_280px] flex-col gap-1.5">
             <ReviewHead title="Goal" onEdit={() => act.goStep(4)} />
-            <span className="text-[14px] text-[#374151]">Page view</span>
+            <span className="text-[14px] text-[#374151]">{rv.goalKind}</span>
             <span className="text-[13px] [overflow-wrap:anywhere] text-[#4B5563]">
               {rv.goalUrl}
             </span>
@@ -893,8 +915,9 @@ function Step5({ d, act }: { d: Derived; act: WizardAct }) {
           </span>
         </div>
         <p className="m-0 text-[13px] leading-[19px] text-pretty text-[#6B7280]">
-          The Routely snippet must be on the page you’re testing, so variant changes can be applied,
-          and on the goal page, so page views can be counted.
+          {d.eventGoal
+            ? "The Routely snippet must be on the page you’re testing, so variant changes can be applied, and wherever your event happens, so it can be counted."
+            : "The Routely snippet must be on the page you’re testing, so variant changes can be applied, and on the goal page, so page views can be counted."}
         </p>
         {!tr.isError ? (
           <div className="flex flex-col rounded-lg border border-[#EEF0F3]">
@@ -1122,7 +1145,7 @@ function Summary({ d, act }: P) {
         gap={6}
         last
       >
-        <span className="text-[14px] leading-5 font-semibold text-[#374151]">Page view</span>
+        <span className="text-[14px] leading-5 font-semibold text-[#374151]">{rv.goalKind}</span>
         <span
           className="text-[14px] leading-5 [overflow-wrap:anywhere]"
           style={{ color: sum.goalFg }}

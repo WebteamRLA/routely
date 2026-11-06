@@ -142,6 +142,16 @@ export const VisitIcon = (p: IconProps) => (
     <path d="M12 8v4l3 2" />
   </Svg>
 );
+/** The goal-type tile's "custom event" glyph: a pointer clicking. */
+export const EventIcon = (p: IconProps) => (
+  <Svg size={18} strokeWidth={1.8} {...p}>
+    <path d="m9 9 5 12 1.8-5.2L21 14Z" />
+    <path d="M7.2 2.2 8 5.1" />
+    <path d="m5.1 8-2.9-.8" />
+    <path d="M14 4.1 12 6" />
+    <path d="m6 12-1.9 2" />
+  </Svg>
+);
 export const DesktopIcon = (p: IconProps) => (
   <Svg size={22} strokeWidth={1.6} {...p}>
     <rect x="3" y="4" width="18" height="12" rx="2" />

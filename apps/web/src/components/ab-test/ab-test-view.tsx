@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
@@ -29,7 +29,7 @@ import {
   type ElementChange,
   type ElementId,
 } from "@/lib/mock/ab-test";
-import { type WizardCtx, trackingFromChecks } from "@/lib/wizard-draft";
+import { type WizardCtx, type WizardEvent, trackingFromChecks } from "@/lib/wizard-draft";
 import { checkTrackingAction, launchExperimentAction } from "@/server/actions/experiment.actions";
 import type { VisualChange } from "@/validation/visual-change";
 
@@ -84,11 +84,11 @@ export interface AbTestLive {
   resumeInfo: { title: string; text: string } | null;
 }
 
-/** The pages the tracking check covers: the tested page and the goal page. */
+/** The pages the tracking check covers: the tested page and, for a page goal, the goal page. */
 function trackedPages(f: AbForm) {
   return [
     { id: "page", url: f.pageUrl },
-    { id: "goal", url: f.goalUrl },
+    ...(f.goalType === "EVENT" ? [] : [{ id: "goal", url: f.goalUrl }]),
   ];
 }
 
@@ -170,6 +170,11 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
     else later("save", 700, () => set({ saving: false, savedLabel: "Draft saved" }));
   };
 
+  const setEvents = useCallback(
+    (events: readonly WizardEvent[]) => set((cur) => ({ ctx: { ...cur.ctx, events } })),
+    [],
+  );
+
   /** A tracking result as state, opening the install flow when the snippet is missing on step 5
    * — what the reference does after its first check. */
   const trackingPatch = (
@@ -191,7 +196,7 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
     return patch;
   };
 
-  /** Checks the snippet on the tested page and the goal page. `force` re-checks recent passes. */
+  /** Checks the snippet on the experiment's pages. `force` re-checks recent passes. */
   const checkLive = async (force: boolean) => {
     const key = trackKey(latest.current.form);
     const id = await sync.flush();
@@ -221,7 +226,7 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
         const attempts = (cur.tracking.attempts || 0) + 1;
         // The first check misses the goal page so the install flow is reachable; later ones pass.
         const results =
-          attempts === 1
+          attempts === 1 && cur.form.goalType === "URL"
             ? ({ page: "ok", goal: "missing" } as const)
             : ({ page: "ok", goal: "ok" } as const);
         const patch: Partial<AbState> = {
@@ -282,6 +287,7 @@ export function AbTestView({ view, live }: { view: AbTestViewName; live?: AbTest
 
   const act: WizardAct = {
     setForm,
+    setEvents,
     goStep,
     next: () => {
       const ce = s.step < 5 ? d.errs[s.step as 1 | 2 | 3 | 4] : null;

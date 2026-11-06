@@ -43,10 +43,10 @@ export interface EditorContext {
 }
 
 /** The editor token in `href`'s fragment, if a well-formed one is present. */
-export function readEditorToken(href: string): string | null {
+export function readEditorToken(href: string, param: string = EDITOR_HASH_PARAM): string | null {
   try {
     const hash = new URL(href).hash.slice(1);
-    const token = new URLSearchParams(hash).get(EDITOR_HASH_PARAM);
+    const token = new URLSearchParams(hash).get(param);
     return token && TOKEN.test(token) ? token : null;
   } catch {
     return null;

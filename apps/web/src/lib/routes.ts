@@ -39,6 +39,8 @@ export const routes = {
     list: "/projects",
     /** A project's dashboard: tracking pixel, integrations and its experiments. */
     detail: (projectId: string) => `/projects/${encodeURIComponent(projectId)}`,
+    /** A project's Event Library. */
+    events: (projectId: string) => `/projects/${encodeURIComponent(projectId)}/events`,
   },
 
   /** Help & Guides: every guide (`lib/guides.ts`) on one scrolling page. */

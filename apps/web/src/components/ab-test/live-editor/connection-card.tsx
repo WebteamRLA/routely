@@ -25,6 +25,7 @@ export function ConnectionCard({
   state,
   pageUrl,
   snippet,
+  tool = "visual editor",
   viewer,
   actions,
 }: {
@@ -32,6 +33,8 @@ export function ConnectionCard({
   pageUrl: string;
   /** The last tracking check's verdict on the page, to word a page that does not answer. */
   snippet: "found" | "missing" | "unknown";
+  /** What this page is being opened for, in the failure messages. */
+  tool?: string;
   viewer: boolean;
   actions: ConnectionActions;
 }): ReactNode {
@@ -40,7 +43,7 @@ export function ConnectionCard({
   if (viewer) {
     return (
       <Card
-        title="Only Editors can use the visual editor"
+        title={`Only Editors can use the ${tool}`}
         body="You can see this version’s saved changes in the list. Ask an Owner, Admin or Editor in this workspace to change them."
       />
     );
@@ -51,7 +54,7 @@ export function ConnectionCard({
       return <Card busy title="Opening your page…" body={`Loading ${page} in the editor.`} />;
     case "failed":
       return (
-        <Card title="We couldn’t open the visual editor" body={state.message}>
+        <Card title={`We couldn’t open the ${tool}`} body={state.message}>
           <button type="button" onClick={actions.retry} className={cls.secondary}>
             Try again
           </button>
@@ -100,7 +103,7 @@ export function ConnectionCard({
       return snippet === "missing" ? (
         <Card
           title="Install the Routely snippet on this page to edit it"
-          body={`The last check didn’t find the snippet on ${page}, and the page didn’t answer the editor. The visual editor works on your real page, so the snippet has to be there first. If you’ve just installed it, open the page in a new window instead.`}
+          body={`The last check didn’t find the snippet on ${page}, and the page didn’t answer the editor. The ${tool} works on your real page, so the snippet has to be there first. If you’ve just installed it, open the page in a new window instead.`}
         >
           <button type="button" onClick={actions.install} className={cls.primary}>
             Install the snippet
@@ -133,7 +136,7 @@ export function ConnectionCard({
       return (
         <Card
           title="Install the Routely snippet on this page to edit it"
-          body={`${page} didn’t answer the editor, so the Routely snippet isn’t on it — or it’s an older copy. The visual editor works on your real page, so the snippet has to be there first.`}
+          body={`${page} didn’t answer the editor, so the Routely snippet isn’t on it — or it’s an older copy. The ${tool} works on your real page, so the snippet has to be there first.`}
           hint="If this address redirects (for example to www.), use the final address as the page URL."
         >
           <button type="button" onClick={actions.install} className={cls.primary}>

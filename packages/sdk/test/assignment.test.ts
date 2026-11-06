@@ -159,7 +159,7 @@ describe("requestAssignment", () => {
       expect(init.credentials).toBe("omit");
       expect(typeof init.body).toBe("string"); // a string body is sent as text/plain: no preflight
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-      expect(body).toEqual({ v: 4, siteId: "rt_abc", visitorId: "visitor-1", experimentId: EXP });
+      expect(body).toEqual({ v: 5, siteId: "rt_abc", visitorId: "visitor-1", experimentId: EXP });
     } finally {
       vi.unstubAllGlobals();
     }

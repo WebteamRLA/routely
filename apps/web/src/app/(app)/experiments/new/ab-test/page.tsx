@@ -15,9 +15,10 @@ import { can } from "@/lib/permissions";
 import { routes } from "@/lib/routes";
 import { buildInstallSnippet } from "@/lib/snippet";
 import { readView, type SearchParams } from "@/lib/view-param";
-import { type WizardCtx, resumeStep, savedLabelFor } from "@/lib/wizard-draft";
+import { type WizardCtx, resumeStep, savedLabelFor, wizardEvents } from "@/lib/wizard-draft";
 import { requireUser } from "@/server/auth/session";
 import { isAppError } from "@/server/errors";
+import { getEventLibrary } from "@/server/services/custom-event.service";
 import * as experimentService from "@/server/services/experiment.service";
 import { readStoredChanges } from "@/validation/visual-change";
 
@@ -86,6 +87,7 @@ export default async function NewAbTestPage({ searchParams }: { searchParams: Se
       }),
       baseline,
       readOnly: !can(role, "experiment.edit"),
+      events: wizardEvents((await getEventLibrary(user.id, experiment.website.id)).events),
     };
     const step = resumeStep(
       experiment.wizardStep,
@@ -126,6 +128,7 @@ export default async function NewAbTestPage({ searchParams }: { searchParams: Se
     snippet: buildInstallSnippet({ sdkUrl: env.SDK_URL, publicSiteId: website.publicSiteId }),
     baseline: null,
     readOnly: false,
+    events: wizardEvents((await getEventLibrary(user.id, website.id)).events),
   };
 
   return (

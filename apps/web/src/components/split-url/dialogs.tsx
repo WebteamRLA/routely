@@ -246,8 +246,9 @@ export function InstallModal({
                 Add the Routely script to your site
               </DialogPrimitive.Title>
               <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">
-                It goes on every page in this experiment — the Control page, each variant and the
-                conversion page — so Routely can redirect visitors and count conversions.
+                {s.form.goalType === "EVENT"
+                  ? "It goes on every page in this experiment — the Control page and each variant — and wherever your event happens, so Routely can redirect visitors and count conversions."
+                  : "It goes on every page in this experiment — the Control page, each variant and the conversion page — so Routely can redirect visitors and count conversions."}
               </p>
               <HelpLink anchor="tracking-install" newTab>
                 Installation guide
@@ -553,7 +554,7 @@ export function LaunchDialog({
         <div className="h-px bg-[#F3F4F6]" />
         <Detail label="Visitors included" value={d.includeShort} />
         <Detail label="Targeting" value={d.targetText} />
-        <Detail label="Goal" value="Page visit" />
+        <Detail label="Goal" value={d.goalShort} />
       </div>
       <Actions>
         <button

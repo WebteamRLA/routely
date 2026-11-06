@@ -281,3 +281,53 @@ describe("summaries", () => {
     expect(launchSummary(exp).arms.map((arm) => arm[2])).toEqual(["33%", "33%", "33%"]);
   });
 });
+
+describe("event goals", () => {
+  const goalIssues = (exp: LaunchRuleExperiment) =>
+    setupIssues(exp, ctx).filter((issue) => issue.step === 4);
+
+  it("needs an event chosen", () => {
+    const issues = goalIssues(split({ goalType: "EVENT", goalEventId: null, conversionUrl: null }));
+    expect(issues.map((issue) => issue.field)).toEqual(["goalEventId"]);
+    expect(issues[0]!.message).toBe("Choose the event that counts as a conversion.");
+  });
+
+  it("passes with an event and no conversion URL, in both experiment types", () => {
+    const goal = { goalType: "EVENT", goalEventId: "ev1", conversionUrl: null } as const;
+    expect(setupIssues(split(goal), ctx)).toEqual([]);
+    expect(setupIssues(ab(goal), ctx)).toEqual([]);
+    expect(isSetupComplete(ab(goal), ctx)).toBe(true);
+  });
+
+  it("ignores a leftover goal page, which would otherwise fail its own rules", () => {
+    expect(
+      goalIssues(
+        split({
+          goalType: "EVENT",
+          goalEventId: "ev1",
+          conversionUrl: "https://elsewhere.test/thanks",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("leaves page goals as they were, with or without the field, and ignores a stale event", () => {
+    for (const exp of [
+      split({ conversionUrl: null }),
+      split({ goalType: "URL", conversionUrl: null }),
+      split({ goalType: "URL", conversionUrl: null, goalEventId: "ev1" }),
+    ]) {
+      expect(goalIssues(exp).map((issue) => issue.field)).toEqual(["conversionUrl"]);
+    }
+    expect(setupIssues(split({ goalType: "URL" }), ctx)).toEqual([]);
+  });
+
+  it("names the event in the launch confirm, and only marks event goals", () => {
+    const summary = launchSummary(
+      ab({ goalType: "EVENT", goalEventId: "ev1", goalEventName: "signup_completed" }),
+    );
+    expect(summary.goal).toBe("signup_completed");
+    expect(summary.goalType).toBe("EVENT");
+    expect(launchSummary(ab({ goalType: "URL" }))).not.toHaveProperty("goalType");
+  });
+});

@@ -1,3 +1,4 @@
+import { eventGoalLabel } from "@/lib/wizard-draft";
 import {
   armsOf,
   colorOf,
@@ -31,6 +32,10 @@ export interface Derived {
   targetText: string;
   includeShort: string;
   goalUrlText: string;
+  /** "Page visit" / "Custom event". */
+  goalKind: string;
+  /** The goal on one line: its type for a page, `Event: <name>` for an event. */
+  goalShort: string;
   pages: Page[];
   stale: boolean;
   missing: Page[];
@@ -54,13 +59,17 @@ export function derive(s: SplitState): Derived {
 
   const tr = s.tracking;
   const stale = tr.status === "done" && tr.key !== trackKey(f);
+  const eventGoal = f.goalType === "EVENT";
   const pages: Page[] = [
     ...arms.map((a) => ({
       id: a.id,
       label: (a.name.trim() || "Variant") + " page",
       url: shortUrl(a.url) || "No URL yet",
     })),
-    { id: "goal", label: "Conversion page", url: shortUrl(f.goalUrl) || "No URL yet" },
+    // An event is reported from wherever it happens, so it has no page to check.
+    ...(eventGoal
+      ? []
+      : [{ id: "goal", label: "Conversion page", url: shortUrl(f.goalUrl) || "No URL yet" }]),
   ];
   const missing =
     tr.status === "done" && !stale ? pages.filter((pg) => tr.results[pg.id] === "missing") : [];
@@ -97,7 +106,13 @@ export function derive(s: SplitState): Derived {
       .filter((b) => parseFloat(b.width) > 0),
     targetText,
     includeShort: (isNaN(incNum) ? "—" : incNum) + "%",
-    goalUrlText: f.goalUrl.trim() ? shortUrl(f.goalUrl) : "No conversion URL yet",
+    goalUrlText: eventGoal
+      ? eventGoalLabel(f)
+      : f.goalUrl.trim()
+        ? shortUrl(f.goalUrl)
+        : "No conversion URL yet",
+    goalKind: eventGoal ? "Custom event" : "Page visit",
+    goalShort: eventGoal ? eventGoalLabel(f) : "Page visit",
     pages,
     stale,
     missing,

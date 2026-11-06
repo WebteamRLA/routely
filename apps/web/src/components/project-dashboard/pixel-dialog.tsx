@@ -1,30 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { HelpLink } from "@/components/common/help-link";
-import {
-  type PixelCheckResult,
-  type PixelVerify as Verify,
-  checkHeader,
-  checkRows,
-  shortCheckUrl,
-  checkTips,
-  verifyFromResult,
-} from "@/lib/pixel-check";
+import { CodeBox } from "@/components/install/code-box";
+import { GtmSteps } from "@/components/install/gtm-steps";
+import { MethodTabs, methodPanelProps } from "@/components/install/method-tabs";
+import { Connector, StepNum } from "@/components/install/step-marks";
+import { useInstallVerification } from "@/components/install/use-install-verification";
+import { VerifyStep } from "@/components/install/verify-step";
+import type { InstallMethodName } from "@/lib/install-verification";
 import { pixelCheckUrl, pixelDefaultUrl, pixelUrlError } from "@/lib/projects";
 import { buildInstallSnippet } from "@/lib/snippet";
 import { cn } from "@/lib/utils";
-import { verifyProjectPixelAction } from "@/server/actions/website.actions";
 
 /*
- * Two-step pixel setup: copy the real install snippet (`lib/snippet.ts`, D10), then verify it on a
- * live page through the server's install check (`verifyProjectPixelAction`).
+ * Two-step pixel setup: install by hand (`lib/snippet.ts`, D10) or through Google Tag Manager, then
+ * prove it in a real tab (`components/install`, `lib/install-verification.ts`).
  *
  * A copy of `components/projects/pixel-setup-dialog.tsx` (same design component), extended for
  * the project dashboard: it reports while a check is running so the page's pixel badge can read
- * "Checking pixel…", and tells the page when the script was found so the badge can refresh.
+ * "Checking pixel…", and tells the page when the install was verified so the badge can refresh.
  */
 
 const ACCENT = "#0070C9";
@@ -37,10 +34,8 @@ const focusRing =
 const btnBase = `inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-lg text-[13px] whitespace-nowrap disabled:cursor-default disabled:opacity-45 ${focusRing}`;
 const primaryClass = `${btnBase} border-0 bg-[#0070C9] px-4 font-semibold text-white hover:enabled:brightness-[.8]`;
 const linkClass = `inline-flex h-9 cursor-pointer items-center gap-1.5 border-0 bg-transparent px-1 text-[13px] font-medium hover:enabled:text-[#111827] disabled:cursor-default disabled:opacity-45 ${focusRing}`;
-const monoFont = "font-[ui-monospace,SFMono-Regular,Menlo,Consolas,monospace]";
 
 export type PixelStep = 1 | 2;
-export type { PixelVerify } from "@/lib/pixel-check";
 type Step = PixelStep;
 
 export interface PixelTarget {
@@ -57,7 +52,7 @@ export interface PixelDialogProps {
   initialStep?: Step;
   /** The SDK URL the snippet loads (`env.SDK_URL`, passed from the server). */
   sdkUrl: string;
-  /** The check found this project's script (`pixelVerifiedAt` was stamped). */
+  /** The check saw this project's code run. */
   onVerified(): void;
   onCheckingChange(checking: boolean): void;
 }
@@ -88,29 +83,13 @@ function PixelPanel({
   onCheckingChange,
 }: Omit<PixelDialogProps, "open">) {
   const [step, setStep] = useState<Step>(initialStep);
-  const [verify, setVerify] = useState<Verify>("idle");
-  const [result, setResult] = useState<PixelCheckResult | null>(null);
-  const [serverErr, setServerErr] = useState("");
+  const [method, setMethod] = useState<InstallMethodName>("MANUAL");
   const [url, setUrl] = useState(pixelDefaultUrl(project.domain, project.protocol));
   const [attempted, setAttempted] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const mounted = useRef(true);
-  const checkingRef = useRef(onCheckingChange);
-  useEffect(() => {
-    checkingRef.current = onCheckingChange;
-  });
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      clearTimeout(copyTimer.current);
-      checkingRef.current(false);
-    };
-  }, []);
+  const verification = useInstallVerification({ onVerified, onCheckingChange });
 
-  const checking = verify === "checking";
-  const found = verify === "found";
+  const checking = verification.phase !== "idle";
+  const found = verification.outcome?.status === "verified";
   const domain = project.domain;
   const snippet = buildInstallSnippet({ sdkUrl, publicSiteId: project.key });
   const urlErr = pixelUrlError(url, domain);
@@ -120,50 +99,26 @@ function PixelPanel({
     if (checking) return;
     setStep(n);
     // A found result survives navigation; a miss is cleared when the user goes back to fix it.
-    if (n === 1 && verify !== "found") {
-      setVerify("idle");
-      setResult(null);
-    }
+    if (n === 1 && !found) verification.reset();
   }
 
-  function copy() {
-    try {
-      void navigator.clipboard?.writeText(snippet).catch(() => {});
-    } catch {
-      // No clipboard (insecure context, permissions): the snippet stays selectable.
-    }
-    setCopied(true);
-    clearTimeout(copyTimer.current);
-    copyTimer.current = setTimeout(() => setCopied(false), 2000);
+  function chooseMethod(next: InstallMethodName) {
+    setMethod(next);
+    // A miss's advice is written for one method, so it can't stand for the other.
+    if (!found) verification.reset();
   }
 
-  async function runCheck(e: React.FormEvent) {
+  function runCheck(e: React.FormEvent) {
     e.preventDefault();
     if (checking) return;
     setAttempted(true);
-    setServerErr("");
     if (urlErr) return;
-    setVerify("checking");
-    onCheckingChange(true);
-    const res = await verifyProjectPixelAction({
+    // Synchronous from here to `window.open`, or the browser blocks the new tab.
+    verification.start({
       websiteId: project.id,
       url: pixelCheckUrl(url, project.protocol),
-    }).catch(() => null);
-    if (!mounted.current) return;
-    onCheckingChange(false);
-    if (!res || !res.ok) {
-      // Refused before any fetch (off-site URL, too many checks, no permission): say why under
-      // the box, and leave the previous result alone.
-      setServerErr(
-        res?.fieldErrors?.url ?? res?.message ?? "We couldn’t check that page. Try again.",
-      );
-      setVerify(result ? verifyFromResult(result) : "idle");
-      return;
-    }
-    setResult(res.data);
-    const next = verifyFromResult(res.data);
-    setVerify(next);
-    if (next === "found") onVerified();
+      method,
+    });
   }
 
   return (
@@ -236,28 +191,7 @@ function PixelPanel({
         {step === 1 ? (
           <>
             <div className="flex flex-col gap-1.5">
-              <span className="flex flex-wrap items-center gap-2">
-                <span
-                  className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-xs font-semibold"
-                  style={{ background: ACCENT_TINT, color: ACCENT_INK }}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="m8 8-4 4 4 4" />
-                    <path d="m16 8 4 4-4 4" />
-                  </svg>
-                  Manual installation
-                </span>
-              </span>
+              <MethodTabs value={method} onChange={chooseMethod} className="mb-2" />
               <DialogPrimitive.Title className="m-0 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-[#111827]">
                 Add the Routely script to your site
               </DialogPrimitive.Title>
@@ -270,80 +204,48 @@ function PixelPanel({
               </HelpLink>
             </div>
 
-            <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
-              <li className="relative flex min-w-0 items-start gap-3">
-                <Connector />
-                <StepNum n={1} />
-                <div className="flex min-w-0 flex-auto flex-col gap-2.5 pt-0.5">
-                  <span className="text-sm leading-[22px] font-semibold text-[#111827]">
-                    Copy the script and paste it into the header
-                  </span>
-                  <div className="flex flex-col overflow-hidden rounded-xl border border-[#EEF0F3] bg-[#F3F4F6]">
-                    <div className="flex items-center justify-end gap-2 border-b border-[#E5E7EB] py-1.5 pr-2 pl-3.5">
-                      <button
-                        type="button"
-                        onClick={copy}
-                        className={cn(
-                          "inline-flex h-[30px] cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium text-[#374151]",
-                          focusRing,
-                        )}
-                        style={{
-                          borderColor: copied ? "#BBF7D0" : "#E5E7EB",
-                          background: copied ? "#ECFDF5" : "#FFFFFF",
-                        }}
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <rect x="8" y="8" width="13" height="13" rx="2" />
-                          <path d="M5 16H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h11a1 1 0 0 1 1 1v1" />
-                        </svg>
-                        <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
-                      </button>
+            <div {...methodPanelProps(method)}>
+              {method === "GTM" ? (
+                <GtmSteps domain={domain} sdkUrl={sdkUrl} publicSiteId={project.key} />
+              ) : (
+                <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
+                  <li className="relative flex min-w-0 items-start gap-3">
+                    <Connector />
+                    <StepNum n={1} />
+                    <div className="flex min-w-0 flex-auto flex-col gap-2.5 pt-0.5">
+                      <span className="text-sm leading-[22px] font-semibold text-[#111827]">
+                        Copy the script and paste it into the header
+                      </span>
+                      <CodeBox code={snippet} />
                     </div>
-                    <pre
-                      className={cn(
-                        "m-0 overflow-x-auto px-3.5 pt-3 pb-3.5 text-[13px] leading-[19px] break-normal [overflow-wrap:anywhere] whitespace-pre-wrap text-[#111827]",
-                        monoFont,
-                      )}
-                    >
-                      {snippet}
-                    </pre>
-                  </div>
-                </div>
-              </li>
-              <li className="flex items-start gap-3">
-                <StepNum n={2} />
-                <div className="flex min-w-0 flex-col gap-0.5 pt-0.5">
-                  <span className="text-sm leading-[22px] font-semibold text-[#111827]">
-                    Publish your changes
-                  </span>
-                  <span className="text-sm leading-5 text-pretty text-[#4B5563]">
-                    Then continue to check that Routely can see the script.
-                  </span>
-                </div>
-              </li>
-            </ol>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <StepNum n={2} />
+                    <div className="flex min-w-0 flex-col gap-0.5 pt-0.5">
+                      <span className="text-sm leading-[22px] font-semibold text-[#111827]">
+                        Publish your changes
+                      </span>
+                      <span className="text-sm leading-5 text-pretty text-[#4B5563]">
+                        Then continue to check that Routely can see the script.
+                      </span>
+                    </div>
+                  </li>
+                </ol>
+              )}
+            </div>
           </>
         ) : (
           <VerifyStep
-            project={project}
-            verify={verify}
-            result={result}
+            domain={domain}
+            method={method}
+            onMethodChange={chooseMethod}
+            verification={verification}
             url={url}
             setUrl={(v) => {
               setUrl(v);
-              setServerErr("");
+              verification.clearError();
             }}
-            urlErr={showUrlErr ? urlErr : serverErr}
+            urlErr={showUrlErr ? urlErr : verification.error}
             onSubmit={runCheck}
           />
         )}
@@ -420,232 +322,6 @@ function PixelPanel({
   );
 }
 
-function VerifyStep({
-  project,
-  verify,
-  result,
-  url,
-  setUrl,
-  urlErr,
-  onSubmit,
-}: {
-  project: PixelTarget;
-  verify: Verify;
-  result: PixelCheckResult | null;
-  url: string;
-  setUrl(v: string): void;
-  urlErr: string;
-  onSubmit(e: React.FormEvent): void;
-}) {
-  const domain = project.domain;
-  const checking = verify === "checking";
-  const shortUrl = shortCheckUrl(url, domain);
-
-  const TONES = {
-    ok: { iconBg: "#DCFCE7", fg: "#166534", icon: "ok" },
-    fail: { iconBg: "#FEE2E2", fg: "#B91C1C", icon: "fail" },
-    warn: { iconBg: "#FEF3C7", fg: "#92400E", icon: "warn" },
-    pending: { iconBg: "#F3F4F6", fg: "#9CA3AF", icon: "pending" },
-    running: { iconBg: ACCENT_TINT, fg: ACCENT_INK, icon: "running" },
-  } as const;
-  const checks = checkRows(verify, result, { shortUrl }).map((c) => ({
-    title: c.title,
-    text: c.text,
-    ...TONES[c.tone],
-  }));
-  const head = checkHeader(verify, result, { shortUrl, domain });
-  const tips = checkTips(verify, result);
-
-  const styles = {
-    found: {
-      ink: "#166534",
-      bg: "#ECFDF5",
-      border: "#BBF7D0",
-      pillBg: "#DCFCE7",
-      pillFg: "#166534",
-      dot: "#16A34A",
-    },
-    missing: {
-      ink: "#B91C1C",
-      bg: "#FEF2F2",
-      border: "#FECACA",
-      pillBg: "#FEE2E2",
-      pillFg: "#B91C1C",
-      dot: "#DC2626",
-    },
-    checking: {
-      ink: "#111827",
-      bg: "#FAFBFC",
-      border: "#E5E7EB",
-      pillBg: ACCENT_TINT,
-      pillFg: ACCENT_INK,
-      dot: ACCENT,
-    },
-    idle: {
-      ink: "#111827",
-      bg: "#FAFBFC",
-      border: "#E5E7EB",
-      pillBg: "#F3F4F6",
-      pillFg: "#4B5563",
-      dot: "#9CA3AF",
-    },
-  }[head.kind];
-  const r = { ...styles, title: head.title, label: head.label };
-
-  const verifyLabel = checking
-    ? "Checking…"
-    : verify === "missing"
-      ? "Check again"
-      : verify === "found"
-        ? "Verify again"
-        : "Verify installation";
-
-  return (
-    <>
-      <div className="flex flex-col gap-1.5">
-        <DialogPrimitive.Title className="m-0 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-[#111827]">
-          Verify your installation
-        </DialogPrimitive.Title>
-        <p className="m-0 text-sm leading-[21px] text-pretty text-[#4B5563]">
-          Enter a page on {domain} where you added the script. Routely will load it and confirm the
-          script is installed and sending data.
-        </p>
-      </div>
-
-      <form onSubmit={onSubmit} noValidate className="flex flex-col gap-1.5">
-        <label htmlFor="rt-pm-url" className="text-[13px] font-medium text-[#374151]">
-          Page URL
-        </label>
-        <div className="flex flex-wrap gap-2.5">
-          <input
-            id="rt-pm-url"
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            disabled={checking}
-            placeholder={`https://${domain}/`}
-            aria-invalid={!!urlErr}
-            aria-describedby={urlErr ? "rt-pm-url-help" : undefined}
-            className="h-11 min-w-0 flex-[1_1_260px] rounded-lg border border-[#E5E7EB] bg-white px-3 text-sm text-[#111827] outline-none placeholder:text-[#9CA3AF] focus:border-[#0091FF] focus:shadow-[0_0_0_3px_#0091FF1F] aria-invalid:border-[#DC2626] aria-invalid:focus:border-[#DC2626] aria-invalid:focus:shadow-[0_0_0_3px_rgba(220,38,38,.12)]"
-          />
-          <button type="submit" disabled={checking} className={cn(primaryClass, "h-11 flex-none")}>
-            {checking ? <Spinner size={15} width={2.4} /> : null}
-            {verifyLabel}
-          </button>
-        </div>
-        {urlErr ? (
-          <p
-            id="rt-pm-url-help"
-            role="alert"
-            className="m-0 text-[13px] leading-[19px] text-[#B91C1C]"
-          >
-            {urlErr}
-          </p>
-        ) : null}
-      </form>
-
-      <section
-        aria-labelledby="rt-pm-vs"
-        role="status"
-        className="flex flex-col overflow-hidden rounded-xl border bg-white"
-        style={{ borderColor: r.border }}
-      >
-        <div
-          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b px-4 py-3"
-          style={{ background: r.bg, borderColor: r.border }}
-        >
-          <h3
-            id="rt-pm-vs"
-            className="m-0 text-sm leading-5 font-semibold [overflow-wrap:anywhere]"
-            style={{ color: r.ink }}
-          >
-            {r.title}
-          </h3>
-          <span
-            className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-xs font-semibold whitespace-nowrap"
-            style={{ background: r.pillBg, color: r.pillFg }}
-          >
-            <span
-              aria-hidden="true"
-              className="size-1.5 rounded-full"
-              style={{ background: r.dot }}
-            />
-            {r.label}
-          </span>
-        </div>
-        <ul className="m-0 flex list-none flex-col px-4 py-1">
-          {checks.map((c, i) => (
-            <li
-              key={c.title}
-              className="flex items-center gap-3 border-t py-2.5"
-              style={{ borderColor: i === 0 ? "transparent" : "#EEF0F3" }}
-            >
-              <span
-                aria-hidden="true"
-                className="inline-flex size-[22px] flex-[0_0_22px] items-center justify-center rounded-full"
-                style={{ background: c.iconBg, color: c.fg }}
-              >
-                {c.icon === "ok" ? <CheckIcon size={12} width={3} /> : null}
-                {c.icon === "fail" ? <XIcon size={12} width={3} /> : null}
-                {c.icon === "warn" ? (
-                  <span className="text-[12px] leading-none font-bold">!</span>
-                ) : null}
-                {c.icon === "running" ? <Spinner size={12} width={3} /> : null}
-                {c.icon === "pending" ? (
-                  <span className="block size-1.5 rounded-full bg-current" />
-                ) : null}
-              </span>
-              <span className="flex min-w-0 flex-col gap-px">
-                <span className="text-sm leading-[19px] font-semibold text-[#111827]">
-                  {c.title}
-                </span>
-                <span className="text-[13px] leading-[19px] [overflow-wrap:anywhere] text-[#6B7280]">
-                  {c.text}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-        {tips ? (
-          <div className="flex flex-col gap-1.5 border-t border-[#FECACA] bg-[#FEF2F2] px-4 pt-3 pb-3.5">
-            <span className="text-[13px] font-semibold text-[#111827]">{tips.title}</span>
-            <ul className="m-0 flex list-disc flex-col gap-1 py-0 pr-0 pl-[18px] text-[13px] leading-[19px] text-[#374151]">
-              {tips.items.map((tip) => (
-                <li key={tip}>{tip}</li>
-              ))}
-            </ul>
-            {tips.moreFixes ? (
-              <HelpLink anchor="tracking-not-found" newTab>
-                More fixes for a missing pixel
-              </HelpLink>
-            ) : null}
-          </div>
-        ) : null}
-      </section>
-    </>
-  );
-}
-
-function Connector() {
-  return (
-    <span
-      aria-hidden="true"
-      className="absolute top-[30px] -bottom-3.5 left-3 w-0.5 rounded-sm bg-[#F3F4F6]"
-    />
-  );
-}
-
-function StepNum({ n }: { n: number }) {
-  return (
-    <span
-      aria-hidden="true"
-      className="relative z-[1] inline-flex size-[26px] flex-[0_0_26px] items-center justify-center rounded-full border-[1.5px] border-[#D1D5DB] bg-white text-[13px] font-semibold text-[#374151]"
-    >
-      {n}
-    </span>
-  );
-}
-
 interface IconProps {
   size: number;
   width: number;
@@ -684,24 +360,6 @@ function XIcon({ size, width }: IconProps) {
     >
       <path d="M18 6 6 18" />
       <path d="m6 6 12 12" />
-    </svg>
-  );
-}
-
-function Spinner({ size, width }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={width}
-      strokeLinecap="round"
-      aria-hidden="true"
-      className="animate-[spin_.8s_linear_infinite] motion-reduce:animate-none"
-    >
-      <path d="M21 12a9 9 0 1 1-6.2-8.56" />
     </svg>
   );
 }

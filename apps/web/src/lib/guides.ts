@@ -7,6 +7,7 @@
  * show. When a screen's copy or a rule changes, change it here and re-capture its screenshot.
  */
 
+import { trackSnippet } from "@/lib/events";
 import { SHOTS } from "@/lib/guide-shots";
 import { GUIDE_SLUGS, type Guide, type GuideSlug } from "@/lib/guides-types";
 import { MIN_CONVERSIONS_PER_ARM, MIN_VISITORS_PER_ARM } from "@/lib/verdict";
@@ -100,6 +101,35 @@ export const GUIDES: readonly Guide[] = [
                 text: "Click “Next: Verify installation”, enter a page URL, and click “Verify installation”.",
               },
             ],
+          },
+        ],
+      },
+      {
+        id: "tracking-gtm",
+        title: "Install with Google Tag Manager",
+        blocks: [
+          {
+            kind: "steps",
+            items: [
+              "Open the project’s tracking code and choose “Google Tag Manager”.",
+              "In Google Tag Manager, open the container for this website.",
+              "Tags → New → Tag Configuration → Custom HTML, and paste the code.",
+              "Under Triggering, choose “Initialization - All Pages”.",
+              "Save, then Submit and Publish. A saved tag isn’t live until you publish.",
+              "Back in Routely, click “Verify installation”. Your page opens in a new tab so the code can prove it runs.",
+            ],
+          },
+          {
+            kind: "note",
+            tone: "info",
+            title: "Routely doesn’t change your container",
+            text: "You add and publish the tag yourself. Routely only reads the published container to help explain what went wrong.",
+          },
+          {
+            kind: "note",
+            tone: "tip",
+            title: "Avoid a flash on redirect tests",
+            text: "Tag Manager loads after the page starts to show. For A/B and Split URL tests, also paste the anti-flicker block straight into your site’s <head>, above the Tag Manager code. It’s optional and isn’t needed to verify.",
           },
         ],
       },
@@ -247,6 +277,113 @@ export const GUIDES: readonly Guide[] = [
               "Visitors on the Control URL are sent to their variant’s URL.",
               ["Ad tags like ", { code: "utm_source" }, " are kept when visitors are redirected."],
             ],
+          },
+        ],
+      },
+    ],
+  },
+
+  {
+    slug: "custom-events",
+    title: "Custom events",
+    summary: "Track clicks, form submissions and purchases, and use them as goals.",
+    sections: [
+      {
+        id: "events-overview",
+        title: "What a custom event is",
+        blocks: [
+          {
+            kind: "p",
+            text: "An event is something a visitor does without changing page, like clicking Apply Now. It has two parts: a name you choose, and a way for Routely to detect it. A name alone tracks nothing.",
+          },
+          {
+            kind: "list",
+            items: [
+              [{ strong: "Created · Not yet detected" }, " — nothing has arrived yet. Test it."],
+              [{ strong: "Active" }, " — received in the last 7 days."],
+              [{ strong: "Inactive" }, " — nothing for 7 days or more."],
+              [{ strong: "Configuration error" }, " — Routely found a problem on your site."],
+            ],
+          },
+        ],
+      },
+      {
+        id: "events-setup",
+        title: "Set up an event",
+        blocks: [
+          {
+            kind: "steps",
+            items: [
+              "Open a project → Events → “Create event”, or start from a suggestion.",
+              "Name it, like apply_button_clicked.",
+              "Choose how to detect it.",
+              "Do the action on your site, then refresh the Events page to see it arrive.",
+            ],
+          },
+          {
+            kind: "list",
+            items: [
+              [{ strong: "Element click" }, " — pick an existing button or link. No code needed."],
+              [
+                { strong: "Form submission" },
+                " — pick the form, then say how a successful submission shows: a success page, a success message, or your form plugin.",
+              ],
+              [{ strong: "JavaScript" }, " — your developer reports the event from your site."],
+            ],
+          },
+          {
+            kind: "note",
+            tone: "warn",
+            title: "A submit isn’t always a success",
+            text: "“Form submitted” counts every submit the browser sends, including ones your server rejects, and counts nothing for forms sent with JavaScript. Use a success page or message when you can.",
+          },
+        ],
+      },
+      {
+        id: "events-code",
+        title: "Track an event with code",
+        blocks: [
+          {
+            kind: "p",
+            text: "Call this only after the action has succeeded, not when it starts:",
+          },
+          {
+            kind: "code",
+            label: "JavaScript",
+            code: trackSnippet("contact_form_submitted"),
+          },
+          {
+            kind: "p",
+            text: [
+              "Add safe details, and an ",
+              { code: "id" },
+              " so the same order can’t be counted twice:",
+            ],
+          },
+          {
+            kind: "code",
+            label: "JavaScript",
+            code: `window.routely.track("purchase_completed", { value: 150, currency: "USD" }, { id: "order_123" });`,
+          },
+          {
+            kind: "note",
+            tone: "warn",
+            title: "Keep personal data out",
+            text: "Don’t send passwords, card details, emails, phone numbers or names. Routely drops properties that look like them. Up to 10 properties, 200 characters each.",
+          },
+        ],
+      },
+      {
+        id: "events-goals",
+        title: "Use an event as a goal",
+        blocks: [
+          {
+            kind: "p",
+            text: "In either test’s Goal step, choose “Custom event” and pick from the project’s events. Test the event first, so you know it works before visitors arrive.",
+          },
+          {
+            kind: "p",
+            text: "Each visitor counts once, however many times the event happens. Results show the total as well, but the conversion rate uses converting visitors. Events from visitors outside the test appear on the Events page and never count as conversions.",
           },
         ],
       },

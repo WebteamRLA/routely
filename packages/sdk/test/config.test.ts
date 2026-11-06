@@ -155,9 +155,9 @@ describe("protocol v4", () => {
     ).toBe(false);
   });
 
-  it("requests v4 from the server", () => {
+  it("requests the current protocol from the server", () => {
     expect(configUrl("https://api.test", "rt_a b")).toBe(
-      "https://api.test/api/v1/config?siteId=rt_a%20b&v=4",
+      "https://api.test/api/v1/config?siteId=rt_a%20b&v=5",
     );
   });
 });

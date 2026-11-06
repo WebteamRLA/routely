@@ -1,10 +1,14 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type { EventType } from "@/generated/prisma/client";
 import { isSameSite, normalizeUrl, urlMatches } from "@/lib/url";
 import { db } from "@/server/db";
 import * as assignmentRepo from "@/server/repositories/assignment.repository";
 import * as conversionRepo from "@/server/repositories/conversion.repository";
+import * as customEventRepo from "@/server/repositories/custom-event.repository";
+import * as eventDefinitionRepo from "@/server/repositories/event-definition.repository";
 import * as eventRepo from "@/server/repositories/event.repository";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
 import * as pageVisitorDayRepo from "@/server/repositories/page-visitor-day.repository";
@@ -13,7 +17,9 @@ import * as visitorRepo from "@/server/repositories/visitor.repository";
 import * as websiteRepo from "@/server/repositories/website.repository";
 import * as websiteService from "@/server/services/website.service";
 import { assignVisitor } from "@/lib/balance";
+import { MAX_UNDECLARED_EVENT_NAMES } from "@/lib/events";
 import { utcDayKey } from "@/lib/utc-day";
+import { filterEventProperties, trackBatchSchema } from "@/validation/custom-event";
 import {
   assignRequestSchema,
   clampClientTimestamp,
@@ -332,6 +338,137 @@ async function recordEvent(input: {
   }
 
   await eventRepo.createEvents([input], db);
+}
+
+export interface TrackResult {
+  /** New occurrences stored. */
+  accepted: number;
+  /** Repeats of an occurrence already stored. */
+  deduplicated: number;
+  websiteId: string | null;
+  /** Experiments that received a conversion or a counted event from this batch. */
+  experimentIds: string[];
+}
+
+const NOTHING_TRACKED: TrackResult = {
+  accepted: 0,
+  deduplicated: 0,
+  websiteId: null,
+  experimentIds: [],
+};
+
+/** One occurrence's identity: `{ id }` means "this order", whatever else differs between sends. */
+function eventKey(name: string, id: string): string {
+  return createHash("sha256").update(`${name}\u0000${id}`).digest("hex");
+}
+
+/**
+ * Custom events from `POST /api/v1/track`, with the same trust rules as `ingest`:
+ *
+ *  - The **website** comes from the public site id, and an event's URL must be on its domain.
+ *  - The browser names **no experiment and no arm**. Attribution is the server's: the occurrence
+ *    counts for an experiment only when that experiment is ACTIVE, its goal is this event, and the
+ *    visitor already holds a stored assignment. So a visitor outside an experiment stays in the
+ *    Event Library and nowhere else, and no event can create a visitor or an arm.
+ *  - **Properties** are filtered again here, whatever the SDK did.
+ *  - **Repeats**: the unique `eventKey` makes a retried beacon a no-op, and a repeat is not
+ *    attributed again. A later genuine repeat has a new id, so it is a new occurrence and a new
+ *    raw count. It cannot be a second conversion: the `conversions` row is unique per assignment.
+ *  - An unconfigured name is kept, up to a limit per project, so the Library can show what arrives.
+ */
+export async function ingestCustomEvents(
+  payload: unknown,
+  now: Date = new Date(),
+): Promise<TrackResult> {
+  const parsed = trackBatchSchema.safeParse(payload);
+  if (!parsed.success) return NOTHING_TRACKED;
+
+  const { siteId, visitorId: anonymousId, events = [], issues = [] } = parsed.data;
+  const website = await websiteService.resolveWebsiteByPublicSiteId(siteId);
+  if (!website) return NOTHING_TRACKED;
+
+  const result: TrackResult = { ...NOTHING_TRACKED, websiteId: website.id, experimentIds: [] };
+  const allowed = new Map<string, boolean>();
+  let visitor: { id: string } | null | undefined;
+
+  for (const event of events) {
+    const url = normalizeUrl(event.url);
+    if (!url || !isSameSite(url, website.domain)) continue;
+
+    if (!allowed.has(event.name)) {
+      allowed.set(
+        event.name,
+        await customEventRepo.nameAllowed(website.id, event.name, MAX_UNDECLARED_EVENT_NAMES),
+      );
+    }
+    if (!allowed.get(event.name)) continue;
+
+    const occurredAt = clampClientTimestamp(event.ts, now.getTime());
+    const stored = await customEventRepo.insertCustomEvent({
+      websiteId: website.id,
+      name: event.name,
+      eventKey: eventKey(event.name, event.id),
+      anonymousId,
+      url,
+      properties: filterEventProperties(event.props),
+      occurredAt,
+    });
+    if (!stored) {
+      result.deduplicated += 1;
+      continue;
+    }
+    result.accepted += 1;
+
+    // Proof it works, so an earlier problem report no longer stands.
+    await eventDefinitionRepo.clearIssue(website.id, event.name);
+
+    const goals = await experimentRepo.listActiveExperimentsWithGoalEvent(website.id, event.name);
+    if (goals.length === 0) continue;
+
+    // Found, never created: an event must not turn a passer-by into a participant.
+    visitor ??= await visitorRepo.findVisitor(website.id, anonymousId);
+    if (!visitor) continue;
+
+    for (const experiment of goals) {
+      const assignment = await assignmentRepo.findAssignment(experiment.id, visitor.id);
+      if (!assignment) continue;
+
+      await conversionRepo.recordConversion({
+        experimentId: experiment.id,
+        visitorId: visitor.id,
+        assignmentId: assignment.id,
+        variantId: assignment.variantId,
+        url,
+        occurredAt,
+      });
+      await eventRepo.createEvents(
+        [
+          {
+            websiteId: website.id,
+            experimentId: experiment.id,
+            visitorId: visitor.id,
+            assignmentId: assignment.id,
+            // The stored arm: nothing in this request can name one.
+            variantId: assignment.variantId,
+            type: "custom",
+            url,
+            durationMs: null,
+            occurredAt,
+          },
+        ],
+        db,
+      );
+      if (!result.experimentIds.includes(experiment.id)) result.experimentIds.push(experiment.id);
+    }
+  }
+
+  for (const issue of issues) {
+    const url = normalizeUrl(issue.url);
+    if (!url || !isSameSite(url, website.domain)) continue;
+    await eventDefinitionRepo.reportIssue(website.id, issue.name, issue.code, url, now);
+  }
+
+  return result;
 }
 
 /**

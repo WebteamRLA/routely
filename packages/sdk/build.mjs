@@ -51,7 +51,7 @@ const watch = process.argv.includes("--watch");
  * the size is a product constraint rather than a nice-to-have. The build fails when it is
  * exceeded, which forces the trade-off to be made deliberately instead of drifting.
  */
-const MAX_GZIP_BYTES = 8 * 1024;
+const MAX_GZIP_BYTES = 10 * 1024;
 
 /**
  * ES2019 is the floor.

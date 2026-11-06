@@ -27,6 +27,7 @@ import { findRole } from "@/server/auth/workspace";
 import { notFound } from "@/server/errors";
 import * as assignmentRepo from "@/server/repositories/assignment.repository";
 import * as conversionRepo from "@/server/repositories/conversion.repository";
+import * as eventRepo from "@/server/repositories/event.repository";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
 import type { ExperimentWithWebsite } from "@/server/repositories/experiment.repository";
 import * as resultsRepo from "@/server/repositories/experiment-results.repository";
@@ -72,6 +73,16 @@ function shareUrl(token: string): string {
 interface ArmCounts {
   assigned: Map<string | null, number>;
   converted: Map<string | null, number>;
+  /** Raw occurrences of an event goal; absent for a page goal. */
+  customEvents?: Map<string | null, number>;
+}
+
+/** An event goal's raw occurrences per arm. A page goal has none to count. */
+async function goalEventCounts(
+  experiment: ExperimentWithWebsite,
+): Promise<Pick<ArmCounts, "customEvents">> {
+  if (experiment.goalType !== "EVENT") return {};
+  return { customEvents: await eventRepo.countCustomEventsByVariant(experiment.id) };
 }
 
 function launchedAt(experiment: ExperimentWithWebsite): Date {
@@ -86,6 +97,8 @@ function armsOf(experiment: ExperimentWithWebsite, counts: ArmCounts): ArmInput[
     trafficAllocation: 100,
   });
   const isAb = experiment.type === "AB_TEST";
+  const totalEvents = (key: string | null) =>
+    counts.customEvents ? { totalEvents: counts.customEvents.get(key) ?? 0 } : {};
 
   const control: ArmInput = {
     key: null,
@@ -97,6 +110,7 @@ function armsOf(experiment: ExperimentWithWebsite, counts: ArmCounts): ArmInput[
     changeCount: 0,
     visitors: counts.assigned.get(null) ?? 0,
     conversions: counts.converted.get(null) ?? 0,
+    ...totalEvents(null),
   };
   const variants = experiment.variants.map((variant, index): ArmInput => {
     const summaries = isAb ? changeSummaries(variant.changes) : [];
@@ -114,6 +128,7 @@ function armsOf(experiment: ExperimentWithWebsite, counts: ArmCounts): ArmInput[
       changeCount: isAb ? changeCount(variant.changes) : 0,
       visitors: counts.assigned.get(variant.id) ?? 0,
       conversions: counts.converted.get(variant.id) ?? 0,
+      ...totalEvents(variant.id),
     };
   });
   return [control, ...variants];
@@ -152,6 +167,11 @@ function resultsInput(
     status: resultStatusOf(experiment.status) as ResultsInput["status"],
     controlUrl: experiment.controlUrl ?? "",
     goalUrl: experiment.conversionUrl ?? "",
+    goal: {
+      type: experiment.goalType,
+      eventName: experiment.goalEvent?.name ?? null,
+      url: experiment.conversionUrl ?? "",
+    },
     include: experiment.trafficAllocation,
     publishedAt: published.toISOString(),
     pausedAt: experiment.pausedAt?.toISOString() ?? null,
@@ -274,32 +294,42 @@ export async function getExperimentDetail(
   const now = options.now ?? new Date();
   const timeZone = safeTimeZone(options.timeZone);
 
-  const [assigned, converted, rows, activity, tracking, createdByName, chosenByName, sheet] =
-    await Promise.all([
-      assignmentRepo.countAssignmentsByVariant(experiment.id),
-      conversionRepo.countConversionsByVariant(experiment.id),
-      analyticsService.getArmRowsByDay(
-        actorUserId,
-        seriesRange(experiment, now),
-        undefined,
-        experiment.id,
-      ),
-      resultsRepo.listActivity(actorUserId, experiment.id),
-      trackingCheckService.getExperimentTracking(actorUserId, experiment.id),
-      experiment.createdById ? resultsRepo.findDisplayName(experiment.createdById) : null,
-      experiment.winnerChosenById ? resultsRepo.findDisplayName(experiment.winnerChosenById) : null,
-      targetRepo.findTargetForWebsite(experiment.websiteId, actorUserId),
-    ]);
+  const [
+    assigned,
+    converted,
+    customEvents,
+    rows,
+    activity,
+    tracking,
+    createdByName,
+    chosenByName,
+    sheet,
+  ] = await Promise.all([
+    assignmentRepo.countAssignmentsByVariant(experiment.id),
+    conversionRepo.countConversionsByVariant(experiment.id),
+    goalEventCounts(experiment),
+    analyticsService.getArmRowsByDay(
+      actorUserId,
+      seriesRange(experiment, now),
+      undefined,
+      experiment.id,
+    ),
+    resultsRepo.listActivity(actorUserId, experiment.id),
+    trackingCheckService.getExperimentTracking(actorUserId, experiment.id),
+    experiment.createdById ? resultsRepo.findDisplayName(experiment.createdById) : null,
+    experiment.winnerChosenById ? resultsRepo.findDisplayName(experiment.winnerChosenById) : null,
+    targetRepo.findTargetForWebsite(experiment.websiteId, actorUserId),
+  ]);
 
   const resumed = [...activity].reverse().find((row) => row.type === "RESUMED");
-  const arms = armsOf(experiment, { assigned, converted });
+  const arms = armsOf(experiment, { assigned, converted, ...customEvents });
   const input = resultsInput(launched, arms, rows, resumed?.createdAt ?? null, now, chosenByName);
 
   const urlChecks: UrlCheckInput[] = tracking.map((entry) => ({
     url: entry.url,
     role: sameUrl(entry.url, experiment.controlUrl)
       ? "control"
-      : sameUrl(entry.url, experiment.conversionUrl)
+      : experiment.goalType === "URL" && sameUrl(entry.url, experiment.conversionUrl)
         ? "goal"
         : "variant",
     result: entry.check?.result ?? null,
@@ -379,13 +409,14 @@ export async function getSharedResults(
   const launched = experiment as ExperimentWithWebsite & { status: DetailStatusName };
   const now = options.now ?? new Date();
 
-  const [assigned, converted, rows, resumedAt] = await Promise.all([
+  const [assigned, converted, customEvents, rows, resumedAt] = await Promise.all([
     assignmentRepo.countAssignmentsByVariant(experiment.id),
     conversionRepo.countConversionsByVariant(experiment.id),
+    goalEventCounts(experiment),
     analyticsService.getSharedExperimentArmRowsByDay(experiment.id, seriesRange(experiment, now)),
     resultsRepo.latestResumedAt(experiment.id),
   ]);
-  const arms = armsOf(experiment, { assigned, converted });
+  const arms = armsOf(experiment, { assigned, converted, ...customEvents });
   const input = resultsInput(launched, arms, rows, resumedAt, now, null);
   return buildExperimentModel(input, null, { timeZone: safeTimeZone(options.timeZone) });
 }

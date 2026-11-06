@@ -44,6 +44,7 @@ import { rateLimit } from "@/server/http/rate-limit";
 import * as activityRepo from "@/server/repositories/activity.repository";
 import * as assignmentRepo from "@/server/repositories/assignment.repository";
 import * as conversionRepo from "@/server/repositories/conversion.repository";
+import * as eventDefinitionRepo from "@/server/repositories/event-definition.repository";
 import * as draftRepo from "@/server/repositories/experiment-draft.repository";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
 import * as websiteRepo from "@/server/repositories/website.repository";
@@ -648,6 +649,9 @@ export function toRuleExperiment(
     name: experiment.name,
     controlUrl: experiment.controlUrl,
     conversionUrl: experiment.conversionUrl,
+    goalType: experiment.goalType,
+    goalEventId: experiment.goalEventId,
+    goalEventName: experiment.goalEvent?.name ?? null,
     controlWeight: experiment.controlWeight,
     trafficAllocation: experiment.trafficAllocation,
     targetDevices: experiment.targetDevices,
@@ -704,6 +708,19 @@ export async function getWizardDraft(
   };
 }
 
+/** An id in a patch only names a row: it must be this experiment's own project's event. */
+async function assertGoalEvent(
+  goalEventId: string | null | undefined,
+  websiteId: string,
+): Promise<void> {
+  if (!goalEventId) return;
+  if (!(await eventDefinitionRepo.findInWebsite(goalEventId, websiteId))) {
+    throw validationFailed("That event isn’t part of this project.", {
+      goalEventId: ["Choose one of this project’s events."],
+    });
+  }
+}
+
 /** The experiment-level fields of a patch, as stored — plain values, valid for create and update. */
 function draftFields(
   patch: DraftPatch,
@@ -712,6 +729,8 @@ function draftFields(
   | "name"
   | "controlUrl"
   | "conversionUrl"
+  | "goalType"
+  | "goalEventId"
   | "keepQueryParams"
   | "trafficAllocation"
   | "controlWeight"
@@ -721,6 +740,8 @@ function draftFields(
     ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
     ...(patch.controlUrl !== undefined ? { controlUrl: storedUrl(patch.controlUrl) } : {}),
     ...(patch.conversionUrl !== undefined ? { conversionUrl: storedUrl(patch.conversionUrl) } : {}),
+    ...(patch.goalType !== undefined ? { goalType: patch.goalType } : {}),
+    ...(patch.goalEventId !== undefined ? { goalEventId: patch.goalEventId } : {}),
     ...(patch.keepQueryParams !== undefined ? { keepQueryParams: patch.keepQueryParams } : {}),
     ...(patch.trafficAllocation !== undefined
       ? { trafficAllocation: patch.trafficAllocation }
@@ -826,6 +847,7 @@ export async function createDraft(
   if (!can(access.role, "experiment.edit")) throw forbidden();
 
   const { variants, ...rest } = patch;
+  await assertGoalEvent(rest.goalEventId, access.website.id);
 
   const result = await db.$transaction(async (tx) => {
     const experiment = await draftRepo.createDraftExperiment(
@@ -888,6 +910,7 @@ export async function saveDraft(
   const patch = parseOrThrow(draftPatchSchema, patchInput ?? {}, "Check the experiment setup.");
   const { variants, ...rest } = patch;
   const now = new Date();
+  await assertGoalEvent(rest.goalEventId, existing.websiteId);
 
   const mapping = await db.$transaction(async (tx) => {
     const written = await draftRepo.updateExperimentWhere(

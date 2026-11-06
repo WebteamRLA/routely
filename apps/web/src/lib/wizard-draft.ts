@@ -7,6 +7,7 @@
  * its autosave patches with it.
  */
 
+import type { EventMethodName, EventStatus } from "@/lib/events";
 import { formatClockTime, formatMonthDay } from "@/lib/experiment-time";
 import {
   type DeviceTypeName,
@@ -32,6 +33,69 @@ export interface WizardCtx {
   baseline: number | null;
   /** A Viewer: the draft is shown, nothing is saved or launched. */
   readOnly: boolean;
+  /** The project's Event Library, for the goal step. Absent in the design's `?view=` states. */
+  events?: readonly WizardEvent[];
+}
+
+/** One Event Library row the goal step can offer. Undeclared names have no id and aren't offered. */
+export interface WizardEvent {
+  id: string;
+  name: string;
+  method: EventMethodName | null;
+  status: EventStatus;
+}
+
+export function wizardEvents(
+  events: readonly {
+    id: string | null;
+    name: string;
+    method: EventMethodName | null;
+    status: EventStatus;
+  }[],
+): WizardEvent[] {
+  return events.flatMap(({ id, name, method, status }) =>
+    id === null ? [] : [{ id, name, method, status }],
+  );
+}
+
+export type GoalTypeName = "URL" | "EVENT";
+
+/** The goal fields both wizards' forms carry beside `goalUrl`. */
+export interface GoalFields {
+  goalType: GoalTypeName;
+  /** The chosen event. Kept while the goal is a page, so switching back doesn't lose it. */
+  goalEventId: string | null;
+  goalEventName: string | null;
+}
+
+/** Every form starts here, the design's `?view=` states included. */
+export const URL_GOAL: GoalFields = { goalType: "URL", goalEventId: null, goalEventName: null };
+
+/** Step 4's lead-in when the goal is an event; a page goal keeps the step's own. */
+export const EVENT_GOAL_DESC =
+  "Pick the event that counts as a conversion. Routely compares how often visitors to each version complete it.";
+
+export function goalFromDraft(row: {
+  goalType?: GoalTypeName;
+  goalEventId?: string | null;
+  goalEvent?: { name: string } | null;
+}): GoalFields {
+  if (row.goalType !== "EVENT") return URL_GOAL;
+  return {
+    goalType: "EVENT",
+    goalEventId: row.goalEventId ?? null,
+    goalEventName: row.goalEvent?.name ?? null,
+  };
+}
+
+/** The goal's share of an autosave patch. A page goal stores no event, so it can't hold one. */
+export function goalPatch(f: GoalFields): Pick<GoalFields, "goalType" | "goalEventId"> {
+  return { goalType: f.goalType, goalEventId: f.goalType === "EVENT" ? f.goalEventId : null };
+}
+
+/** `Event: signup_completed`, wherever a review or summary would show the goal page. */
+export function eventGoalLabel(f: Pick<GoalFields, "goalEventName">): string {
+  return f.goalEventName ? `Event: ${f.goalEventName}` : "No event chosen yet";
 }
 
 /** A device-flags record, as both wizards hold targeting. */

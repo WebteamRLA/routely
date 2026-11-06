@@ -253,6 +253,59 @@ export function selectorFor(el: Element, doc: Document): string | null {
   }
 }
 
+/** What a click on `start` is really a click on: the control around it, for event tracking. */
+const CLICKABLE = "a,button,input,select,summary,label,[role=button],[role=link],[onclick]";
+
+/** Attributes teams keep stable on purpose, or that describe what an element is for. */
+const STABLE_ATTRS = [
+  "data-testid",
+  "data-test",
+  "data-cy",
+  "data-qa",
+  "data-track",
+  "name",
+  "aria-label",
+];
+
+/** A class a build tool generated, which the next deploy will rename. */
+const GENERATED_CLASS = /^(css|jsx|sc|svelte|emotion)-|__|[0-9a-f]{5,}|\d{3,}/i;
+
+/**
+ * A selector for tracking `el`, chosen to outlive page edits: an id, then a purposeful attribute,
+ * then where a link goes or a form posts, then hand-written classes, and a position only as a last
+ * resort. Each candidate must match exactly this element on this page.
+ */
+export function trackSelectorFor(el: Element, doc: Document): string | null {
+  const tag = tagOf(el);
+  const quoted = (value: string) => '"' + value.replace(/["\\]/g, "\\$&") + '"';
+  const candidates: string[] = [];
+
+  const id = stableId(el, doc);
+  if (id) candidates.push(id);
+  for (const attr of STABLE_ATTRS) {
+    const value = el.getAttribute(attr);
+    if (value && value.length <= 80) candidates.push(tag + "[" + attr + "=" + quoted(value) + "]");
+  }
+  for (const attr of tag === "form" ? ["action"] : tag === "a" ? ["href"] : []) {
+    const value = el.getAttribute(attr);
+    if (value && value.length <= 120 && !value.startsWith("#")) {
+      candidates.push(tag + "[" + attr + "=" + quoted(value) + "]");
+    }
+  }
+  const classes = Array.from(el.classList).filter((name) => !GENERATED_CLASS.test(name));
+  if (classes.length > 0) candidates.push(tag + "." + classes.slice(0, 3).map(esc).join("."));
+
+  for (const candidate of candidates) {
+    try {
+      const found = doc.querySelectorAll(candidate);
+      if (found.length === 1 && found[0] === el) return candidate;
+    } catch {
+      // Not a valid selector here; try the next.
+    }
+  }
+  return selectorFor(el, doc);
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* Descriptors                                                                                 */
 /* ------------------------------------------------------------------------------------------ */
@@ -439,6 +492,8 @@ export function startAgent(win: Win = window as Win): boolean {
   };
 
   let mode: "edit" | "preview" = "edit";
+  /** Set by `routely:pick`: hovering and clicking resolve to a click target or a form. */
+  let picking: "click" | "form" | null = null;
   let hovered: Element | null = null;
   let selected: Element | null = null;
   const shots = new Map<Element, Snapshot>();
@@ -451,10 +506,23 @@ export function startAgent(win: Win = window as Win): boolean {
     place(selectBox, selected);
   };
 
+  const resolve = (start: Element | null) => {
+    if (!picking || !start) return pick(start);
+    const el = start.closest(picking === "form" ? "form" : CLICKABLE);
+    if (el) return { el, kind: kindOf(el) };
+    return picking === "form" ? null : pick(start);
+  };
+
+  const described = (el: Element, kind: ElementKind) => {
+    const element = describe(el, kind, win);
+    if (!element || !picking) return element;
+    return { ...element, trackSelector: trackSelectorFor(el, doc) ?? element.selector };
+  };
+
   const onMove = (event: Event) => {
     try {
       if (mode !== "edit") return;
-      const found = pick(event.target as Element | null);
+      const found = resolve(event.target as Element | null);
       const el = found && !isOurs(found.el) ? found.el : null;
       if (el === hovered) return;
       hovered = el;
@@ -462,7 +530,7 @@ export function startAgent(win: Win = window as Win): boolean {
       post({
         type: "routely:hover",
         token: ctx.token,
-        element: found && el ? describe(el, found.kind, win) : null,
+        element: found && el ? described(el, found.kind) : null,
       });
     } catch {
       // Never into the page.
@@ -483,9 +551,9 @@ export function startAgent(win: Win = window as Win): boolean {
       event.stopPropagation();
       event.stopImmediatePropagation();
       if (mode !== "edit" || event.type !== "click") return;
-      const found = pick(event.target as Element | null);
+      const found = resolve(event.target as Element | null);
       if (!found || isOurs(found.el)) return;
-      const element = describe(found.el, found.kind, win);
+      const element = described(found.el, found.kind);
       if (!element) return;
       selected = found.el;
       redraw();
@@ -543,11 +611,13 @@ export function startAgent(win: Win = window as Win): boolean {
         mode = data.mode;
         if (mode === "preview") hovered = null;
         redraw();
+      } else if (data.type === "routely:pick") {
+        picking = data.target === "form" ? "form" : "click";
       } else if (data.type === "routely:highlight") {
         highlight(typeof data.selector === "string" ? data.selector : null);
       } else if (data.type === "routely:select-parent" && mode === "edit" && selected) {
         const up = ancestors(selected)[Math.floor(Number(data.depth)) - 1];
-        const element = up ? describe(up, kindOf(up), win) : null;
+        const element = up ? described(up, kindOf(up)) : null;
         if (up && element) {
           selected = up;
           redraw();

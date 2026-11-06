@@ -4,6 +4,7 @@ import type {
   DeviceType,
   ExperimentStatus,
   ExperimentType,
+  GoalType,
   MemberRole,
   Prisma,
   SiteProtocol,
@@ -214,6 +215,9 @@ export interface ProjectExperimentRecord {
   status: ExperimentStatus;
   controlUrl: string | null;
   conversionUrl: string | null;
+  goalType: GoalType;
+  goalEventId: string | null;
+  goalEvent: { name: string } | null;
   controlWeight: number;
   trafficAllocation: number;
   targetDevices: DeviceType[];
@@ -250,6 +254,9 @@ export function listProjectExperiments(
       status: true,
       controlUrl: true,
       conversionUrl: true,
+      goalType: true,
+      goalEventId: true,
+      goalEvent: { select: { name: true } },
       controlWeight: true,
       trafficAllocation: true,
       targetDevices: true,

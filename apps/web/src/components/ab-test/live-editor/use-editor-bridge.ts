@@ -32,6 +32,9 @@ import {
  * this screen. Only if that does not answer either (the site refused Routely's server, say) does it
  * offer the popup — framing rules do not apply there, so a page that does not answer in the popup
  * has no snippet, and only then does the editor say "not installed".
+ *
+ * The Event Library's element picker opens the same session for a page with no experiment behind it
+ * by passing `sessionRequest` instead of `ensureDraft`. Everything after step 1 is shared.
  */
 
 /** `proxy`: the same frame, loading the page through Routely's proxy (a site that refuses framing). */
@@ -89,14 +92,27 @@ export interface BridgeHandlers {
   onApplied(results: boolean[]): void;
 }
 
+/** What `POST /api/editor/token` is asked to open. */
+export type EditorSessionRequest =
+  { experimentId: string } | { websiteId: string; pageUrl: string };
+
+/** Where the session comes from: the wizard's draft, or a request the caller already has. */
+type SessionSource =
+  | {
+      /** Flushes the autosave; resolves to the draft id, or null when it could not be saved. */
+      ensureDraft(): Promise<string | null>;
+      sessionRequest?: undefined;
+    }
+  | { ensureDraft?: undefined; sessionRequest: EditorSessionRequest };
+
 type ApiFailure = { error?: { message?: string } };
 
-async function requestSession(experimentId: string): Promise<EditorSession | string> {
+async function requestSession(request: EditorSessionRequest): Promise<EditorSession | string> {
   try {
     const res = await fetch("/api/editor/token", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ experimentId }),
+      body: JSON.stringify(request),
       credentials: "same-origin",
       cache: "no-store",
     });
@@ -114,14 +130,13 @@ async function requestSession(experimentId: string): Promise<EditorSession | str
 export function useEditorBridge({
   enabled,
   ensureDraft,
+  sessionRequest,
   handlers,
 }: {
   /** False for a Viewer: nothing is requested and nothing is opened. */
   enabled: boolean;
-  /** Flushes the autosave; resolves to the draft id, or null when it could not be saved. */
-  ensureDraft(): Promise<string | null>;
   handlers: BridgeHandlers;
-}) {
+} & SessionSource) {
   const [state, setState] = useState<BridgeState>({ kind: "starting" });
   const [session, setSession] = useState<EditorSession | null>(null);
   /** Bumped per attempt, to remount the frame. */
@@ -136,12 +151,14 @@ export function useEditorBridge({
   const stateRef = useRef<BridgeState>(state);
   const handlersRef = useRef(handlers);
   const ensureRef = useRef(ensureDraft);
+  const requestRef = useRef(sessionRequest);
   const runRef = useRef(0);
   const timers = useRef<{ wait?: number; agent?: number; closed?: number }>({});
 
   useEffect(() => {
     handlersRef.current = handlers;
     ensureRef.current = ensureDraft;
+    requestRef.current = sessionRequest;
   });
 
   const go = useCallback((next: BridgeState) => {
@@ -192,17 +209,21 @@ export function useEditorBridge({
     setVia("frame");
     go({ kind: "starting" });
 
-    const draftId = await ensureRef.current();
-    if (run !== runRef.current) return;
-    if (!draftId) {
-      go({
-        kind: "failed",
-        message: "We couldn’t save your draft. Check your connection and try again.",
-      });
-      return;
+    let request = requestRef.current;
+    if (!request) {
+      const draftId = (await ensureRef.current?.()) ?? null;
+      if (run !== runRef.current) return;
+      if (!draftId) {
+        go({
+          kind: "failed",
+          message: "We couldn’t save your draft. Check your connection and try again.",
+        });
+        return;
+      }
+      request = { experimentId: draftId };
     }
 
-    const result = await requestSession(draftId);
+    const result = await requestSession(request);
     if (run !== runRef.current) return;
     if (typeof result === "string") {
       go({ kind: "failed", message: result });

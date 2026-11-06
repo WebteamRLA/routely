@@ -34,9 +34,7 @@ export function conversionKey(experimentId: string): string {
  * deserves its own conversion for the visitors it actually bucketed.
  */
 export function findGoalMatches(href: string, experiments: ExperimentConfig[]): ExperimentConfig[] {
-  return experiments.filter((experiment) =>
-    urlMatches(href, experiment.goal.url, experiment.goal.match),
-  );
+  return experiments.filter(({ goal }) => goal !== null && urlMatches(href, goal.url, goal.match));
 }
 
 /**

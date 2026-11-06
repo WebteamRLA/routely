@@ -14,6 +14,7 @@ import { actorMembershipSelect, experimentAccess } from "@/server/repositories/a
 
 const VARIANTS_INCLUDE = {
   variants: { orderBy: { position: "asc" as const } },
+  goalEvent: { select: { id: true, name: true } },
 } satisfies Prisma.ExperimentInclude;
 
 export type ExperimentWithVariants = Prisma.ExperimentGetPayload<{
@@ -83,6 +84,18 @@ export function listActiveExperiments(
     where: { websiteId, status: "ACTIVE" },
     orderBy: { createdAt: "asc" },
     include: VARIANTS_INCLUDE,
+  });
+}
+
+/** Running experiments that count this event as a conversion. */
+export function listActiveExperimentsWithGoalEvent(
+  websiteId: string,
+  eventName: string,
+  client: DbClient = db,
+): Promise<{ id: string }[]> {
+  return client.experiment.findMany({
+    where: { websiteId, status: "ACTIVE", goalType: "EVENT", goalEvent: { name: eventName } },
+    select: { id: true },
   });
 }
 

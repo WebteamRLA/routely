@@ -21,6 +21,7 @@ const MATRIX: Record<Capability, [boolean, boolean, boolean, boolean]> = {
   "experiment.edit": [true, true, true, false],
   "share.manage": [true, true, true, false],
   "project.manage": [true, true, false, false],
+  "events.manage": [true, true, true, false],
   "pixel.verify": [true, true, true, false],
   "sheets.manage": [true, true, false, false],
   "sheets.sync": [true, true, true, false],

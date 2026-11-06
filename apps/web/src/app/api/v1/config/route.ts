@@ -7,7 +7,13 @@ import type {
   ExperimentVariantConfig,
   VisualChange,
 } from "@routely/sdk/contract";
-import { LEGACY_PROTOCOL_VERSION, SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
+import {
+  LEGACY_PROTOCOL_VERSION,
+  PREVIOUS_PROTOCOL_VERSION,
+  SDK_PROTOCOL_VERSION,
+} from "@routely/sdk/contract";
+import { toEventTrigger } from "@/lib/events";
+import * as eventDefinitionRepo from "@/server/repositories/event-definition.repository";
 import * as experimentRepo from "@/server/repositories/experiment.repository";
 import type { ExperimentWithVariants } from "@/server/repositories/experiment.repository";
 import * as websiteService from "@/server/services/website.service";
@@ -16,12 +22,13 @@ import { configRequestSchema } from "@/validation/tracking";
 /**
  * Public experiment configuration for the tracking SDK.
  *
- *   GET /api/v1/config?siteId=rt_…&v=4
+ *   GET /api/v1/config?siteId=rt_…&v=5
  *
- * `v=4` (what the current SDK sends) gets the v4 document: every ACTIVE experiment with its
- * `kind`, `devices`, `keepParams` and, for A/B tests, the visual `changes`. Anything else — an
- * installed v3 bundle sends no `v` — gets the v3 document, which omits A/B tests and
- * device-targeted experiments that an old bundle would mis-serve.
+ * `v=5` (what the current SDK sends) gets every ACTIVE experiment with its `kind`, `devices`,
+ * `keepParams` and, for A/B tests, the visual `changes`, plus the project's event triggers. `v=4`
+ * gets the same without triggers or event-goal experiments, which that bundle cannot report.
+ * Anything else — an installed v3 bundle sends no `v` — gets the v3 document, which also omits A/B
+ * tests and device-targeted experiments that an old bundle would mis-serve.
  *
  * Unauthenticated by necessity — it is called by a script running on a visitor's browser on
  * the customer's own site — and therefore deliberately narrow. It exposes exactly what the
@@ -88,7 +95,11 @@ export async function GET(request: NextRequest) {
 
   const { siteId } = parsed.data;
   const version =
-    parsed.data.v >= SDK_PROTOCOL_VERSION ? SDK_PROTOCOL_VERSION : LEGACY_PROTOCOL_VERSION;
+    parsed.data.v >= SDK_PROTOCOL_VERSION
+      ? SDK_PROTOCOL_VERSION
+      : parsed.data.v === PREVIOUS_PROTOCOL_VERSION
+        ? PREVIOUS_PROTOCOL_VERSION
+        : LEGACY_PROTOCOL_VERSION;
 
   const website = await websiteService.resolveWebsiteByPublicSiteId(siteId);
 
@@ -96,7 +107,12 @@ export async function GET(request: NextRequest) {
   // website leaves its snippet installed on pages nobody will update, and those pages should
   // quietly do nothing instead of logging an error on every view. The SDK's behaviour is the
   // same either way: no experiments, no redirect.
-  const experiments = website ? await experimentRepo.listActiveExperiments(website.id) : [];
+  const [experiments, definitions] = website
+    ? await Promise.all([
+        experimentRepo.listActiveExperiments(website.id),
+        version === SDK_PROTOCOL_VERSION ? eventDefinitionRepo.listTriggers(website.id) : [],
+      ])
+    : [[], []];
 
   const body: ConfigResponse = {
     v: version,
@@ -106,8 +122,13 @@ export async function GET(request: NextRequest) {
       const config = toExperimentConfig(experiment);
       if (!config) return [];
       if (version === SDK_PROTOCOL_VERSION) return [config];
+      if (config.goal === null) return [];
+      if (version === PREVIOUS_PROTOCOL_VERSION) return [config];
       return toLegacyConfig(config);
     }),
+    ...(version === SDK_PROTOCOL_VERSION
+      ? { events: definitions.flatMap((definition) => toEventTrigger(definition) ?? []) }
+      : {}),
   };
 
   // The document differs by `v`, which is part of the URL — so the cache key already separates
@@ -144,7 +165,10 @@ const SET_KEYS = [
  */
 function toExperimentConfig(experiment: ExperimentWithVariants): ExperimentConfig | null {
   const { controlUrl, conversionUrl } = experiment;
-  if (controlUrl === null || conversionUrl === null) return null;
+  const eventGoal = experiment.goalType === "EVENT";
+  if (controlUrl === null || (eventGoal ? !experiment.goalEventId : conversionUrl === null)) {
+    return null;
+  }
 
   const kind = experiment.type === "AB_TEST" ? "ab_test" : "split_url";
 
@@ -176,7 +200,7 @@ function toExperimentConfig(experiment: ExperimentWithVariants): ExperimentConfi
     control: { url: controlUrl, match: experiment.controlMatchType },
     controlWeight: experiment.controlWeight,
     variants,
-    goal: { url: conversionUrl, match: experiment.conversionMatchType },
+    goal: eventGoal ? null : { url: conversionUrl!, match: experiment.conversionMatchType },
     trafficAllocation: experiment.trafficAllocation,
   };
 }

@@ -472,6 +472,19 @@ export function ProjectDashboardView({
                 <span>
                   Created {project.created} by {project.by}
                 </span>
+                <span
+                  aria-hidden
+                  className="size-[3px] flex-[0_0_3px] rounded-full bg-[#9CA3AF] max-[641px]:hidden"
+                />
+                <Link
+                  href={routes.projects.events(project.id)}
+                  className={cn(
+                    "font-medium text-[#0060AD] no-underline hover:underline",
+                    focusRing,
+                  )}
+                >
+                  Events
+                </Link>
               </p>
             </div>
           </div>

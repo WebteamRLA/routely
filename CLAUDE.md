@@ -98,6 +98,8 @@ routely/
 │       │   ├── ab-test/      A/B wizard; visual-editor.tsx + live-editor/ (frame/popup bridge)
 │       │   ├── split-url/  wizard-draft/   Split URL wizard; shared draft autosave hook
 │       │   ├── settings/  integrations-catalog/   Settings tabs + invite dialog; /integrations
+│       │   ├── install/      GTM steps, method tabs, browser install check (both pixel dialogs)
+│       │   ├── events/       Event Library, Create/Edit flow, element picker
 │       │   └── experiments/ metrics/ get-started/ websites/ integrations/
 │       │                     pre-design components. Only integrations/google-picker.ts is still
 │       │                     imported (by the Sheets dialog); the rest render nowhere now
@@ -112,17 +114,19 @@ routely/
 │       │   ├── repositories/ one per table group; access.ts holds the tenant filters (§5)
 │       │   ├── services/     account, team, website, project, dashboard, project-dashboard,
 │       │   │                 experiment, experiment-results, visual-editor, ingest, analytics,
-│       │   │                 tracking-check, pixel, notification, sheets-sync, google-oauth,
-│       │   │                 google-sheets (+ pre-design overview, metrics)
+│       │   │                 tracking-check, pixel, install-verification, custom-event,
+│       │   │                 notification, sheets-sync, google-oauth, google-sheets
+│       │   │                 (+ pre-design overview, metrics)
 │       │   ├── actions/      Server Actions: account, team, website, experiment, integration,
-│       │   │                 share, pixel (+ pre-design metrics), types
+│       │   │                 share, pixel, event, install (+ pre-design metrics), types, result
 │       │   ├── http/         rate-limit, bot-filter, safe-fetch (SSRF-guarded GET), viewer-time-zone
 │       │   ├── crypto.ts     configured AES-GCM wrapper (pure cipher in lib/secret-box.ts)
 │       │   └── editor-token.ts  configured wrapper for lib/editor-token.ts
 │       ├── validation/       Zod: common, account, website, experiment, visual-change, editor,
-│       │                     integration, tracking
+│       │                     integration, tracking, custom-event
 │       ├── lib/              pure modules — routes, url, permissions, verdict, launch-rules,
 │       │                     experiment-time, visitors, pixel-status, notifications, password,
+│       │                     gtm, install-verification, events,
 │       │                     editor-protocol, google-oauth-state, sheets-card … and mock/ (§4)
 │       ├── generated/prisma/ Prisma client output — GITIGNORED, regenerated on build
 │       └── proxy.ts          Next 16's renamed middleware (optimistic auth check only)
@@ -133,7 +137,8 @@ routely/
 ├── infra/
 │   ├── docker-compose.dev.yml    Postgres only (the app runs on the host)
 │   └── nginx/conf.d/             app.conf, cdn.conf — production reference configs
-└── docs/                     ARCHITECTURE, DATABASE, AUTH, SDK-DEPLOYMENT, INTEGRATIONS, DEPLOY-VERCEL
+└── docs/                     ARCHITECTURE, DATABASE, AUTH, SDK-DEPLOYMENT, INTEGRATIONS, DEPLOY-VERCEL,
+                              CUSTOM-EVENTS (GTM install check + custom events)
 ```
 
 **Read the docs in `docs/` before large changes.** They carry the reasoning, not just the
@@ -156,6 +161,7 @@ must be labelled as such wherever it appears.
 | `/settings/email/confirm` | — | **Route handler.** Spends an email-change link, 303 → `/settings?emailChanged=`. Needs no session — `proxy.ts` lets it through |
 | `/dashboard` | `(app)` | Workspace overview: 3 stat cards + projects with sparklines |
 | `/projects`, `/projects/[projectId]` | `(app)` | Project list; project dashboard (tracking pixel, Sheets card, experiments) |
+| `/projects/[projectId]/events` | `(app)` | The project's Event Library: create/edit events, element picker, status from what actually arrived |
 | `/experiments`, `/experiments/[experimentId]` | `(app)` | Experiment list; results & review. A DRAFT detail redirects to its wizard |
 | `/experiments/new/ab-test`, `/experiments/new/split-url` | `(app)` | The two wizards. `?project=<id>` starts a draft, `?id=<draftId>` resumes one (`routes.experiments.wizard`) |
 | `/help` | `(app)` | Help & Guides (2026-10-27): every guide in `lib/guides.ts` on one scrolling page, short numbered steps and a few screenshots, plus the workspace's Getting started progress. `/help/[guide]` only redirects to its first section |
@@ -166,13 +172,15 @@ must be labelled as such wherever it appears.
 | `/api/integrations/google/start` | — | **POST only.** Mints signed state (`workspaceId`, `returnTo`), redirects to Google |
 | `/api/integrations/google/callback` | — | Verifies state, exchanges the code, stores the workspace's grant |
 | `/api/favicon/[websiteId]` | — | **Session required**, members only (404 otherwise). The project's favicon for its tile: homepage `<link rel=icon>` via `safeFetch`, bitmaps only (no SVG — script-capable on our origin), type sniffed from bytes, `nosniff` + `sandbox` CSP |
-| `/api/editor/token` | — | **POST, JSON only, session required.** Issues a 30-min visual editor token |
+| `/api/editor/token` | — | **POST, JSON only, session required.** Issues a 30-min visual editor token; `{websiteId, pageUrl}` issues one for the event picker |
 | `/api/cron/sheets-sync` | — | Daily 00:20 UTC. Requires `Authorization: Bearer $CRON_SECRET` |
 | `/api/cron/notifications` | — | Daily 00:40 UTC: result-ready backstop, tracking-stopped alerts, visitor-day retention. Same bearer rule |
-| `/api/v1/config` | — | **Public.** Active experiments for a site id (`?v=4`; v3 document for older bundles) |
+| `/api/v1/config` | — | **Public.** Active experiments and event triggers for a site id (`?v=5`; v4 and v3 documents for older bundles) |
 | `/api/v1/assign` | — | **Public.** A new visitor's arm, chosen and recorded by the server (balanced allocation, §6) |
 | `/api/v1/events` | — | **Public.** Event ingestion (accepts `v` 3 or 4) |
 | `/api/v1/hit` | — | **Public.** Site-wide page hit — tracking status, daily visitors, page baselines |
+| `/api/v1/track` | — | **Public.** Custom events and selector problems. Attribution is the server's |
+| `/api/v1/verify` | — | **Public, token required.** The SDK's answer to an install check |
 
 **Every screen is wired to real data.** The design prototype (github.com/RaihanSoft/routely-design-main,
 one bundled `index.html`) was first implemented frontend-only on `src/lib/mock/*`; the backend work
@@ -432,7 +440,9 @@ These constraints carry the product's guarantees. **Do not weaken them.**
 | `websites (workspaceId, domain)` unique, and `websites_ws_name_ci` on `(workspaceId, lower(name))` | One project per domain, and project names unique case-insensitively, per workspace |
 | `website_visitor_days` PK `(websiteId, day, anonymousId)`, `page_visitor_days` PK `(websiteId, urlKey, day, anonymousId)` | A browser counts once per site (and per page) per UTC day; inserts are `ON CONFLICT DO NOTHING` |
 | `tracking_checks (websiteId, urlKey)` unique | One latest snippet check per URL; a changed URL has a new key, so a stale check cannot vouch for it |
-| `*.tokenHash` unique (invites, password resets, email changes) | Tokens are looked up by SHA-256 only; the raw token exists only in the emailed link |
+| `event_definitions (websiteId, name)` unique | One definition per event name per project |
+| `custom_events (websiteId, eventKey)` unique | A retried beacon, a second SDK or a repeated `{ id }` stores one occurrence |
+| `*.tokenHash` unique (invites, password resets, email changes, install checks) | Tokens are looked up by SHA-256 only; the raw token exists only in the emailed link |
 
 The four partial / expression indexes cannot be written in `schema.prisma`; they are hand-written
 at the end of `migrations/20261019120000_workspaces_and_new_design/migration.sql`, and nothing in
@@ -443,7 +453,7 @@ and RESULT_READY ones against the live database.
 
 **Compare-and-set latches** (`resultReadyAt`, `trackingAlertSentAt`, `errorNotifiedAt`,
 `WebsiteSheetTarget.refreshedAt`, `Website.lastSeenAt`, `Session.lastSeenAt`,
-`Membership.lastActiveAt`) are written with the value read in the `where` clause. Do not turn any
+`Membership.lastActiveAt`, `InstallVerification.loadedAt`/`readyAt`) are written with the value read in the `where` clause. Do not turn any
 of them into a read-then-write.
 
 Enum values: `ExperimentStatus` (DRAFT/ACTIVE/PAUSED/COMPLETED — `ARCHIVED` was renamed in place to
@@ -509,6 +519,9 @@ Application-level rules enforced in `experiment.service.ts`:
   request could invent a visitor, choose their arm, and convert them.
 - **A site-wide hit** (`recordHit`) writes only visitor-day rows and `Website.lastSeenAt`, never a
   `Visitor`, and is dropped when its URL is not on the website's domain.
+- **A custom event names no experiment and no arm.** `ingestCustomEvents` finds the ACTIVE experiments
+  whose goal is that event and the visitor's stored assignment in each. No assignment, no conversion,
+  and an event can never create a `Visitor` or an arm. See `docs/CUSTOM-EVENTS.md`.
 - **Device targeting is not verifiable server-side.** The SDK decides it in the browser and never
   reports an untargeted visitor; ingestion has nothing to check it against.
 
@@ -517,9 +530,11 @@ Application-level rules enforced in `experiment.service.ts`:
 ## 7. The SDK
 
 `packages/sdk` — vanilla TypeScript, **zero runtime dependencies**, one IIFE bundle.
-Currently **7.63 kB gzipped (20.94 kB raw) against an 8 kB budget the build enforces** (it exits
-non-zero if exceeded; `npm run sdk:build`, 2026-10-22). The budget was 6 kB until the user raised it
-for v4 (decision D3). Installation is two script tags — an inline anti-flickering block and the
+Currently **9.68 kB gzipped (26.68 kB raw) against a 10 kB budget the build enforces** (it exits
+non-zero if exceeded; `npm run sdk:build`, 2026-11-05). The budget was 6 kB until the user raised it
+for v4 (decision D3), then 8 kB. It went to 10 kB on 2026-11-05 for custom events and the install
+check, because the bundle had 16 bytes left. **That rise was flagged to the user, not asked of them:
+confirm it before treating it as settled.** Installation is two script tags — an inline anti-flickering block and the
 tracking tag — pasted into `<head>`. The same pair works on every platform, which is what makes it
 framework-independent:
 
@@ -550,7 +565,9 @@ carry a synchronous tag, which still works.
 | `dedupe.ts` | Page-view guard against repeated SDK initialisation |
 | `cloak.ts` | Calls `window.__routelyReveal` — the overlay itself lives in the install snippet |
 | `config.ts` / `transport.ts` / `track.ts` | Fetch + cache config (`?v=4`); timeouts; `sendBeacon` |
-| `index.ts` | Options, boot sequence, orchestration |
+| `events.ts` | `routely.track`, click and form triggers (one listener each), offline queue, selector checks |
+| `verify.ts` | Reports to an install check opened with `#_rt_verify=<token>` |
+| `index.ts` | Options, boot sequence, orchestration. A second copy on a page stands down |
 
 ### Protocol v4
 
@@ -570,6 +587,19 @@ snippet's own timeout still bounds it. None of the redirect loop guards apply to
 The **site-wide hit** (`POST /api/v1/hit`, `text/plain` via `sendBeacon`) is sent on every page
 carrying the snippet, independently of the config request, so a site with nothing running still
 shows as tracked.
+
+### Protocol v5 and the install check
+
+v5 lets `goal` be `null` (an event goal) and adds `events`, the triggers the SDK listens for. A v4 or
+v3 caller gets a document with no event-goal experiments: those visitors are not entered, rather than
+entered and unable to convert.
+
+**A server fetch cannot see a tag GTM injects, so only the SDK can verify an install.** The dashboard
+opens the page in the customer's own browser with `#_rt_verify=<token>`, the SDK reports to
+`/api/v1/verify`, and the dashboard polls. The server's look at the HTML and the published
+`gtm.js?id=GTM-…` only explains failures. Ordinary site-wide hits deliberately do not verify: any
+visitor on any page could send one. Status rules are in `lib/install-verification.ts`, the reasoning
+in `docs/CUSTOM-EVENTS.md`. The Project ID the SDK runs as is `siteIds[0]`.
 
 ### The visual editor bridge, and the agent that is not written yet
 
@@ -746,8 +776,8 @@ duplicate `DATABASE_URL` line, so the local one *looked* right while the second 
 which aimed a command that drops every table at production data. `db:deploy` is deliberately
 **not** guarded: that is how Vercel applies migrations during `vercel-build`.
 
-Tests: **720** — 192 in the SDK (15 files), 528 in the app (45 files), counted by running both
-suites on 2026-10-22. Both run under Vitest in a Node environment. (Earlier revisions said 129 and
+Tests: **972** — 241 in the SDK (16 files), 731 in the app (61 files), counted by running both
+suites on 2026-11-05. Both run under Vitest in a Node environment. (Earlier revisions said 129 and
 then 264; recount rather than trusting this figure.)
 
 Email locally: leave `RESEND_API_KEY` unset and every email — verification, reset, invite,
@@ -957,6 +987,12 @@ Working:
 - **Crons** — Sheets refresh (00:20 UTC) and notifications (00:40 UTC: result-ready backstop,
   tracking-stopped alerts, 400-day retention of the visitor-day tables).
 - **Demo seed** of the design's workspace (§8).
+- **Google Tag Manager install** (2026-11-05) — Manual and GTM tabs in both pixel dialogs, and a
+  browser-run check for both, with nine statuses and specific guidance (`docs/CUSTOM-EVENTS.md`).
+  Routely never signs in to GTM or changes a container.
+- **Custom events** (2026-11-05) — project Event Library; click, form and JavaScript tracking; real
+  element picker on the editor bridge (frame, then proxy); `window.routely.track()`; events as goals
+  in both wizards, on the existing conversion and verdict path.
 - **Onboarding and help** (2026-10-27) — a Dashboard "Getting started" checklist read from real
   state (`lib/onboarding.ts`: project → tracking → Google Sheets → experiment — user request. Sheets
   is optional, has "Skip" (a per-browser cookie) and is left out when the integration isn't
@@ -970,7 +1006,7 @@ Working:
   wizards' `?view=` states: **re-capture one when its screen changes.** The live visual editor has
   no screenshot (it needs a real public page carrying the snippet).
 
-**Not built:** workspace rename, ownership
+**Not built:** retention for `custom_events` · workspace rename, ownership
 transfer, leaving a workspace and deleting an account (`workspace.manage` exists in the matrix with
 no action behind it) · the production Docker Compose
 stack and Dockerfile (only `docker-compose.dev.yml` and reference Nginx configs exist) · click /
@@ -995,6 +1031,9 @@ Known limitations are listed at the end of each `docs/*.md`. The most significan
   COOP cannot be edited at all (unverified against a real site).
 - **Google name and picture are null** on the Sheets card: the grant's scopes (`openid`,
   `userinfo.email`, `drive.file`) do not include `profile`, so the UI falls back to the email.
+- **The GTM check has only run against a stand-in container**, not a real published one, and the form
+  plugin events only against simulated events. Neither was tried on real WordPress, Shopify or React
+  sites. See `docs/CUSTOM-EVENTS.md`.
 - **Conversions are per-origin** — the assignment lives in `localStorage`, so a goal page on a
   different origin from where the visitor was assigned will not convert
 - **Redirect flicker is bounded, not eliminated** — the pasted anti-flickering script lifts

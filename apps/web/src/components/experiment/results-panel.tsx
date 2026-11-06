@@ -44,6 +44,8 @@ export function ResultsPanel({
       : recommendedName
         ? `End and keep ${recommendedName}`
         : null;
+  const eventGoal = m.goal.type === "EVENT";
+  const eventsLabel = `Total ${m.goal.eventName ?? "goal"} events`;
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const hover = chartHover(m.chart, hoverIdx);
 
@@ -214,8 +216,14 @@ export function ResultsPanel({
           >
             <span role="columnheader">Version</span>
             <span role="columnheader">Visitors</span>
-            <span role="columnheader">Traffic share</span>
-            <span role="columnheader">Conversions</span>
+            {eventGoal ? (
+              <span role="columnheader" className="[overflow-wrap:anywhere]">
+                {eventsLabel}
+              </span>
+            ) : (
+              <span role="columnheader">Traffic share</span>
+            )}
+            <span role="columnheader">{eventGoal ? "Converting visitors" : "Conversions"}</span>
             <span role="columnheader">Conversion rate</span>
             <span role="columnheader">Lift vs Control</span>
             <span role="columnheader">Chance to beat Control</span>
@@ -254,14 +262,33 @@ export function ResultsPanel({
                 </span>
               </div>
               <NumCell area="vis" label="Visitors" value={r.vis} />
-              <NumCell area="share" label="Traffic share" value={r.share} plain />
-              <NumCell area="conv" label="Conversions" value={r.conv} />
+              {eventGoal ? (
+                <NumCell area="share" label={eventsLabel} value={r.events} />
+              ) : (
+                <NumCell area="share" label="Traffic share" value={r.share} plain />
+              )}
+              <NumCell
+                area="conv"
+                label={eventGoal ? "Converting visitors" : "Conversions"}
+                value={r.conv}
+              />
               <NumCell area="rate" label="Conv. rate" value={r.rate} />
-              <NumCell area="lift" label="Lift" value={r.lift} color={r.liftFg} />
+              <NumCell
+                area="lift"
+                label="Lift"
+                value={r.lift}
+                color={r.liftFg}
+                note={eventGoal ? r.diff : null}
+              />
               <NumCell area="chance" label="Chance to beat" value={r.chance} color={r.chanceFg} />
             </div>
           ))}
         </div>
+        {m.eventNote ? (
+          <p className="m-0 border-t border-[#EEF0F3] px-5 py-3 text-[13px] leading-[19px] text-pretty text-[#6B7280]">
+            {m.eventNote}
+          </p>
+        ) : null}
         {m.notProof ? (
           <p className="m-0 border-t border-[#EEF0F3] px-5 py-3 text-[13px] leading-[19px] text-pretty text-[#6B7280]">
             {m.notProof}
@@ -413,7 +440,9 @@ export function ResultsPanel({
             <p className="m-0 max-w-[340px] text-[13px] leading-[19px] text-[#4B5563]">
               {m.chart.waiting === "second-day"
                 ? "Each line shows a version’s conversion rate day by day, so it needs at least two days of data. The numbers above are up to date."
-                : "This chart fills in as visitors see your versions and reach the goal page."}
+                : eventGoal
+                  ? "This chart fills in as visitors see your versions and complete the goal event."
+                  : "This chart fills in as visitors see your versions and reach the goal page."}
             </p>
           </div>
         )}
@@ -461,6 +490,7 @@ function NumCell({
   value,
   color = "#111827",
   plain = false,
+  note = null,
 }: {
   area: keyof typeof AREAS;
   label: string;
@@ -468,6 +498,8 @@ function NumCell({
   color?: string;
   /** Traffic share is set in regular weight and a softer grey. */
   plain?: boolean;
+  /** A smaller line under the value. */
+  note?: string | null;
 }) {
   return (
     <div role="cell" className={cn("flex flex-col gap-0.5 text-right", AREAS[area])}>
@@ -478,6 +510,7 @@ function NumCell({
       >
         {value}
       </span>
+      {note ? <span className="text-xs leading-4 text-[#6B7280] tabular-nums">{note}</span> : null}
     </div>
   );
 }

@@ -4,6 +4,8 @@ import type { ElementDescriptor } from "@routely/sdk/contract";
 
 import {
   EDITOR_MAX_CHANGES,
+  EDITOR_MAX_TRACK_SELECTOR,
+  appMessage,
   editChange,
   initMessage,
   isEditorImageUrl,
@@ -15,6 +17,7 @@ import {
   toHexColor,
   toWireChanges,
 } from "@/lib/editor-protocol";
+import { SELECTOR_MAX } from "@/validation/custom-event";
 import {
   MAX_CHANGES_PER_VARIANT,
   visualChangeSchema,
@@ -116,6 +119,48 @@ describe("accepting a message", () => {
 
   it("answers with the session token", () => {
     expect(initMessage(token)).toEqual({ type: "routely:init", v: 1, token });
+  });
+});
+
+describe("the event picker", () => {
+  const form: ElementDescriptor = {
+    selector: "body > form:nth-of-type(1)",
+    kind: "block",
+    label: "Form",
+    fingerprint: { tag: "form" },
+    current: {},
+    textEditable: false,
+    trackSelector: "#signup",
+  };
+
+  it("asks the page to pick, addressed with the session token", () => {
+    expect(appMessage(token, { type: "routely:pick", target: "form" })).toEqual({
+      type: "routely:pick",
+      target: "form",
+      token,
+    });
+  });
+
+  it("passes the selector to save through a select and a hover", () => {
+    expect(readDescriptor(form)?.trackSelector).toBe("#signup");
+    const select = readPageMessage({ type: "routely:select", token, element: form }, token);
+    expect(select).toMatchObject({ element: { trackSelector: "#signup" } });
+    const hover = readPageMessage({ type: "routely:hover", token, element: form }, token);
+    expect(hover).toMatchObject({ element: { trackSelector: "#signup" } });
+  });
+
+  it("drops one it cannot save whole, and anything that isn't a selector", () => {
+    const at = (trackSelector: unknown) => readDescriptor({ ...form, trackSelector });
+    expect(EDITOR_MAX_TRACK_SELECTOR).toBe(SELECTOR_MAX);
+    const longest = "x".repeat(EDITOR_MAX_TRACK_SELECTOR);
+    expect(at(longest)?.trackSelector).toBe(longest);
+    // Never shortened: a cut-off selector names a different element, or none.
+    expect(at(longest + "x")).not.toHaveProperty("trackSelector");
+    expect(at(7)).not.toHaveProperty("trackSelector");
+    expect(at("   ")).not.toHaveProperty("trackSelector");
+    // The rest of the descriptor survives; the visual editor never sends one at all.
+    expect(at(longest + "x")?.selector).toBe(form.selector);
+    expect(readDescriptor(heading)).not.toHaveProperty("trackSelector");
   });
 });
 

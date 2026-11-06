@@ -201,6 +201,9 @@ export const draftPatchSchema = z.strictObject({
   name: draftNameSchema.optional(),
   controlUrl: draftUrlSchema.nullable().optional(),
   conversionUrl: draftUrlSchema.nullable().optional(),
+  goalType: z.enum(["URL", "EVENT"]).optional(),
+  /** A project event; the service checks it is this experiment's project's. */
+  goalEventId: idSchema.nullable().optional(),
   keepQueryParams: z.boolean().optional(),
   trafficAllocation: draftPercentSchema.optional(),
   controlWeight: draftPercentSchema.optional(),

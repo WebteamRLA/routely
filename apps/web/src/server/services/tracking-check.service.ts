@@ -61,14 +61,12 @@ export interface CheckOptions {
 
 /** The URLs a launch depends on, in display order, de-duplicated by normalised key. */
 export function experimentTrackingUrls(experiment: ExperimentWithVariants): string[] {
+  // An event goal has no goal page: the event reports itself from wherever it happens.
+  const goalUrl = experiment.goalType === "EVENT" ? null : experiment.conversionUrl;
   const candidates =
     experiment.type === "AB_TEST"
-      ? [experiment.controlUrl, experiment.conversionUrl]
-      : [
-          experiment.controlUrl,
-          ...experiment.variants.map((variant) => variant.url),
-          experiment.conversionUrl,
-        ];
+      ? [experiment.controlUrl, goalUrl]
+      : [experiment.controlUrl, ...experiment.variants.map((variant) => variant.url), goalUrl];
 
   const seen = new Set<string>();
   const urls: string[] = [];

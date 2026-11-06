@@ -88,6 +88,7 @@ function setup({
     visibilityState: "visible",
     cookie: "",
     querySelector: (selector: string) => (selector === "#hero" ? hero : null),
+    querySelectorAll: () => [],
     addEventListener: vi.fn(),
   });
   vi.stubGlobal("navigator", {
@@ -122,7 +123,7 @@ describe("boot", () => {
 
     expect(sentTo(page.beacons, "/api/v1/events")).toHaveLength(1);
     expect(sentTo(page.beacons, "/api/v1/hit")).toHaveLength(1);
-    expect(String(page.fetchMock.mock.calls[0]![0])).toContain("&v=4");
+    expect(String(page.fetchMock.mock.calls[0]![0])).toContain("&v=5");
   });
 
   it("leaves an A/B control visitor's page untouched and reveals at once", async () => {
@@ -234,6 +235,75 @@ describe("boot", () => {
     expect(sentTo(page.beacons, "/api/v1/events")).toHaveLength(0);
     expect(page.reveal).toHaveBeenCalled();
     expect(page.localStorage.getItem(assignmentKey(AB.id))).toBeNull();
+  });
+
+  describe("install verification", () => {
+    const VERIFY = `${PAGE}#_rt_verify=${"t".repeat(43)}`;
+    const signals = (beacons: { url: string; body: Blob }[]) =>
+      Promise.all(
+        sentTo(beacons, "/api/v1/verify").map(async (b) => JSON.parse(await b.body.text())),
+      );
+
+    it("reports loaded then ready, runs no experiment, and reveals the page", async () => {
+      const page = setup({ href: VERIFY });
+      const opener = { postMessage: vi.fn() };
+      (window as unknown as { opener: unknown }).opener = opener;
+
+      await boot();
+
+      const stages = await signals(page.beacons);
+      expect(stages.map((s) => s.stage)).toEqual(["loaded", "ready"]);
+      expect(stages[1]).toMatchObject({ siteIds: ["rt_abc"], url: PAGE });
+      expect(page.assignCalls()).toBe(0);
+      expect(sentTo(page.beacons, "/api/v1/events")).toHaveLength(0);
+      expect(page.hero.textContent).toBe("Original heading");
+      expect(page.reveal).toHaveBeenCalled();
+      // The window that opened the page hears the same stages, with no token in them.
+      expect(opener.postMessage).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(opener.postMessage.mock.calls)).not.toContain("ttt");
+    });
+
+    it("reports failed when the configuration cannot load", async () => {
+      const page = setup({ href: VERIFY });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ ok: false, json: async () => null })),
+      );
+      await boot();
+      const stages = await signals(page.beacons);
+      expect(stages.map((s) => [s.stage, s.reason])).toEqual([
+        ["loaded", undefined],
+        ["failed", "config"],
+      ]);
+    });
+
+    it("ignores the fragment's absence: an ordinary visit sends no signal", async () => {
+      const page = setup();
+      await boot();
+      expect(sentTo(page.beacons, "/api/v1/verify")).toHaveLength(0);
+    });
+  });
+
+  it("exposes track before the configuration answers, and drains a page's queued calls", async () => {
+    const page = setup({ experiments: [] });
+    (window as unknown as { routely: unknown }).routely = {
+      q: [["early_event", { plan: "pro" }]],
+    };
+    const pending = boot();
+    expect(typeof window.routely?.track).toBe("function");
+    await pending;
+    const sent = sentTo(page.beacons, "/api/v1/track");
+    expect(sent).toHaveLength(1);
+    expect(await sent[0]!.body.text()).toContain("early_event");
+    expect(window.routely?.ready).toBe(true);
+  });
+
+  it("stands down when a copy of the SDK is already running on the page", async () => {
+    const page = setup();
+    await boot();
+    const beacons = page.beacons.length;
+    expect(await boot()).toBeNull();
+    expect(page.beacons).toHaveLength(beacons);
   });
 
   it("does not ask for an arm for a visitor opening a variant page directly", async () => {

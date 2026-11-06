@@ -5,6 +5,7 @@ import {
   type ResultsInput,
   type ReviewInput,
   buildExperimentModel,
+  EVENT_UNIQUE_NOTE,
   buildResultsModel,
   chartHover,
   joinAnd,
@@ -551,5 +552,91 @@ describe("winner selection", () => {
     );
     expect(live.verdict.nextStep).toBeNull();
     expect(live.rows[1]!.bestLabel).toBe("Likely winner");
+  });
+});
+
+describe("event goals", () => {
+  const goal = { type: "EVENT", eventName: "signup_completed", url: "" } as const;
+  const arms = (control: number, variant: number) => [
+    arm("Control", 2000, control, { totalEvents: control * 3 }),
+    arm("Variant A", 2000, variant, { totalEvents: variant * 2 }),
+  ];
+
+  it("names the event, and counts occurrences apart from converting visitors", () => {
+    const m = buildResultsModel(input({ goal, goalUrl: "", arms: arms(200, 300) }));
+    expect(m.goalLabel).toBe("Custom event · signup_completed");
+    expect(m.eventNote).toBe(EVENT_UNIQUE_NOTE);
+    expect(m.tiles[1]).toEqual({
+      label: "Converting visitors",
+      value: "500",
+      sub: "1,200 events in total",
+    });
+    expect(m.rows.map((r) => [r.events, r.conv, r.rate])).toEqual([
+      ["600", "200", "10.00%"],
+      ["600", "300", "15.00%"],
+    ]);
+    expect(m.rows[0]!.diff).toBeNull();
+    expect(m.rows[1]!.diff).toBe("+5.0 pts vs control");
+  });
+
+  it("rates visitors, not occurrences: repeats change nothing but the total", () => {
+    const repeated = [
+      arm("Control", 2000, 200, { totalEvents: 90_000 }),
+      arm("Variant A", 2000, 300, { totalEvents: 300 }),
+    ];
+    const plain = buildResultsModel(
+      input({ arms: [arm("Control", 2000, 200), arm("Variant A", 2000, 300)] }),
+    );
+    const m = buildResultsModel(input({ goal, goalUrl: "", arms: repeated }));
+    expect(m.rows.map((r) => [r.rate, r.lift, r.chance])).toEqual(
+      plain.rows.map((r) => [r.rate, r.lift, r.chance]),
+    );
+    expect(m.verdict).toEqual(plain.verdict);
+  });
+
+  it("keeps the gate and the note: many events from few visitors name nothing", () => {
+    const m = buildResultsModel(
+      input({
+        goal,
+        goalUrl: "",
+        arms: [
+          arm("Control", 2000, 90, { totalEvents: 50_000 }),
+          arm("Variant A", 2000, 99, { totalEvents: 50_000 }),
+        ],
+      }),
+    );
+    expect(m.rows.some((r) => r.isBest)).toBe(false);
+    expect(m.notProof).toBe(NOT_PROOF_NOTE);
+  });
+
+  it("describes the event on the Review tab, not a page", () => {
+    const r = buildExperimentModel(
+      input({ goal, goalUrl: "", arms: arms(200, 300) }),
+      review(),
+    ).review!;
+    const check = r.checks.find((c) => c.key === "goal")!;
+    expect(check.title).toBe("Goal event is set");
+    expect(check.text).toBe("Custom event · signup_completed.");
+    expect(r.config.rows.find((x) => x.label === "Goal")!.value).toBe(
+      "Custom event · signup_completed",
+    );
+    expect(r.glance[1]).toEqual({
+      label: "Converting visitors",
+      value: "500",
+      sub: "Each counted once",
+    });
+  });
+
+  it("reads a page goal the same whether or not the field is passed", () => {
+    const args = { arms: [arm("Control", 2000, 200), arm("Variant A", 2000, 300)] };
+    const url = "https://fernwoodsupply.com/collections/all";
+    const without = buildResultsModel(input(args));
+    const withGoal = buildResultsModel(
+      input({ ...args, goal: { type: "URL", eventName: null, url } }),
+    );
+    expect(withGoal).toEqual(without);
+    expect(without.goalLabel).toBe("Page view · fernwoodsupply.com/collections/all");
+    expect(without.eventNote).toBeNull();
+    expect(without.tiles[1]!.label).toBe("Conversions");
   });
 });

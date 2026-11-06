@@ -34,6 +34,12 @@ export interface LaunchRuleExperiment {
   name: string;
   controlUrl: string | null;
   conversionUrl: string | null;
+  /** Absent reads as URL: every row and form from before event goals. */
+  goalType?: "URL" | "EVENT";
+  /** The project event, when `goalType` is EVENT. */
+  goalEventId?: string | null;
+  /** Its name, for summaries. */
+  goalEventName?: string | null;
   /** Integer share of included traffic; null or NaN when not a number yet. */
   controlWeight: number | null;
   /** 1–100; null or NaN when not a number yet. */
@@ -67,7 +73,7 @@ export type LaunchStep = 1 | 2 | 3 | 4;
 /**
  * One problem. `field` names what it is about:
  * `name` · `controlUrl` · `variants.<id>.name` · `variants.<id>.url` · `variants.<id>.changes` ·
- * `trafficAllocation` · `split` · `devices` · `conversionUrl`.
+ * `trafficAllocation` · `split` · `devices` · `conversionUrl` · `goalEventId`.
  */
 export interface LaunchIssue {
   step: LaunchStep;
@@ -325,10 +331,14 @@ export function setupIssues(exp: LaunchRuleExperiment, ctx: LaunchRuleContext): 
     add(3, "devices", "Choose at least one device type.");
   }
 
-  // Step 4 — goal.
+  // Step 4 — goal. An event goal needs an event and no page: it is reported from wherever it
+  // happens. Whether it has been detected yet is a warning in the wizard, never a launch rule.
+  const eventGoal = exp.goalType === "EVENT";
   const goal = (exp.conversionUrl ?? "").trim();
   const goalKey = pageKey(goal);
-  if (!goal) {
+  if (eventGoal) {
+    if (!exp.goalEventId) add(4, "goalEventId", "Choose the event that counts as a conversion.");
+  } else if (!goal) {
     add(4, "conversionUrl", "Enter the page that counts as a conversion.");
   } else if (!goalKey) {
     add(
@@ -416,8 +426,10 @@ export interface LaunchSummary {
   include: number;
   /** "All visitors" / "Desktop and tablet". */
   targeting: string;
-  /** Goal page without scheme. */
+  /** Goal page without scheme, or the event's name when `goalType` is EVENT. */
   goal: string;
+  /** Absent for a page goal. */
+  goalType?: "URL" | "EVENT";
   /** [name, meta, "50%"] per arm, Control first. Meta: "Original page" / "2 saved changes" for
    * an A/B test; the page without scheme for a Split URL test. */
   arms: [string, string, string][];
@@ -465,7 +477,8 @@ export function launchSummary(exp: LaunchRuleExperiment): LaunchSummary {
     page: shortUrl(exp.controlUrl),
     include: asInt(exp.trafficAllocation) ?? 0,
     targeting: targetingSummary(exp.targetDevices, "sentence"),
-    goal: shortUrl(exp.conversionUrl),
+    goal: exp.goalType === "EVENT" ? (exp.goalEventName ?? "") : shortUrl(exp.conversionUrl),
+    ...(exp.goalType === "EVENT" ? { goalType: "EVENT" as const } : {}),
     arms,
     changes,
   };

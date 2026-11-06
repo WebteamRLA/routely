@@ -34,6 +34,8 @@ export const EDITOR_MAX_CHANGES = 50;
 export const EDITOR_MAX_TEXT = 2_000;
 export const EDITOR_MAX_ALT = 500;
 export const EDITOR_MAX_SRC = 2_048;
+/** Same cap as `SELECTOR_MAX` (`validation/custom-event.ts`; a test pins the two). */
+export const EDITOR_MAX_TRACK_SELECTOR = 500;
 
 const KINDS: ReadonlySet<string> = new Set(["heading", "text", "button", "image", "block"]);
 /** The style values an element reports and a change can set, besides text and image fields. */
@@ -155,6 +157,15 @@ export function readDescriptor(value: unknown): ElementDescriptor | null {
       .slice(0, 5)
       .map((crumb) => (typeof crumb === "string" ? crumb.slice(0, 40) : ""))
       .filter(Boolean);
+  }
+  // Dropped rather than shortened, for the reason above: this one gets saved.
+  const { trackSelector } = value;
+  if (
+    typeof trackSelector === "string" &&
+    trackSelector.trim() !== "" &&
+    trackSelector.length <= EDITOR_MAX_TRACK_SELECTOR
+  ) {
+    out.trackSelector = trackSelector;
   }
   return out;
 }

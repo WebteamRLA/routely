@@ -31,7 +31,9 @@ import {
   type SplitState,
 } from "@/lib/mock/split-url";
 import { cn } from "@/lib/utils";
+import { EVENT_GOAL_DESC, type WizardEvent } from "@/lib/wizard-draft";
 
+import { CUSTOM_EVENT_HINT, EventGoalFields, GoalTypeOption } from "./goal-fields";
 import type { Derived } from "./model";
 import {
   BangIcon,
@@ -39,6 +41,7 @@ import {
   Chip,
   CodeIcon,
   DesktopIcon,
+  EventIcon,
   ExternalIcon,
   FieldError,
   FieldWarning,
@@ -53,6 +56,7 @@ import {
 
 export interface WizardAct {
   setForm(patch: Partial<SplitForm> | ((f: SplitForm) => Partial<SplitForm>)): void;
+  setEvents(events: readonly WizardEvent[]): void;
   goStep(n: number): void;
   next(): void;
   back(): void;
@@ -148,7 +152,9 @@ export function Wizard({ s, d, act }: Props) {
             >
               {cur.title}
             </h2>
-            <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">{cur.desc}</p>
+            <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">
+              {step === 4 && s.form.goalType === "EVENT" ? EVENT_GOAL_DESC : cur.desc}
+            </p>
             <HelpLink
               anchor={step === 5 ? "launch" : step === 1 ? "split-urls" : "split-create"}
               newTab
@@ -768,41 +774,52 @@ function StepTargeting({ s, d, act }: Props) {
 function StepGoal({ s, d, act }: Props) {
   const f = s.form;
   const showUrl = !!s.attempted[4] && !!d.errs[4].url;
+  const eventGoal = f.goalType === "EVENT";
+  const showEvent = !!s.attempted[4] && !!d.errs[4].event;
   return (
     <>
       <fieldset className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
         <legend className="mb-3 p-0 text-[14px] leading-5 font-semibold text-[#111827]">
           Goal type
         </legend>
-        <label
-          className="flex cursor-pointer items-start gap-3 rounded-[12px] border-[1.5px] border-solid p-4"
-          style={{ borderColor: ACCENT_LINE, background: ACCENT_WASH }}
+        <GoalTypeOption
+          checked={!eventGoal}
+          onSelect={() => act.setForm({ goalType: "URL" })}
+          icon={<VisitIcon />}
+          title="Page visit"
         >
-          <input
-            type="radio"
-            name="rt-goaltype"
-            checked
-            onChange={() => {}}
-            className="m-0 mt-px size-[18px] flex-none"
-            style={{ accentColor: ACCENT }}
-          />
-          <span
-            aria-hidden
-            className="inline-flex size-8 flex-none items-center justify-center rounded-[8px] border bg-white"
-            style={{ color: ACCENT_INK, borderColor: ACCENT_LINE }}
-          >
-            <VisitIcon />
-          </span>
-          <span className="flex min-w-0 flex-col gap-1">
-            <span className="text-[14px] font-semibold text-[#111827]">Page visit</span>
-            <span className="text-[13px] leading-[19px] text-[#6B7280]">
-              A conversion counts when a visitor from any version reaches a specific page, such as
-              an order confirmation.
-            </span>
-          </span>
-        </label>
+          A conversion counts when a visitor from any version reaches a specific page, such as an
+          order confirmation.
+        </GoalTypeOption>
+        <GoalTypeOption
+          checked={eventGoal}
+          onSelect={() => act.setForm({ goalType: "EVENT" })}
+          icon={<EventIcon />}
+          title="Custom event"
+        >
+          {CUSTOM_EVENT_HINT}
+        </GoalTypeOption>
       </fieldset>
 
+      {eventGoal ? (
+        <EventGoalFields
+          ctx={s.ctx}
+          selectedId={f.goalEventId}
+          onSelect={(ev) => act.setForm({ goalEventId: ev.id, goalEventName: ev.name })}
+          onEvents={act.setEvents}
+          error={showEvent ? <FieldError>{d.errs[4].event}</FieldError> : null}
+        />
+      ) : (
+        <PageGoalFields s={s} act={act} showUrl={showUrl} d={d} />
+      )}
+    </>
+  );
+}
+
+function PageGoalFields({ s, d, act, showUrl }: Props & { showUrl: boolean }) {
+  const f = s.form;
+  return (
+    <>
       <div className="flex flex-col gap-1.5">
         <label htmlFor="rt-gu" className="text-[13px] font-medium text-[#374151]">
           Conversion URL
@@ -937,7 +954,7 @@ function StepReview({ s, d, act }: Props) {
           </div>
           <div className="flex min-w-0 flex-[2_1_280px] flex-col gap-1.5">
             {head("Goal", 4)}
-            <span className="text-[14px] text-[#374151]">Page visit</span>
+            <span className="text-[14px] text-[#374151]">{d.goalKind}</span>
             <span className="truncate text-[13px] text-[#4B5563]">{d.goalUrlText}</span>
           </div>
         </div>
@@ -989,8 +1006,9 @@ function StepReview({ s, d, act }: Props) {
           </span>
         </div>
         <p className="m-0 text-[13px] leading-[19px] text-pretty text-[#6B7280]">
-          The Routely snippet must be on every page in this experiment so visitors can be redirected
-          and conversions counted.
+          {f.goalType === "EVENT"
+            ? "The Routely snippet must be on every page in this experiment so visitors can be redirected, and wherever your event happens so it can be counted."
+            : "The Routely snippet must be on every page in this experiment so visitors can be redirected and conversions counted."}
         </p>
 
         {tr.status !== "error" ? (
@@ -1300,14 +1318,23 @@ function Summary({ s, d, act }: Props) {
       <section aria-label="Goal" className={cn(section, "gap-1.5 pb-5")}>
         {head("Goal", 4, "Edit goal")}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[14px] leading-5 font-semibold text-[#374151]">Page visit</span>
+          <span className="text-[14px] leading-5 font-semibold text-[#374151]">{d.goalKind}</span>
         </div>
-        <span
-          className="text-[14px] leading-5 [overflow-wrap:anywhere]"
-          style={{ color: f.goalUrl.trim() ? "#4B5563" : "#6B7280" }}
-        >
-          {f.goalUrl.trim() ? shortUrl(f.goalUrl) : "Conversion URL not set yet"}
-        </span>
+        {f.goalType === "EVENT" ? (
+          <span
+            className="text-[14px] leading-5 [overflow-wrap:anywhere]"
+            style={{ color: f.goalEventId ? "#4B5563" : "#6B7280" }}
+          >
+            {d.goalUrlText}
+          </span>
+        ) : (
+          <span
+            className="text-[14px] leading-5 [overflow-wrap:anywhere]"
+            style={{ color: f.goalUrl.trim() ? "#4B5563" : "#6B7280" }}
+          >
+            {f.goalUrl.trim() ? shortUrl(f.goalUrl) : "Conversion URL not set yet"}
+          </span>
+        )}
       </section>
     </aside>
   );

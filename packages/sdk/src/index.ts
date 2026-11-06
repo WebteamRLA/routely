@@ -37,6 +37,7 @@ import { revealPage } from "./cloak";
 import { claimConversion, findGoalMatches } from "./conversion";
 import { loadConfig } from "./config";
 import { claimPageView } from "./dedupe";
+import { type EventContext, flushQueue, startTriggers, trackEvent } from "./events";
 import {
   type EngagementTimer,
   MIN_FLUSH_MS,
@@ -55,6 +56,7 @@ import { decide, findExperimentForUrl, markLanded, performRedirect } from "./red
 import { sendConversion, sendPageEvents, sendTimeOnPage } from "./track";
 import { DEFAULT_TIMEOUT_MS } from "./transport";
 import { normalizeUrl, readHandoff, stripHandoff } from "./url";
+import { SDK_VERSION, pageSiteIds, readVerifyToken, reportVerify } from "./verify";
 
 export * from "./contract";
 export { resolveIdentity, isValidVisitorId } from "./identity";
@@ -67,8 +69,10 @@ export { claimPageView } from "./dedupe";
 export { revealPage } from "./cloak";
 export { createEngagementTimer, attachEngagement } from "./engagement";
 export { findGoalMatches, claimConversion } from "./conversion";
+export { startTriggers, trackEvent, safeProperties } from "./events";
+export { readVerifyToken } from "./verify";
 
-export const SDK_VERSION = "0.1.0";
+export { SDK_VERSION };
 
 /** Replaced at build time by esbuild's `define`. */
 declare const __ROUTELY_API_BASE__: string;
@@ -87,6 +91,19 @@ export interface RoutelyOptions {
 
 /** What `boot()` resolves to. Exposed on `window.routely` for debugging an installation. */
 export interface RoutelyState {
+  /** Set the moment this bundle starts, so a second copy on the page stands down. */
+  isLoaded: true;
+  /** True once the configuration has been dealt with. */
+  ready: boolean;
+  /**
+   * Reports a custom event. Call it only after the action has really happened.
+   *
+   *   window.routely.track("purchase_completed", { value: 150, currency: "USD" }, { id: "order_42" });
+   *
+   * `{ id }` makes the occurrence idempotent: the same id is counted once, however often it is sent.
+   * Returns false for an invalid name. Never throws.
+   */
+  track: (name: string, properties?: Record<string, unknown>, options?: { id?: string }) => boolean;
   version: string;
   protocol: number;
   siteId: string;
@@ -111,9 +128,15 @@ export interface RoutelyState {
   conversions: string[];
 }
 
+/** What a page may have set before the SDK arrived: a stub that queues `track` calls. */
+interface RoutelyStub {
+  isLoaded?: boolean;
+  q?: ArrayLike<unknown>[];
+}
+
 declare global {
   interface Window {
-    routely?: RoutelyState;
+    routely?: (RoutelyState | RoutelyStub) & Partial<RoutelyState>;
   }
 }
 
@@ -158,8 +181,17 @@ export function findScript(): HTMLScriptElement | null {
  * rendering while the configuration request is in flight.
  */
 export async function boot(): Promise<RoutelyState | null> {
+  // A second copy on one page — pasted by hand and added through a tag manager, say. The first one
+  // owns the page; running again would double every listener.
+  if (window.routely?.isLoaded) return null;
+
+  const verifyToken = readVerifyToken(window.location.href);
+
   const options = readOptions(findScript());
-  if (!options) return null;
+  if (!options) {
+    if (verifyToken) reportVerify(__ROUTELY_API_BASE__, verifyToken, "failed", [], "no_site_id");
+    return null;
+  }
 
   const log = options.debug
     ? // eslint-disable-next-line no-console
@@ -173,6 +205,11 @@ export async function boot(): Promise<RoutelyState | null> {
   if (editToken && startEditorBridge(editToken, options.apiBase)) {
     log("visual editor mode");
     revealPage();
+    return null;
+  }
+
+  if (verifyToken) {
+    await runVerification(options, verifyToken);
     return null;
   }
 
@@ -196,22 +233,42 @@ export async function boot(): Promise<RoutelyState | null> {
   // snippet is installed.
   const pending = loadConfig(options.apiBase, options.siteId, options.timeoutMs);
   sendHit(options.apiBase, options.siteId, identity.id, href);
-  const config = await pending;
 
-  const state: RoutelyState = {
+  // `track` exists from here on, before the configuration answers: it needs only the site and the
+  // visitor, and a page's own code may call it at any moment.
+  const context: EventContext = {
+    apiBase: options.apiBase,
+    siteId: options.siteId,
+    visitorId: identity.id,
+  };
+  const queued = window.routely?.q;
+  const state: RoutelyState = Object.assign(window.routely ?? {}, {
+    isLoaded: true as const,
+    ready: false,
+    track: (name: string, properties?: Record<string, unknown>, opts?: { id?: string }) =>
+      trackEvent(context, name, properties, opts),
     version: SDK_VERSION,
     protocol: SDK_PROTOCOL_VERSION,
     siteId: options.siteId,
     visitorId: identity.id,
     identitySource: identity.source,
-    experiments: config?.experiments ?? [],
-    degraded: config === null,
+    experiments: [] as ConfigResponse["experiments"],
+    degraded: false,
     assignment: null,
     action: "none",
     device: currentDevice(),
     reported: false,
-    conversions: [],
-  };
+    conversions: [] as string[],
+  });
+  window.routely = state;
+  flushQueue(context);
+  for (const call of Array.from(queued ?? [])) {
+    state.track(...(Array.from(call) as Parameters<RoutelyState["track"]>));
+  }
+
+  const config = await pending;
+  state.experiments = config?.experiments ?? [];
+  state.degraded = config === null;
 
   const publish = () => {
     // Every path out of `boot` funnels through here, so one call covers them all. The single
@@ -221,7 +278,7 @@ export async function boot(): Promise<RoutelyState | null> {
     // An A/B variant is the other: its overlay lifts when its changes are in place.
     if (state.action !== "redirect" && state.action !== "apply") revealPage();
 
-    if (typeof window !== "undefined") window.routely = state;
+    state.ready = true;
     return state;
   };
 
@@ -231,6 +288,8 @@ export async function boot(): Promise<RoutelyState | null> {
   }
 
   log(`${state.experiments.length} active experiment(s)`);
+
+  startTriggers(context, config?.events ?? [], href);
 
   const stores = resolveAssignmentStores();
 
@@ -276,14 +335,14 @@ export async function boot(): Promise<RoutelyState | null> {
     return publish();
   }
 
-  const context = { visitorId: identity.id };
+  const visitor = { visitorId: identity.id };
   const included = (experiment: ExperimentConfig) =>
     resolveInclusion(experiment.id, experiment.trafficAllocation, stores).included;
 
   // Every loop guard and the inclusion gate run before an arm is asked for, so a visitor who is
   // skipped anyway never takes a place in the split. Only then is the arm resolved — stored, or
   // the server's — and the decision made again with it.
-  let decision = decide(href, [experiment], () => null, context, included);
+  let decision = decide(href, [experiment], () => null, visitor, included);
   if (decision && decision.action === "stay") {
     const variantId = await obtainAssignment(experiment.id, stores, ask(experiment.id));
     if (variantId === undefined) {
@@ -291,7 +350,7 @@ export async function boot(): Promise<RoutelyState | null> {
       state.action = "skip";
       return publish();
     }
-    decision = decide(href, [experiment], () => variantId, context, included);
+    decision = decide(href, [experiment], () => variantId, visitor, included);
   }
 
   if (!decision) {
@@ -340,6 +399,33 @@ export async function boot(): Promise<RoutelyState | null> {
   log(`staying on the control page (${decision.variantId ?? "control"})`);
   trackEngagement(options, state, href);
   return publish();
+}
+
+/**
+ * Opened by the install check (`#_rt_verify=<token>`): prove the SDK runs here, and do nothing else
+ * a visitor would cause — no arm, no redirect, no events. A redirect in particular would take the
+ * page away before it could report. The site-wide hit still goes: it is the same evidence any page
+ * load gives, and it is what later tracking checks read.
+ */
+async function runVerification(options: RoutelyOptions, token: string): Promise<void> {
+  const { apiBase, siteId } = options;
+  const href = window.location.href;
+  const siteIds = pageSiteIds(siteId);
+  window.routely = { isLoaded: true };
+
+  reportVerify(apiBase, token, "loaded", siteIds);
+  sendHit(apiBase, siteId, resolveIdentity().id, href);
+
+  const config = await loadConfig(apiBase, siteId, options.timeoutMs);
+  if (config) reportVerify(apiBase, token, "ready", siteIds);
+  else reportVerify(apiBase, token, "failed", siteIds, "config");
+
+  revealPage();
+  try {
+    history.replaceState(history.state, "", href.split("#")[0]);
+  } catch {
+    // The fragment staying in the address bar costs nothing.
+  }
 }
 
 /**

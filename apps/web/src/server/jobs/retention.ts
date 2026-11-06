@@ -3,6 +3,7 @@ import "server-only";
 import { retentionCutoff, VISITOR_DAY_RETENTION_DAYS } from "@/lib/notification-triggers";
 import { utcDayKey } from "@/lib/utc-day";
 import { prunePageVisitorDays } from "@/server/repositories/page-visitor-day.repository";
+import { pruneExpiredVerifications } from "@/server/repositories/install-verification.repository";
 import { pruneWebsiteVisitorDays } from "@/server/repositories/visitor-day.repository";
 
 /**
@@ -28,6 +29,8 @@ export async function pruneVisitorDays(now: Date = new Date()): Promise<Retentio
   // deletes at once would only contend for it.
   const websiteVisitorDays = await pruneWebsiteVisitorDays(before);
   const pageVisitorDays = await prunePageVisitorDays(before);
+  // Install checks are useful for minutes; a row is only their working state.
+  await pruneExpiredVerifications(now);
   return {
     keptFrom: utcDayKey(before),
     retentionDays: VISITOR_DAY_RETENTION_DAYS,

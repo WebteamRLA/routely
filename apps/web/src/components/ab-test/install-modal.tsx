@@ -228,8 +228,9 @@ export function InstallModal({
                 Add the Routely script to your site
               </AbDialogTitle>
               <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">
-                It goes on the page you’re testing and on your goal page, so Routely can show
-                variants and count conversions.
+                {s.form.goalType === "EVENT"
+                  ? "It goes on the page you’re testing and wherever your event happens, so Routely can show variants and count conversions."
+                  : "It goes on the page you’re testing and on your goal page, so Routely can show variants and count conversions."}
               </p>
               <HelpLink anchor="tracking-install" newTab>
                 Installation guide
@@ -488,7 +489,7 @@ export function LaunchDialog({
         <div className="h-px bg-[#F3F4F6]" />
         <Line k="Visitors included" v={d.rv.includeShort} />
         <Line k="Targeting" v={d.rv.targeting} />
-        <Line k="Goal" v="Page view" />
+        <Line k="Goal" v={d.rv.goalShort} />
       </div>
       <DialogActions>
         <button

@@ -40,6 +40,7 @@ export function LaunchDialog({
   const li = experiment ? (experiment.launch ?? launchInfo(experiment.id)) : null;
   const colors = ["#6B7280", ACCENT];
   const hasError = error && !busy;
+  const eventGoal = li?.goalType === "EVENT";
   const facts = li
     ? [
         {
@@ -47,7 +48,7 @@ export function LaunchDialog({
           value: li.include === 100 ? "All visitors (100%)" : `${li.include}% of visitors`,
         },
         { label: "Targeting", value: li.targeting },
-        { label: "Goal", value: `Page view · ${li.goal}` },
+        { label: "Goal", value: eventGoal ? `Event: ${li.goal}` : `Page view · ${li.goal}` },
       ]
     : [];
   const checks = li
@@ -55,7 +56,7 @@ export function LaunchDialog({
         "Setup is complete — all 5 steps are filled in",
         li.changes,
         "Traffic split adds up to 100%",
-        "Goal page is set and different from the tested page",
+        eventGoal ? "Goal event is chosen" : "Goal page is set and different from the tested page",
       ]
     : [];
 

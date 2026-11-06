@@ -20,7 +20,16 @@
  * ignore a configured distribution, which is exactly the kind of quiet wrongness the version
  * check exists to prevent.
  */
-export const SDK_PROTOCOL_VERSION = 4;
+export const SDK_PROTOCOL_VERSION = 5;
+
+/**
+ * v5: an experiment's `goal` may be `null` — its conversion is a custom event, attributed by the
+ * server from the stored assignment — and the document gains `events`, the triggers the SDK
+ * listens for. A v4 bundle would refuse a document holding a null goal, and could never report the
+ * event if it did not, so an older caller gets a v4 or v3 document that **omits** every
+ * event-goal experiment: its visitors are not entered rather than entered and never able to convert.
+ */
+export const PREVIOUS_PROTOCOL_VERSION = 4;
 
 /**
  * v4: experiments gain a `kind`. A `split_url` experiment redirects exactly as in v3; an
@@ -41,7 +50,11 @@ export const LEGACY_PROTOCOL_VERSION = 3;
 
 /** Every `v` a current API should accept on an ingestion batch (`/events`, `/hit`). The batch
  * shape did not change between them, so an installed v3 bundle's events remain valid. */
-export const ACCEPTED_PROTOCOL_VERSIONS = [LEGACY_PROTOCOL_VERSION, SDK_PROTOCOL_VERSION] as const;
+export const ACCEPTED_PROTOCOL_VERSIONS = [
+  LEGACY_PROTOCOL_VERSION,
+  PREVIOUS_PROTOCOL_VERSION,
+  SDK_PROTOCOL_VERSION,
+] as const;
 
 /** How a configured URL is compared against the visitor's current URL. */
 export type UrlMatchType = "EXACT" | "PREFIX";
@@ -141,7 +154,9 @@ export interface ExperimentConfig {
   controlWeight: number;
   /** One or more redirect targets. */
   variants: ExperimentVariantConfig[];
-  goal: { url: string; match: UrlMatchType };
+  /** The conversion page. `null` (v5) when the goal is a custom event, which needs nothing from
+   * the browser beyond reporting the event: the server attributes it. */
+  goal: { url: string; match: UrlMatchType } | null;
   /**
    * Percentage of visitors on the control page entered into this experiment at all, 1–100.
    * Checked before the arm is drawn: a visitor excluded here is never assigned one. Kept
@@ -157,11 +172,40 @@ export interface ExperimentConfig {
   keepParams?: boolean;
 }
 
-/** Response of `GET /api/v1/config?siteId=…&v=4`. */
+/**
+ * One thing to listen for on the customer's pages, built from a project's event definition. Plain
+ * data: a selector and a few URLs, never code, so configuring an event cannot run anything in a
+ * visitor's browser. Events tracked by the site's own code need no trigger and are not listed.
+ */
+export interface EventTrigger {
+  /** The event name reported when this fires. */
+  name: string;
+  kind: "click" | "form";
+  /** `click`: the element, matched with `closest()`, so a click on an icon inside a button counts.
+   * `form`: the form. Absent only for a form confirmed by `url` or `callback` alone. */
+  selector?: string;
+  /** Listen only on matching pages. Absent: every page. */
+  page?: { url: string; match: UrlMatchType };
+  /** A page the selector is expected on. The SDK reports an `EventIssue` when it is not there. */
+  check?: string;
+  /** The last report said the selector was missing; say so when it comes back. */
+  flagged?: boolean;
+  /** `form` only: what confirms the submission. See `FormSuccessMode` in the schema. */
+  success?: "submit" | "url" | "element" | "callback";
+  successUrl?: { url: string; match: UrlMatchType };
+  successSelector?: string;
+  /** A DOM or jQuery event name. */
+  successEvent?: string;
+}
+
+/** Response of `GET /api/v1/config?siteId=…&v=5`. */
 export interface ConfigResponse {
-  v: typeof SDK_PROTOCOL_VERSION | typeof LEGACY_PROTOCOL_VERSION;
+  v:
+    typeof SDK_PROTOCOL_VERSION | typeof PREVIOUS_PROTOCOL_VERSION | typeof LEGACY_PROTOCOL_VERSION;
   siteId: string;
   experiments: ExperimentConfig[];
+  /** v5. Absent means nothing to listen for. */
+  events?: EventTrigger[];
   /** Seconds the browser may reuse this document before refetching. */
   ttl: number;
 }
@@ -185,6 +229,73 @@ export interface EventBatch {
   siteId: string;
   visitorId: string;
   events: TrackedEvent[];
+}
+
+/** A custom event name. Written here so the browser and the server cannot disagree. */
+export const EVENT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
+/** A property name. */
+export const EVENT_PROPERTY_KEY_PATTERN = /^[A-Za-z0-9_.-]{1,40}$/;
+/** Property names that suggest personal or secret data. Such a property is dropped, never sent. */
+export const SENSITIVE_PROPERTY_KEY =
+  /pass|pwd|secret|token|card|cvv|cvc|iban|ssn|e-?mail|phone|mobile|first.?name|last.?name|full.?name|^name$|address|birth/i;
+/** String values that look like an email address, or a card or phone number. */
+export const SENSITIVE_PROPERTY_VALUE = /[^\s@]+@[^\s@]+\.[^\s@]+|\d(?:[ ()-]{0,2}\d){8,}/;
+export const MAX_EVENT_PROPERTIES = 10;
+export const MAX_EVENT_PROPERTY_LENGTH = 200;
+
+/** Values an event property may hold. Nested data is dropped rather than flattened. */
+export type EventPropertyValue = string | number | boolean;
+
+/** One custom event occurrence. It names no experiment and no arm: the server works those out. */
+export interface CustomEventPayload {
+  /** Unique per occurrence, so a retry is recognised. A caller's `{ id }` replaces it, which makes
+   * a repeat of the same order or form a no-op however many times it is sent. */
+  id: string;
+  name: string;
+  url: string;
+  /** Client epoch milliseconds; clamped server-side. */
+  ts: number;
+  props?: Record<string, EventPropertyValue>;
+}
+
+/** A configuration problem seen on a real page, or its end. */
+export interface EventIssue {
+  name: string;
+  /** `selector_ok` clears an earlier `selector_missing`. */
+  code: "selector_missing" | "selector_ok" | "form_ajax";
+  url: string;
+}
+
+/** Body of `POST /api/v1/track`, sent as `text/plain`. */
+export interface TrackBatch {
+  v: typeof SDK_PROTOCOL_VERSION;
+  siteId: string;
+  visitorId: string;
+  events?: CustomEventPayload[];
+  issues?: EventIssue[];
+}
+
+/** The URL fragment key that asks the SDK to prove it is running (install verification). */
+export const VERIFY_HASH_PARAM = "_rt_verify";
+
+/**
+ * Body of `POST /api/v1/verify`, and of the `routely:verify` message posted to the window that
+ * opened the page (which carries no token). Two channels on purpose: the message says what the SDK
+ * did in the browser, the POST is the proof it reached Routely, and the gap between them is the
+ * failure a customer's Content Security Policy causes.
+ *
+ * `failed` reasons: `config` (the configuration could not be loaded) · `no_site_id` (the tag has no
+ * `data-site-id`).
+ */
+export interface VerifySignal {
+  v: typeof SDK_PROTOCOL_VERSION;
+  token: string;
+  stage: "loaded" | "ready" | "failed";
+  reason?: "config" | "no_site_id";
+  /** Every `data-site-id` on the page, this SDK's own first. Empty for `no_site_id`. */
+  siteIds: string[];
+  url: string;
+  sdk: string;
 }
 
 /**
@@ -269,6 +380,8 @@ export interface ElementDescriptor {
   /** The element's ancestors, nearest first (at most 5, `body` excluded), as short labels —
    * "Section", "Group", "List" — for a breadcrumb; `routely:select-parent` climbs them. */
   crumbs?: string[];
+  /** Event picker only: a selector chosen to survive page edits, unique on this page. */
+  trackSelector?: string;
 }
 
 /** Messages the page (SDK, then agent) sends to the app. */
@@ -296,5 +409,8 @@ export type EditorAppMessage =
   | { type: "routely:mode"; token: string; mode: "edit" | "preview" }
   /** Outline an element from the changes list, or clear the selection with `null`. */
   | { type: "routely:highlight"; token: string; selector: string | null }
+  /** Event picker: choose the click target (`click`) or the surrounding form (`form`). Hovering
+   * and clicking then resolve to that element, and `select` carries its `trackSelector`. */
+  | { type: "routely:pick"; token: string; target: "click" | "form" }
   /** Select the selected element's `depth`-th ancestor (1 = its parent); answered with `select`. */
   | { type: "routely:select-parent"; token: string; depth: number };

@@ -44,9 +44,11 @@ import {
   conversionsStillNeeded,
   decisionBadge,
   decisionVerdict,
+  deltaPts,
   experimentVerdict,
   formatChance,
   formatLift,
+  formatPtsVsControl,
   formatRate1,
   formatRate2,
   manualChoiceCaveat,
@@ -80,8 +82,29 @@ export interface ArmInput {
   changeCount: number;
   /** count(assignments). */
   visitors: number;
+  /** Event goals: raw occurrences of the event. Rates use `conversions`, never this. */
+  totalEvents?: number;
   /** count(conversions). */
   conversions: number;
+}
+
+export interface ResultsGoal {
+  type: "URL" | "EVENT";
+  /** The event's name; null for a page goal. */
+  eventName: string | null;
+  /** The goal URL, as stored. Means nothing for an event goal. */
+  url: string;
+}
+
+function goalOf(input: ResultsInput): ResultsGoal {
+  return input.goal ?? { type: "URL", eventName: null, url: input.goalUrl };
+}
+
+/** "Custom event · signup_completed" / "Page view · acme.com/thanks". */
+function goalText(goal: ResultsGoal): string {
+  return goal.type === "EVENT"
+    ? `Custom event · ${goal.eventName ?? "deleted event"}`
+    : `Page view · ${shortUrl(goal.url)}`;
 }
 
 /** Cumulative per-arm totals for each UTC day of the run, arms in `ResultsInput.arms` order. */
@@ -100,6 +123,8 @@ export interface ResultsInput {
   controlUrl: string;
   /** The goal URL, as stored. */
   goalUrl: string;
+  /** What counts as a conversion. Absent is the page at `goalUrl`. */
+  goal?: ResultsGoal;
   /** `trafficAllocation`, 1–100. */
   include: number;
   /** ISO instants. `publishedAt` is the first launch. */
@@ -269,6 +294,9 @@ export function abVariantLines(changes: unknown): string[] {
 
 /** The design said "Goal page views"; what is counted is visitors who converted, at most once each. */
 const GOAL_COUNT_SUB = "Reached the goal";
+
+/** Shown with an event goal's results: why the rate can't be read off the event total. */
+export const EVENT_UNIQUE_NOTE = "Each visitor counts once, however many times the event happens.";
 
 // ---------------------------------------------------------------------------------------------
 // Chart
@@ -520,13 +548,23 @@ export function buildResultsModel(input: ResultsInput, options: ModelOptions = {
     }),
   };
 
+  const goal = goalOf(input);
+  const eventGoal = goal.type === "EVENT";
+  const totalEvents = input.arms.reduce((sum, arm) => sum + (arm.totalEvents ?? 0), 0);
+
   const tiles = [
     {
       label: "Visitors",
       value: formatNumber(totV),
       sub: hasData ? `Over ${formatDays(m.days)}` : "None yet",
     },
-    { label: "Conversions", value: formatNumber(totC), sub: GOAL_COUNT_SUB },
+    eventGoal
+      ? {
+          label: "Converting visitors",
+          value: formatNumber(totC),
+          sub: `${formatNumber(totalEvents)} ${totalEvents === 1 ? "event" : "events"} in total`,
+        }
+      : { label: "Conversions", value: formatNumber(totC), sub: GOAL_COUNT_SUB },
     {
       label: "Conversion rate",
       value: hasData ? formatRate2(totC / totV) : "—",
@@ -556,8 +594,12 @@ export function buildResultsModel(input: ResultsInput, options: ModelOptions = {
     vis: formatNumber(a.visitors),
     share: hasData ? formatRate1(a.visitors / totV) : `${input.arms[i]!.pct}%`,
     conv: formatNumber(a.conversions),
+    /** Event goals: raw occurrences, beside the unique `conv`. */
+    events: formatNumber(input.arms[i]!.totalEvents ?? 0),
     rate: hasData ? formatRate2(a.rate) : "—",
     lift: i === 0 ? "Baseline" : formatLift(a.lift),
+    /** Event goals: the same gap in points, under the relative `lift`. */
+    diff: i === 0 || !hasData ? null : formatPtsVsControl(deltaPts(a.rate, analysis.arms[0]!.rate)),
     liftFg:
       i === 0 || a.lift === null
         ? "#6B7280"
@@ -611,7 +653,9 @@ export function buildResultsModel(input: ResultsInput, options: ModelOptions = {
     rows,
     /** Rendered under the results whenever a chance is on screen (decision D1). */
     notProof: hasData ? NOT_PROOF_NOTE : null,
-    goalLabel: `Page view · ${shortUrl(input.goalUrl)}`,
+    goal,
+    goalLabel: goalText(goal),
+    eventNote: eventGoal ? EVENT_UNIQUE_NOTE : null,
     chart,
     pauseFacts,
     resumeFacts,
@@ -902,12 +946,22 @@ export function buildReviewModel(
     title: "Traffic split adds up to 100%",
     text: `${input.arms.map((a) => `${a.name} ${a.pct}%`).join(" · ")}, with ${input.include === 100 ? "all visitors" : `${input.include}% of visitors`} included.`,
   });
-  checks.push({
-    key: "goal",
-    tone: "ok",
-    title: "Goal page is set",
-    text: `Page view of ${shortUrl(input.goalUrl)}.`,
-  });
+  const goal = goalOf(input);
+  checks.push(
+    goal.type === "EVENT"
+      ? {
+          key: "goal",
+          tone: "ok",
+          title: "Goal event is set",
+          text: `${goalText(goal)}.`,
+        }
+      : {
+          key: "goal",
+          tone: "ok",
+          title: "Goal page is set",
+          text: `Page view of ${shortUrl(goal.url)}.`,
+        },
+  );
 
   if (hasData) {
     if (enough) {
@@ -1045,7 +1099,7 @@ export function buildReviewModel(
     value: input.include === 100 ? "All visitors (100%)" : `${input.include}% of site visitors`,
   });
   rows.push({ label: "Targeting", value: targetingSummary(review.devices, "sentence") });
-  rows.push({ label: "Goal", value: `Page view · ${shortUrl(input.goalUrl)}` });
+  rows.push({ label: "Goal", value: goalText(goalOf(input)) });
   rows.push({
     label: "Created",
     value: `${formatMonthDayYear(created, tz)}${review.createdByName ? ` by ${review.createdByName}` : ""}`,
@@ -1069,7 +1123,9 @@ export function buildReviewModel(
 
   const glance = [
     { label: "Visitors", value: formatNumber(totV), sub: hasData ? "All versions" : "None yet" },
-    { label: "Conversions", value: formatNumber(totC), sub: GOAL_COUNT_SUB },
+    goal.type === "EVENT"
+      ? { label: "Converting visitors", value: formatNumber(totC), sub: "Each counted once" }
+      : { label: "Conversions", value: formatNumber(totC), sub: GOAL_COUNT_SUB },
     {
       label: isDone ? "Ran for" : "Days running",
       value: String(m.days),

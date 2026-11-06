@@ -1,5 +1,9 @@
 import type { ConfigResponse, ExperimentConfig, VisualChange } from "./contract";
-import { LEGACY_PROTOCOL_VERSION, SDK_PROTOCOL_VERSION } from "./contract";
+import {
+  LEGACY_PROTOCOL_VERSION,
+  PREVIOUS_PROTOCOL_VERSION,
+  SDK_PROTOCOL_VERSION,
+} from "./contract";
 import { type KeyValueStore, getSessionStorage } from "./env";
 import { getJson } from "./transport";
 
@@ -37,8 +41,11 @@ export function isConfigResponse(value: unknown): value is ConfigResponse {
   // v3 is still understood: it is a v4 document with every new field at its default, which is
   // what an API that has not been upgraded keeps sending.
   return (
-    (candidate.v === SDK_PROTOCOL_VERSION || candidate.v === LEGACY_PROTOCOL_VERSION) &&
+    (candidate.v === SDK_PROTOCOL_VERSION ||
+      candidate.v === PREVIOUS_PROTOCOL_VERSION ||
+      candidate.v === LEGACY_PROTOCOL_VERSION) &&
     typeof candidate.siteId === "string" &&
+    (candidate.events === undefined || Array.isArray(candidate.events)) &&
     Array.isArray(candidate.experiments) &&
     candidate.experiments.every(isExperimentConfig)
   );
@@ -79,7 +86,7 @@ function isExperimentConfig(value: unknown): value is ExperimentConfig {
             (Array.isArray(variant.changes) && variant.changes.every(isVisualChange))),
     ) &&
     typeof candidate.control?.url === "string" &&
-    typeof candidate.goal?.url === "string"
+    (candidate.goal === null || typeof candidate.goal?.url === "string")
   );
 }
 

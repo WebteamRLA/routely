@@ -20,9 +20,14 @@ import {
   splitTotal,
 } from "@/lib/launch-rules";
 import {
+  type GoalFields,
+  type GoalTypeName,
+  URL_GOAL,
   type WizardCtx,
   devicesFromFlags,
   flagsFromDevices,
+  goalFromDraft,
+  goalPatch,
   savedAtPhrase,
   typedInt,
 } from "@/lib/wizard-draft";
@@ -85,7 +90,7 @@ export interface Variant {
   visual?: VisualChange[];
 }
 
-export interface AbForm {
+export interface AbForm extends GoalFields {
   name: string;
   pageUrl: string;
   variants: Variant[];
@@ -385,6 +390,7 @@ export function sampleForm(): AbForm {
     targeting: "all",
     devices: { desktop: false, mobile: false, tablet: false },
     goalUrl: "https://fernwoodsupply.com/collections/fall-sale",
+    ...URL_GOAL,
     nextId: 3,
   };
 }
@@ -399,6 +405,7 @@ export function emptyForm(): AbForm {
     targeting: "all",
     devices: { desktop: false, mobile: false, tablet: false },
     goalUrl: "",
+    ...URL_GOAL,
     nextId: 2,
   };
 }
@@ -488,13 +495,14 @@ export const armsOf = (f: AbForm): Arm[] => [
   ...f.variants,
 ];
 
-export const trackKey = (f: AbForm) => urlKey(f.pageUrl) + "|" + urlKey(f.goalUrl);
+export const trackKey = (f: AbForm) =>
+  urlKey(f.pageUrl) + "|" + (f.goalType === "EVENT" ? "event" : urlKey(f.goalUrl));
 
 export interface StepErrors {
   1: { name: string; page: string; variants: Record<string, string>; count: number };
   2: { include: string; split: string; low: Record<string, boolean>; total: number; count: number };
   3: { devices: string; count: number };
-  4: { url: string; count: number };
+  4: { url: string; event: string; count: number };
 }
 
 /** The form as the launch rules read it. */
@@ -508,6 +516,9 @@ export function ruleExperiment(f: AbForm): LaunchRuleExperiment {
     name: f.name,
     controlUrl: f.pageUrl,
     conversionUrl: f.goalUrl,
+    goalType: f.goalType,
+    goalEventId: f.goalEventId,
+    goalEventName: f.goalEventName,
     controlWeight: pct("control"),
     trafficAllocation: typedInt(f.include) ?? NaN,
     targeting: f.targeting,
@@ -561,7 +572,7 @@ export function validate(
       count: count(2),
     },
     3: { devices: msg("devices"), count: count(3) },
-    4: { url: msg("conversionUrl"), count: count(4) },
+    4: { url: msg("conversionUrl"), event: msg("goalEventId"), count: count(4) },
   };
 }
 
@@ -572,6 +583,9 @@ export interface AbDraftRow {
   name: string;
   controlUrl: string | null;
   conversionUrl: string | null;
+  goalType?: GoalTypeName;
+  goalEventId?: string | null;
+  goalEvent?: { name: string } | null;
   trafficAllocation: number;
   controlWeight: number;
   targetDevices: readonly ("DESKTOP" | "MOBILE" | "TABLET")[];
@@ -605,6 +619,7 @@ export function formFromDraft(row: AbDraftRow): AbForm {
     targeting,
     devices,
     goalUrl: row.conversionUrl ?? "",
+    ...goalFromDraft(row),
     nextId: row.variants.length + 1,
   };
 }
@@ -617,6 +632,7 @@ export function draftPatch(f: AbForm, step: number, idFor: (key: string) => stri
     name: f.name,
     controlUrl: f.pageUrl.trim() || null,
     conversionUrl: f.goalUrl.trim() || null,
+    ...goalPatch(f),
     ...(include === null ? {} : { trafficAllocation: include }),
     controlWeight: typedInt(f.split.control) ?? 0,
     targetDevices: devicesFromFlags(f.targeting, f.devices),
@@ -674,7 +690,10 @@ export function resumeInfoFor(
     1: "Finish setting up your page and variants to continue.",
     2: "Adjust the traffic split to continue.",
     3: "Choose who can enter to continue.",
-    4: "Add a goal page to finish setup.",
+    4:
+      f.goalType === "EVENT"
+        ? "Choose a goal event to finish setup."
+        : "Add a goal page to finish setup.",
   }[firstBad];
   return {
     title: "Welcome back — you left off at " + STEP_LABELS[Math.min(step, 5) as 1 | 2 | 3 | 4 | 5],
@@ -765,6 +784,7 @@ export function initState(view: AbTestViewName): AbState {
       targeting: "specific",
       devices: { desktop: true, mobile: true, tablet: false },
       goalUrl: "",
+      ...URL_GOAL,
       nextId: 2,
     };
     st.step = 4;
@@ -797,6 +817,7 @@ export function initState(view: AbTestViewName): AbState {
       targeting: "all",
       devices: { desktop: false, mobile: false, tablet: false },
       goalUrl: "https://fernwoodsupply.com/checkout",
+      ...URL_GOAL,
       nextId: 2,
     };
     st.step = 5;
@@ -834,6 +855,7 @@ export function initState(view: AbTestViewName): AbState {
       targeting: "specific",
       devices: { desktop: true, mobile: false, tablet: true },
       goalUrl: "https://journal.fernwoodsupply.com/newsletter/thanks",
+      ...URL_GOAL,
       nextId: 2,
     };
     st.step = 5;

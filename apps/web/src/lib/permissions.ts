@@ -42,6 +42,8 @@ export const CAPABILITY_MIN_ROLE = {
   "share.manage": "EDITOR",
   /** Create, edit or delete a project (website). */
   "project.manage": "ADMIN",
+  /** Create, change or delete a project's custom events. */
+  "events.manage": "EDITOR",
   /** Verify a pixel installation (a rate-limited outbound fetch). */
   "pixel.verify": "EDITOR",
   /** Connect or revoke the Google grant; attach, create or detach a project's spreadsheet. */

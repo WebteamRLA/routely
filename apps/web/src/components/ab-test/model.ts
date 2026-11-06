@@ -19,6 +19,7 @@ import {
   type Arm,
 } from "@/lib/mock/ab-test";
 import { changeSummaries } from "@/lib/change-summary";
+import { EVENT_GOAL_DESC, eventGoalLabel } from "@/lib/wizard-draft";
 
 /**
  * Everything the screen displays, computed from state — the design's `renderVals()` minus the
@@ -82,7 +83,9 @@ export function derive(s: AbState) {
       line: n < step || done ? ACCENT_LINE : "#E5E7EB",
     };
   });
-  const cur = STEPS[step - 1]!;
+  const eventGoal = f.goalType === "EVENT";
+  const stepInfo = STEPS[step - 1]!;
+  const cur = step === 4 && eventGoal ? { ...stepInfo, desc: EVENT_GOAL_DESC } : stepInfo;
   const eCur = step < 5 ? errs[step as 1 | 2 | 3 | 4] : { count: 0 };
 
   const sh1 = !!att[1];
@@ -179,7 +182,7 @@ export function derive(s: AbState) {
     ? "All three device types are selected, which is the same as All visitors."
     : "Visitors on other devices see the original page and aren’t counted.";
   const e3 = { devices: att[3] ? errs[3].devices : "" };
-  const e4 = { url: att[4] ? errs[4].url : "" };
+  const e4 = { url: att[4] ? errs[4].url : "", event: att[4] ? errs[4].event : "" };
 
   const tr = s.tracking;
   const stale = tr.status === "done" && tr.key !== trackKey(f);
@@ -190,12 +193,17 @@ export function derive(s: AbState) {
       url: shortUrl(f.pageUrl) || "No URL yet",
       set: !!shortUrl(f.pageUrl),
     },
-    {
-      id: "goal" as const,
-      label: "Goal page",
-      url: shortUrl(f.goalUrl) || "No URL yet",
-      set: !!shortUrl(f.goalUrl),
-    },
+    // An event is reported from wherever it happens, so it has no page to check.
+    ...(eventGoal
+      ? []
+      : [
+          {
+            id: "goal" as const,
+            label: "Goal page",
+            url: shortUrl(f.goalUrl) || "No URL yet",
+            set: !!shortUrl(f.goalUrl),
+          },
+        ]),
   ];
   const missing =
     tr.status === "done" && !stale ? pages.filter((pg) => tr.results[pg.id] === "missing") : [];
@@ -325,7 +333,14 @@ export function derive(s: AbState) {
     include: include + "% of visitors on the page enter the experiment",
     includeShort: include + "%",
     targeting: targetText,
-    goalUrl: shortUrl(f.goalUrl) || "No goal page yet",
+    goalKind: eventGoal ? "Custom event" : "Page view",
+    /** The goal for the launch confirm: its type for a page, `Event: <name>` for an event. */
+    goalShort: eventGoal ? eventGoalLabel(f) : "Page view",
+    goalUrl: eventGoal ? eventGoalLabel(f) : shortUrl(f.goalUrl) || "No goal page yet",
+    /** The goal on one line, as the summaries print it. */
+    goalLine: eventGoal
+      ? eventGoalLabel(f)
+      : "Page view · " + (shortUrl(f.goalUrl) || "No goal page yet"),
     issues,
   };
   const readyCount = ([1, 2, 3, 4] as const).filter((k) => valid(k)).length;
@@ -343,8 +358,8 @@ export function derive(s: AbState) {
       };
     }),
     include: include + "% of visitors on the page are included",
-    goal: shortUrl(f.goalUrl) || "Goal page not set yet",
-    goalFg: f.goalUrl.trim() ? "#4B5563" : "#6B7280",
+    goal: eventGoal ? eventGoalLabel(f) : shortUrl(f.goalUrl) || "Goal page not set yet",
+    goalFg: (eventGoal ? f.goalEventId : f.goalUrl.trim()) ? "#4B5563" : "#6B7280",
     ready: readyCount + " of 4 steps ready",
     readyBg: readyCount === 4 ? "#DCFCE7" : "#F3F4F6",
     readyFg: readyCount === 4 ? "#166534" : "#4B5563",
@@ -388,6 +403,7 @@ export function derive(s: AbState) {
     e2,
     e3,
     e4,
+    eventGoal,
     variants,
     splitRows,
     splitSegs,

@@ -69,7 +69,7 @@ export function Success({
             </div>
           ))}
           <div className="h-px bg-[#F3F4F6]" />
-          <span className="text-[13px] text-[#4B5563]">Goal: Page view · {d.rv.goalUrl}</span>
+          <span className="text-[13px] text-[#4B5563]">Goal: {d.rv.goalLine}</span>
         </div>
         <div className="flex w-full flex-wrap justify-center gap-2.5">
           <button
@@ -234,10 +234,16 @@ export function Results({
       label: hasData ? pc.toFixed(1) + "%" : pc + "%",
     };
   });
+  const eventGoal = f.goalType === "EVENT";
   const goal = shortUrl(f.goalUrl) || "goal page";
+  const goalLine = eventGoal ? d.rv.goalLine : "Page view · " + goal;
   const tiles = [
     { label: "Visitors", value: fmt(totV), sub: "Across all versions" },
-    { label: "Goal page views", value: fmt(totC), sub: "Page view · " + goal },
+    {
+      label: eventGoal ? "Converting visitors" : "Goal page views",
+      value: fmt(totC),
+      sub: goalLine,
+    },
     {
       label: "Conversion rate",
       value: totV ? ((totC / totV) * 100).toFixed(2) + "%" : "—",
@@ -323,7 +329,7 @@ export function Results({
               >
                 Version comparison
               </h2>
-              <p className="m-0 text-[13px] text-[#6B7280]">Goal: Page view · {goal}</p>
+              <p className="m-0 text-[13px] text-[#6B7280]">Goal: {goalLine}</p>
             </div>
             <span className="text-[13px] text-[#6B7280]">
               {hasData ? "Actual traffic split" : "Configured traffic split"}
@@ -647,7 +653,7 @@ export function Results({
             ))}
           </div>
           <div className="flex flex-col gap-2 px-[18px] py-3.5">
-            <Detail k="Goal" v={"Page view · " + d.rv.goalUrl} wrap />
+            <Detail k="Goal" v={d.rv.goalLine} wrap />
             <Detail k="Visitors included" v={d.rv.includeShort} />
             <Detail k="Targeting" v={d.rv.targeting} />
           </div>

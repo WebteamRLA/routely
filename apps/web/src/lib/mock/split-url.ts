@@ -15,7 +15,17 @@ import {
   setupIssues,
   splitTotal,
 } from "@/lib/launch-rules";
-import { type WizardCtx, devicesFromFlags, flagsFromDevices, typedInt } from "@/lib/wizard-draft";
+import {
+  type GoalFields,
+  type GoalTypeName,
+  URL_GOAL,
+  type WizardCtx,
+  devicesFromFlags,
+  flagsFromDevices,
+  goalFromDraft,
+  goalPatch,
+  typedInt,
+} from "@/lib/wizard-draft";
 
 /**
  * The design's named states, addressable as `?view=`. Lives here, not in the client component:
@@ -82,7 +92,7 @@ export interface Variant {
 
 export type Arm = Variant;
 
-export interface SplitForm {
+export interface SplitForm extends GoalFields {
   name: string;
   controlUrl: string;
   variants: Variant[];
@@ -150,6 +160,7 @@ export function sampleForm(): SplitForm {
     devices: { desktop: false, mobile: false, tablet: false },
     goalName: "",
     goalUrl: "https://fernwoodsupply.com/checkout/thank-you",
+    ...URL_GOAL,
     goalMatch: "exact",
     nextId: 3,
   };
@@ -167,6 +178,7 @@ export function emptyForm(): SplitForm {
     devices: { desktop: false, mobile: false, tablet: false },
     goalName: "",
     goalUrl: "",
+    ...URL_GOAL,
     goalMatch: "exact",
     nextId: 2,
   };
@@ -378,9 +390,12 @@ export function pctOf(f: SplitForm, id: string): number {
 // --- Tracking ---------------------------------------------------------------------------------
 
 export function trackKey(f: SplitForm): string {
-  return [f.controlUrl, ...f.variants.map((v) => v.url), f.goalUrl]
-    .map((u) => urlKey(u || ""))
-    .join("|");
+  // An event goal has no page to check, so it keys the check differently from a page goal.
+  const goal = f.goalType === "EVENT" ? "event" : urlKey(f.goalUrl || "");
+  return [
+    ...[f.controlUrl, ...f.variants.map((v) => v.url)].map((u) => urlKey(u || "")),
+    goal,
+  ].join("|");
 }
 
 export function okResults(f: SplitForm): Record<string, TrackResult> {
@@ -411,7 +426,7 @@ export interface StepErrors {
   };
   2: { include: string; split: string; low: Record<string, boolean>; total: number; count: number };
   3: { devices: string; count: number };
-  4: { url: string; count: number };
+  4: { url: string; event: string; count: number };
 }
 
 /** The form as the launch rules read it. */
@@ -421,6 +436,9 @@ export function ruleExperiment(f: SplitForm): LaunchRuleExperiment {
     name: f.name,
     controlUrl: f.controlUrl,
     conversionUrl: f.goalUrl,
+    goalType: f.goalType,
+    goalEventId: f.goalEventId,
+    goalEventName: f.goalEventName,
     controlWeight: pctOf(f, "control"),
     trafficAllocation: typedInt(f.include) ?? NaN,
     targeting: f.targeting,
@@ -484,7 +502,7 @@ export function validate(
     1: e1,
     2: e2,
     3: { devices: msg("devices"), count: count(3) },
-    4: { url: msg("conversionUrl"), count: count(4) },
+    4: { url: msg("conversionUrl"), event: msg("goalEventId"), count: count(4) },
   };
 }
 
@@ -495,6 +513,9 @@ export interface SplitDraftRow {
   name: string;
   controlUrl: string | null;
   conversionUrl: string | null;
+  goalType?: GoalTypeName;
+  goalEventId?: string | null;
+  goalEvent?: { name: string } | null;
   keepQueryParams: boolean;
   trafficAllocation: number;
   controlWeight: number;
@@ -532,6 +553,7 @@ export function formFromDraft(row: SplitDraftRow): SplitForm {
     devices,
     goalName: "",
     goalUrl: row.conversionUrl ?? "",
+    ...goalFromDraft(row),
     goalMatch: "exact",
     nextId: row.variants.length + 1,
   };
@@ -547,6 +569,7 @@ export function draftPatch(f: SplitForm, step: number, idFor: (key: string) => s
     name: f.name,
     controlUrl: f.controlUrl.trim() || null,
     conversionUrl: f.goalUrl.trim() || null,
+    ...goalPatch(f),
     keepQueryParams: f.keepParams,
     ...(include === null ? {} : { trafficAllocation: include }),
     controlWeight: typedInt(f.split.control) ?? 0,

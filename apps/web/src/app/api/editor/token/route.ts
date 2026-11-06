@@ -2,12 +2,16 @@ import type { NextRequest } from "next/server";
 
 import { requireUser } from "@/server/auth/session";
 import { isAppError, toPublicError } from "@/server/errors";
-import { issueEditorSession } from "@/server/services/visual-editor.service";
+import { issueEditorSession, issuePickerSession } from "@/server/services/visual-editor.service";
 
 /**
  * `POST /api/editor/token` — opens a visual editor session on an A/B test's tested page.
  *
  *   { "experimentId": "…" }  →  200 { token, expiresAt, pageUrl, frameUrl, origin, snippet }
+ *
+ * The Event Library's element picker uses the same session on a page of a project:
+ *
+ *   { "websiteId": "…", "pageUrl": "https://…" }  →  the same answer
  *
  * Errors are `{ error: { code, message } }` with the AppError status: 401 signed out, 403 a Viewer,
  * 404 an experiment outside the actor's workspaces, 422 no usable tested page, 429 too many.
@@ -44,7 +48,8 @@ export async function POST(request: NextRequest) {
   try {
     const user = await requireUser();
     const body: unknown = await request.json().catch(() => null);
-    return json(await issueEditorSession(user.id, body), 200);
+    const picker = typeof body === "object" && body !== null && "websiteId" in body;
+    return json(await (picker ? issuePickerSession : issueEditorSession)(user.id, body), 200);
   } catch (error) {
     const { code, message } = toPublicError(error);
     if (!isAppError(error)) console.error("[routely] editor token failed", error);

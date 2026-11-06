@@ -582,6 +582,11 @@ popup is now only the last resort, for a page the proxy cannot fetch either. A s
 
 ---
 
+## 7a. Custom events, Google Tag Manager and protocol v5
+
+See [CUSTOM-EVENTS.md](CUSTOM-EVENTS.md) for `window.routely.track()`, click and form triggers, the
+browser-run install check and what v5 changed.
+
 ## 8. Known limitations
 
 1. **Identity is per-origin.** A visitor on `www.acme.com` and `shop.acme.com` is two

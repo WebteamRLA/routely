@@ -9,6 +9,7 @@ import {
   withCacheBuster,
 } from "@/lib/install-check";
 import { can, rolesWith } from "@/lib/permissions";
+import { GTM_ORIGIN, findGtmContainers, gtmContainerUrl, readContainer } from "@/lib/gtm";
 import { detectSnippet } from "@/lib/snippet-detect";
 import { isSameSite } from "@/lib/url";
 import { forbidden, notFound, rateLimited, validationFailed } from "@/server/errors";
@@ -154,7 +155,7 @@ const NO_SNIPPET = {
 export async function inspectPage(
   url: string,
   website: { id: string; domain: string; publicSiteId: string },
-): Promise<{ fetched: ReturnType<typeof readFetch>; finding: InstallFinding }> {
+): Promise<{ fetched: ReturnType<typeof readFetch>; finding: InstallFinding; gtm: GtmLook }> {
   const options = { allowUrl: sameSitePolicy(website.domain), allowPrivate: allowPrivateFetch() };
   const fetched = readFetch(await safeFetch(url, options));
   const look = (f: ReturnType<typeof readFetch>): PageLook => ({
@@ -169,7 +170,16 @@ export async function inspectPage(
     freshFetch = readFetch(await safeFetch(withCacheBuster(url), options));
   }
   const fresh = freshFetch ? look(freshFetch) : null;
-  const finding = combineLooks(served, fresh);
+  const looked = combineLooks(served, fresh);
+
+  // A tag in Google Tag Manager is never in the HTML. A live container holding this project's id
+  // is the same evidence the HTML would have been: the code is on the site.
+  const html = (freshFetch?.pageLoaded ? freshFetch : fetched).html;
+  const gtm = await inspectContainers(html, website.publicSiteId);
+  const finding: InstallFinding =
+    !looked.scriptFound && gtm.inContainer
+      ? { ...looked, scriptFound: true, wrongSiteId: false, mismatchConfirmed: false }
+      : looked;
 
   console.info(
     "[routely] install-check",
@@ -190,10 +200,62 @@ export async function inspectPage(
           : fetched.pageLoaded
             ? "missing"
             : "not-loaded",
+      gtm,
     }),
   );
 
-  return { fetched, finding };
+  return { fetched, finding, gtm };
+}
+
+export interface GtmLook {
+  /** GTM containers the page loads. */
+  containers: string[];
+  /** This project's id is in a published container. */
+  inContainer: boolean;
+  /** Another project's id is in a published container, and this one's is not. */
+  otherInContainer: boolean;
+  /** A container could not be fetched, so nothing can be said about it. */
+  unreadable: boolean;
+}
+
+/** Where containers are read from. Overridable outside production, for testing without Google. */
+function gtmOrigin(): string {
+  return (!isProduction() && process.env["ROUTELY_GTM_ORIGIN"]) || GTM_ORIGIN;
+}
+
+function isProduction(): boolean {
+  return env.NODE_ENV === "production";
+}
+
+/**
+ * Reads the published version of every GTM container the page loads. Only that one host is ever
+ * fetched, and the id in the URL comes from a strict pattern, so a customer's page cannot steer
+ * this request anywhere else.
+ */
+async function inspectContainers(html: string, publicSiteId: string): Promise<GtmLook> {
+  const containers = findGtmContainers(html);
+  const origin = gtmOrigin();
+  const allowUrl = (target: URL) =>
+    target.origin === origin ? null : "Only Google Tag Manager is read.";
+
+  const reads = await Promise.all(
+    containers.map(async (id) => {
+      const result = await safeFetch(gtmContainerUrl(id, origin), {
+        allowUrl,
+        allowPrivate: allowPrivateFetch(),
+        maxRedirects: 0,
+      });
+      return result.ok && result.status < 400 ? readContainer(result.body, publicSiteId) : null;
+    }),
+  );
+
+  const inContainer = reads.some((read) => read?.hasThisProject);
+  return {
+    containers,
+    inContainer,
+    otherInContainer: !inContainer && reads.some((read) => (read?.otherSiteIds.length ?? 0) > 0),
+    unreadable: reads.includes(null),
+  };
 }
 
 function evidence(f: ReturnType<typeof readFetch>, look: PageLook) {

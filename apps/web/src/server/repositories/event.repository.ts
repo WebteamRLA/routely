@@ -53,6 +53,25 @@ export async function countPageViewsByVariant(
 }
 
 /**
+ * Occurrences of an experiment's goal event per arm, keyed by variant id (`null` is control).
+ *
+ * Raw occurrences, so a visitor who repeats the event counts each time. Rates never read this:
+ * they divide `conversions`, which holds one row per assignment.
+ */
+export async function countCustomEventsByVariant(
+  experimentId: string,
+  client: DbClient = db,
+): Promise<Map<string | null, number>> {
+  const rows = await client.event.groupBy({
+    by: ["variantId"],
+    where: { experimentId, type: "custom" },
+    _count: { _all: true },
+  });
+
+  return new Map(rows.map((row) => [row.variantId, row._count._all]));
+}
+
+/**
  * Distinct visitors who produced a page view, per arm (`null` is control).
  *
  * Deliberately distinct from the assignment count: an assignment means a visitor was bucketed,
