@@ -161,19 +161,9 @@ export const verifySignalSchema = z.object({
 
 export const installMethodSchema = z.enum(["MANUAL", "GTM"]);
 
-export const startVerificationSchema = z.strictObject({
+/** The dialogs' install check. */
+export const installCheckSchema = z.strictObject({
   websiteId: idSchema,
   url: absoluteUrlSchema,
   method: installMethodSchema,
-});
-
-export const verificationPollSchema = z.strictObject({
-  id: idSchema,
-  browser: z
-    .object({
-      stage: z.enum(["loaded", "ready", "failed"]),
-      reason: z.enum(["config", "no_site_id"]).optional(),
-    })
-    .nullable()
-    .optional(),
 });

@@ -5,6 +5,7 @@ import {
   type StaticLook,
   VERIFY_WINDOW_MS,
   type VerifyObservation,
+  readServerCheck,
   readVerification,
 } from "@/lib/install-verification";
 
@@ -135,5 +136,126 @@ describe("readVerification", () => {
       read(late, { pageLoaded: false }),
     ];
     for (const failure of failures) expect(failure.steps.length).toBeGreaterThan(0);
+  });
+});
+
+describe("readServerCheck", () => {
+  // The anti-flicker block in place, so these cases are about the tag alone.
+  const check = (method: "GTM" | "MANUAL", look: Partial<StaticLook> = {}) =>
+    readServerCheck(method, { ...LOOK, antiFlicker: "ok", ...look });
+
+  it("verifies on this project's code in the page or in a published container", () => {
+    expect(check("MANUAL", { inHtml: true }).status).toBe("verified");
+    expect(check("GTM", { inHtml: true }).status).toBe("verified");
+    expect(check("GTM", { containers: ["GTM-A"], inContainer: true }).status).toBe("verified");
+    expect(check("MANUAL", { containers: ["GTM-A"], inContainer: true }).status).toBe("verified");
+  });
+
+  it("is always final, so the dialog never waits", () => {
+    expect(check("GTM").final).toBe(true);
+    expect(check("MANUAL", { inHtml: true }).final).toBe(true);
+  });
+
+  it("does not verify a page that failed to load, even with the code in an old copy", () => {
+    const res = check("MANUAL", { pageLoaded: false, loadError: "Timed out.", inHtml: true });
+    expect(res.status).toBe("failed");
+    expect(res.detail).toBe("Timed out.");
+  });
+
+  it("names another project's code, and says where it is", () => {
+    expect(check("MANUAL", { otherInHtml: true }).status).toBe("wrong_site_id");
+    const gtm = check("GTM", { containers: ["GTM-A"], otherInContainer: true });
+    expect(gtm.status).toBe("wrong_site_id");
+    expect(gtm.detail).toMatch(/Tag Manager/);
+  });
+
+  it("points at publishing when the container is on the page without the tag", () => {
+    const res = check("GTM", { containers: ["GTM-A"] });
+    expect(res.status).toBe("not_installed");
+    expect(res.detail).toContain("GTM-A");
+    expect(res.steps.join(" ")).toMatch(/Publish/);
+  });
+
+  it("says when Tag Manager isn't on the page at all", () => {
+    expect(check("GTM").detail).toMatch(/wasn’t found/);
+    expect(check("MANUAL").detail).toMatch(/wasn’t in it/);
+  });
+});
+
+describe("readServerCheck: the anti-flicker block on a Tag Manager install", () => {
+  const published = { ...LOOK, containers: ["GTM-A"], inContainer: true };
+
+  it("verifies only with the block in <head> above Tag Manager", () => {
+    expect(readServerCheck("GTM", { ...published, antiFlicker: "ok" }).status).toBe("verified");
+    for (const antiFlicker of ["missing", "below_gtm", "outside_head"] as const) {
+      const res = readServerCheck("GTM", { ...published, antiFlicker });
+      expect(res.status).toBe("anti_flicker");
+      expect(res.final).toBe(true);
+    }
+  });
+
+  it("says what is wrong with the block", () => {
+    expect(readServerCheck("GTM", { ...published, antiFlicker: "missing" }).title).toBe(
+      "Anti-flicker block not found",
+    );
+    expect(readServerCheck("GTM", { ...published, antiFlicker: "below_gtm" }).steps[0]).toMatch(
+      /above the Google Tag Manager snippet/,
+    );
+    expect(readServerCheck("GTM", { ...published, antiFlicker: "outside_head" }).detail).toMatch(
+      /<body>/,
+    );
+  });
+
+  it("treats a look stored without the field as missing the block", () => {
+    expect(readServerCheck("GTM", published).status).toBe("anti_flicker");
+  });
+
+  it("names both problems when the tag is unpublished too, the tag first", () => {
+    const res = readServerCheck("GTM", { ...LOOK, containers: ["GTM-A"], antiFlicker: "missing" });
+    expect(res.status).toBe("not_installed");
+    expect(res.detail).toMatch(/published version.*anti-flicker block isn’t/);
+    expect(res.steps[0]).toMatch(/Submit, then Publish/);
+    expect(
+      res.steps.some((step) => /Tag Manager code\. It includes the anti-flicker/.test(step)),
+    ).toBe(true);
+  });
+
+  it("accepts the block inside the published tag, with a note about the flash", () => {
+    const res = readServerCheck("GTM", {
+      ...published,
+      antiFlicker: "missing",
+      antiFlickerInContainer: true,
+    });
+    expect(res.status).toBe("verified");
+    expect(res.warnings.join(" ")).toMatch(/inside Google Tag Manager.*<head>/);
+  });
+
+  it("adds no note when the block is in <head> as well", () => {
+    const res = readServerCheck("GTM", {
+      ...published,
+      antiFlicker: "ok",
+      antiFlickerInContainer: true,
+    });
+    expect(res.status).toBe("verified");
+    expect(res.warnings).toEqual([]);
+  });
+
+  it("does not let the block in the container stand in for an unpublished tag", () => {
+    const res = readServerCheck("GTM", {
+      ...LOOK,
+      containers: ["GTM-A"],
+      antiFlicker: "missing",
+      antiFlickerInContainer: true,
+    });
+    expect(res.status).toBe("not_installed");
+  });
+
+  it("leaves a page that didn't load, and a manual install, as they were", () => {
+    expect(
+      readServerCheck("GTM", { ...LOOK, pageLoaded: false, antiFlicker: "missing" }).status,
+    ).toBe("failed");
+    expect(
+      readServerCheck("MANUAL", { ...LOOK, inHtml: true, antiFlicker: "missing" }).status,
+    ).toBe("verified");
   });
 });

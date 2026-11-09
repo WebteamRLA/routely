@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 /*
  * Two-step pixel setup: install by hand (`lib/snippet.ts`, D10) or through Google Tag Manager, then
- * prove it in a real tab (`components/install`, `lib/install-verification.ts`).
+ * check it from the server (`components/install`, `lib/install-verification.ts`).
  */
 
 const ACCENT = "#0070C9";
@@ -84,7 +84,7 @@ function PixelPanel({
   onVerified(projectId: string): void;
 }) {
   const [step, setStep] = useState<Step>(initialStep);
-  const [method, setMethod] = useState<InstallMethodName>("MANUAL");
+  const [method, setMethod] = useState<InstallMethodName>("GTM");
   const [url, setUrl] = useState(pixelDefaultUrl(project.domain, project.protocol));
   const [attempted, setAttempted] = useState(false);
   const verification = useInstallVerification({
@@ -116,7 +116,6 @@ function PixelPanel({
     if (checking) return;
     setAttempted(true);
     if (urlErr) return;
-    // Synchronous from here to `window.open`, or the browser blocks the new tab.
     verification.start({
       websiteId: project.id,
       url: pixelCheckUrl(url, project.protocol),

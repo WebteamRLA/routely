@@ -10,7 +10,7 @@
  * Routely never signs in to GTM and never changes a container.
  */
 
-import { OPTIMIZER_OPT_OUT } from "@/lib/snippet";
+import { OPTIMIZER_OPT_OUT, antiFlickerScript } from "@/lib/snippet";
 
 /** A container id, as the standard GTM install writes it into the page. */
 const CONTAINER_ID = /\bGTM-[A-Z0-9]{4,12}\b/g;
@@ -28,6 +28,33 @@ export function findGtmContainers(html: string): string[] {
   return [...new Set(html.match(CONTAINER_ID) ?? [])].slice(0, MAX_CONTAINERS);
 }
 
+/**
+ * Where a page's anti-flicker block sits, for a Google Tag Manager install (user decision
+ * 2026-11-09: required there, and verified). Tag Manager loads after the page starts to render, so
+ * the block only hides the original page if it is pasted straight into `<head>`, above the Tag
+ * Manager loader; inside a container it would run too late.
+ *
+ *  - `missing`: no anti-flicker block (`__routelyReveal`) in the HTML;
+ *  - `outside_head`: it comes after `</head>` (or `<body>`);
+ *  - `below_gtm`: it comes after the page's Tag Manager loader (`gtm.js`);
+ *  - `ok`: in `<head>`, above Tag Manager (or no loader in the HTML to be above).
+ */
+export type AntiFlickerPlacement = "ok" | "missing" | "outside_head" | "below_gtm";
+
+const ANTI_FLICKER_MARK = "__routelyReveal";
+const HEAD_END = /<\/head\s*>|<body[\s>]/i;
+const GTM_LOADER = /googletagmanager\.com\/gtm\.js/i;
+
+export function antiFlickerPlacement(html: string): AntiFlickerPlacement {
+  const at = html.indexOf(ANTI_FLICKER_MARK);
+  if (at < 0) return "missing";
+  const headEnd = html.search(HEAD_END);
+  if (headEnd >= 0 && at > headEnd) return "outside_head";
+  const loader = html.search(GTM_LOADER);
+  if (loader >= 0 && at > loader) return "below_gtm";
+  return "ok";
+}
+
 export function gtmContainerUrl(containerId: string, origin: string = GTM_ORIGIN): string {
   return `${origin}/gtm.js?id=${encodeURIComponent(containerId)}`;
 }
@@ -42,12 +69,14 @@ const QUOTED_SITE_ID = /(?:["'=]|\\x2[27]|\\u002[27])(rt_[0-9a-z]{24,48})/gi;
 export function readContainer(
   js: string,
   publicSiteId: string,
-): { hasThisProject: boolean; otherSiteIds: string[] } {
+): { hasThisProject: boolean; otherSiteIds: string[]; hasAntiFlicker: boolean } {
   const own = publicSiteId.toLowerCase();
   const ids = new Set([...js.matchAll(QUOTED_SITE_ID)].map((match) => match[1]!.toLowerCase()));
   return {
     hasThisProject: js.toLowerCase().includes(own),
     otherSiteIds: [...ids].filter((id) => id !== own),
+    // The block's own global; it has no quotes, so the container keeps it verbatim.
+    hasAntiFlicker: js.includes(ANTI_FLICKER_MARK),
   };
 }
 
@@ -64,11 +93,16 @@ export interface GtmSnippetOptions {
  * And it can stand down: a page that already has a Routely tag (pasted by hand earlier, or a second
  * GTM tag) gets no second copy. The SDK has its own guard for the case this cannot see.
  *
+ * The anti-flicker block comes first in the same script (user request 2026-11-09: one tag, nothing
+ * pasted into the site's `<head>`). Inside Tag Manager it starts after the page is visible, so it
+ * narrows the flash rather than preventing it; the `<head>` block remains the way to prevent it.
+ *
  * Both values are escaped for a JavaScript string inside an inline script.
  */
 export function buildGtmSnippet({ sdkUrl, publicSiteId }: GtmSnippetOptions): string {
-  return `<!-- Routely tracking script (Google Tag Manager: Custom HTML) -->
+  return `<!-- Routely tracking script with anti-flicker (Google Tag Manager: Custom HTML) -->
 <script ${OPTIMIZER_OPT_OUT}>
+${antiFlickerScript()}
 (function (d) {
   if (d.querySelector("script[data-site-id]")) return;
   var s = d.createElement("script");

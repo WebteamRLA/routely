@@ -5,8 +5,8 @@ import type { InstallMethodName } from "@/lib/install-verification";
 import { cn } from "@/lib/utils";
 
 const METHODS: { value: InstallMethodName; label: string }[] = [
-  { value: "MANUAL", label: "Manual installation" },
   { value: "GTM", label: "Google Tag Manager" },
+  { value: "MANUAL", label: "Manual installation" },
 ];
 
 const PANEL_ID = "rt-install-panel";

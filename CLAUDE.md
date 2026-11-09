@@ -165,8 +165,9 @@ must be labelled as such wherever it appears.
 | `/experiments`, `/experiments/[experimentId]` | `(app)` | Experiment list; results & review. A DRAFT detail redirects to its wizard |
 | `/experiments/new/ab-test`, `/experiments/new/split-url` | `(app)` | The two wizards. `?project=<id>` starts a draft, `?id=<draftId>` resumes one (`routes.experiments.wizard`) |
 | `/help` | `(app)` | Help & Guides (2026-10-27): every guide in `lib/guides.ts` on one scrolling page, short numbered steps and a few screenshots, plus the workspace's Getting started progress. `/help/[guide]` only redirects to its first section |
+| `/metrics` | `(app)` | Sidebar item (2026-11-09): the Event Library with a project switcher (`?project=<id>`, else the first project). Same view as `/projects/[id]/events` |
 | `/integrations`, `/settings` | `(app)` | Integrations catalog (Sheets card); profile, password, sessions, team, notifications |
-| `/websites/[id]`, `/get-started`, `/metrics`, `/metrics/[id]`, `/experiments/new` | `(app)` | **Redirects only** → project dashboard, `/dashboard`, `/experiments`, the experiment, the Split URL wizard |
+| `/websites/[id]`, `/get-started`, `/metrics/[id]`, `/experiments/new` | `(app)` | **Redirects only** → project dashboard, `/dashboard`, the experiment, the Split URL wizard |
 | `/share/[token]` | — | **Public**, read-only results. No session. `noindex` |
 | `/api/auth/[...nextauth]` | — | Auth.js handlers (Google), Node runtime |
 | `/api/integrations/google/start` | — | **POST only.** Mints signed state (`workspaceId`, `returnTo`), redirects to Google |
@@ -566,7 +567,7 @@ carry a synchronous tag, which still works.
 | `cloak.ts` | Calls `window.__routelyReveal` — the overlay itself lives in the install snippet |
 | `config.ts` / `transport.ts` / `track.ts` | Fetch + cache config (`?v=4`); timeouts; `sendBeacon` |
 | `events.ts` | `routely.track`, click and form triggers (one listener each), offline queue, selector checks |
-| `verify.ts` | Reports to an install check opened with `#_rt_verify=<token>` |
+| `verify.ts` | Reports to an install check opened with `#_rt_verify=<token>` (dormant since 2026-11-09) |
 | `index.ts` | Options, boot sequence, orchestration. A second copy on a page stands down |
 
 ### Protocol v4
@@ -594,12 +595,13 @@ v5 lets `goal` be `null` (an event goal) and adds `events`, the triggers the SDK
 v3 caller gets a document with no event-goal experiments: those visitors are not entered, rather than
 entered and unable to convert.
 
-**A server fetch cannot see a tag GTM injects, so only the SDK can verify an install.** The dashboard
-opens the page in the customer's own browser with `#_rt_verify=<token>`, the SDK reports to
-`/api/v1/verify`, and the dashboard polls. The server's look at the HTML and the published
-`gtm.js?id=GTM-…` only explains failures. Ordinary site-wide hits deliberately do not verify: any
-visitor on any page could send one. Status rules are in `lib/install-verification.ts`, the reasoning
-in `docs/CUSTOM-EVENTS.md`. The Project ID the SDK runs as is `siteIds[0]`.
+**The install check runs on the server only** (user decision 2026-11-09: the dialog must not open
+the customer's page in a new tab). `checkInstall` reads the page HTML and the published
+`gtm.js?id=GTM-…` of each container it loads, and `readServerCheck` answers at once: this project's
+id in either verifies. That proves the code is on the site, not that a GTM trigger fires or the SDK
+starts. The browser-run check it replaced (`#_rt_verify=<token>`, `/api/v1/verify`, SDK
+`verify.ts`) is **dormant**: nothing issues tokens. Ordinary site-wide hits still do not verify.
+Rules in `lib/install-verification.ts`, reasoning in `docs/CUSTOM-EVENTS.md`.
 
 ### The visual editor bridge, and the agent that is not written yet
 
@@ -642,8 +644,9 @@ Never add `allow-same-origin` to the proxy's CSP or to the proxy-mode iframe. Me
 with origin `"null"` and are answered with `targetOrigin "*"` to that frame only
 (`use-editor-bridge.ts`). `EDITOR_PROXY_ORIGIN` is optional extra isolation. The popup remains only
 for a page the proxy cannot fetch. Fidelity limits: fetched without the user's cookies (logged-out
-view); the customer's scripts have no storage or cookies; web fonts and other CORS-gated assets may
-not load.
+view); the customer's scripts get in-memory storage and cookies only, and a `history` call to a
+cross-origin URL is retried without it (`PAGE_SHIM` in `lib/editor-proxy-html.ts`, 2026-11-09: Next.js
+sites crashed to their error page without it); web fonts and other CORS-gated assets may not load.
 
 **Local testing gotcha:** a public site loading the snippet from `http://localhost:3000` is blocked by
 Chrome's Local Network Access unless the user allows it for that site — no SDK, no tracking, no
@@ -987,8 +990,9 @@ Working:
 - **Crons** — Sheets refresh (00:20 UTC) and notifications (00:40 UTC: result-ready backstop,
   tracking-stopped alerts, 400-day retention of the visitor-day tables).
 - **Demo seed** of the design's workspace (§8).
-- **Google Tag Manager install** (2026-11-05) — Manual and GTM tabs in both pixel dialogs, and a
-  browser-run check for both, with nine statuses and specific guidance (`docs/CUSTOM-EVENTS.md`).
+- **Google Tag Manager install** (2026-11-05) — GTM (the default, 2026-11-09) and Manual tabs in
+  both pixel dialogs, checked on the server from the page and its published containers
+  (`docs/CUSTOM-EVENTS.md`).
   Routely never signs in to GTM or changes a container.
 - **Custom events** (2026-11-05) — project Event Library; click, form and JavaScript tracking; real
   element picker on the editor bridge (frame, then proxy); `window.routely.track()`; events as goals

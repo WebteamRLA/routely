@@ -2,6 +2,7 @@
 
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { ProjectAvatar } from "@/components/common/project-avatar";
 import { DeleteEventDialog } from "@/components/events/delete-event-dialog";
@@ -16,6 +17,7 @@ import {
 } from "@/components/events/event-form";
 import {
   AlertCircleIcon,
+  ArrowLeftIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   PencilIcon,
@@ -39,7 +41,7 @@ import { relativeTime } from "@/lib/experiment-time";
 import { shortUrl } from "@/lib/launch-rules";
 import { can } from "@/lib/permissions";
 import type { PdProject } from "@/lib/project-dashboard";
-import { routes } from "@/lib/routes";
+import { routes, withGoalEvent } from "@/lib/routes";
 import { cn } from "@/lib/utils";
 import { getEventLibraryAction } from "@/server/actions/event.actions";
 import type {
@@ -47,6 +49,7 @@ import type {
   EventUsage,
   LibraryEvent,
 } from "@/server/services/custom-event.service";
+import type { ProjectChoice } from "@/server/services/project.service";
 
 export type EventsLoad = "data" | "loading" | "error";
 
@@ -98,13 +101,20 @@ export function EventsView({
   data,
   load,
   now: serverNow,
+  projects,
+  returnTo = null,
 }: {
   project: PdProject;
   data: EventLibrary | null;
   load: EventsLoad;
   /** Epoch ms the server read the library at, so relative times render the same on both sides. */
   now: number;
+  /** Set on the Metrics page: the workspace's projects, switched between in place of a breadcrumb. */
+  projects?: ProjectChoice[];
+  /** The wizard this visit came from (`wizardReturnPath`): offer the way back. */
+  returnTo?: string | null;
 }) {
+  const router = useRouter();
   // A newer server render replaces whatever a refresh read before it.
   const [source, setSource] = useState(data);
   const [library, setLibrary] = useState(data);
@@ -118,7 +128,8 @@ export function EventsView({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshFailed, setRefreshFailed] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
-  const [showSuggested, setShowSuggested] = useState(false);
+  // Open by default: starting from a suggestion is the quickest way to an event (2026-11-09).
+  const [showSuggested, setShowSuggested] = useState(true);
   const { toast, notify } = useToast();
 
   const refresh = useCallback(async () => {
@@ -153,22 +164,34 @@ export function EventsView({
   return (
     <div aria-busy={loading || refreshing} className="flex flex-col gap-6">
       <header className="flex min-w-0 flex-col gap-2.5">
-        <nav
-          aria-label="Breadcrumb"
-          className="flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-[#6B7280]"
-        >
-          <Link href={routes.projects.list} className={crumb}>
-            Projects
+        {returnTo ? (
+          <Link
+            href={returnTo}
+            className={cn(crumb, "inline-flex w-fit items-center gap-1 text-[13px]")}
+          >
+            <ArrowLeftIcon size={14} />
+            Back to experiment
           </Link>
-          <ChevronRightIcon size={14} stroke="#9CA3AF" className="flex-[0_0_14px]" />
-          <Link href={routes.projects.detail(project.id)} className={cn(crumb, "truncate")}>
-            {project.name}
-          </Link>
-          <ChevronRightIcon size={14} stroke="#9CA3AF" className="flex-[0_0_14px]" />
-          <span aria-current="page" className="font-medium text-[#111827]">
-            Events
-          </span>
-        </nav>
+        ) : projects ? (
+          <ProjectSwitcher projects={projects} current={project.id} />
+        ) : (
+          <nav
+            aria-label="Breadcrumb"
+            className="flex min-w-0 items-center gap-1.5 text-[13px] leading-[18px] text-[#6B7280]"
+          >
+            <Link href={routes.projects.list} className={crumb}>
+              Projects
+            </Link>
+            <ChevronRightIcon size={14} stroke="#9CA3AF" className="flex-[0_0_14px]" />
+            <Link href={routes.projects.detail(project.id)} className={cn(crumb, "truncate")}>
+              {project.name}
+            </Link>
+            <ChevronRightIcon size={14} stroke="#9CA3AF" className="flex-[0_0_14px]" />
+            <span aria-current="page" className="font-medium text-[#111827]">
+              Events
+            </span>
+          </nav>
+        )}
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3.5">
             <ProjectAvatar
@@ -180,7 +203,7 @@ export function EventsView({
             />
             <div className="flex min-w-0 flex-col gap-0.5">
               <h1 className="m-0 text-[20px] leading-7 font-semibold tracking-[-0.01em] [overflow-wrap:anywhere] text-[#111827]">
-                {project.name} events
+                {projects ? "Metrics" : `${project.name} events`}
               </h1>
               <p className="m-0 text-[14px] leading-5 text-pretty text-[#4B5563]">
                 Actions visitors take on your site, ready to use as experiment goals.
@@ -273,19 +296,38 @@ export function EventsView({
       ) : null}
 
       {canManage && events.length > 0 && suggestions.length > 0 ? (
-        <section aria-label="Suggested events" className="flex flex-col gap-3">
-          <button
-            type="button"
-            aria-expanded={showSuggested}
-            onClick={() => setShowSuggested((open) => !open)}
-            className={cn(btn.link, "h-auto gap-1.5 self-start px-0 text-[#374151]")}
-          >
-            <ChevronDownIcon
-              size={14}
-              className={cn("transition-transform", !showSuggested && "-rotate-90")}
-            />
-            Suggested events ({suggestions.length})
-          </button>
+        <section
+          aria-labelledby="rt-suggested-title"
+          className={cn(card, "flex flex-col gap-4 border-[#B3DBFF] bg-[#F7FBFF] p-5")}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <h2
+                id="rt-suggested-title"
+                className="m-0 flex items-center gap-2 text-[16px] leading-6 font-semibold text-[#111827]"
+              >
+                Suggested events
+                <span className="inline-flex h-5 items-center rounded-md bg-[#E6F4FF] px-1.5 text-[12px] font-semibold text-[#0060AD]">
+                  {suggestions.length}
+                </span>
+              </h2>
+              <p className="m-0 text-[13px] leading-[19px] text-[#4B5563]">
+                Common events, ready to set up. Pick one to start from it.
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-expanded={showSuggested}
+              onClick={() => setShowSuggested((open) => !open)}
+              className={cn(btn.secondary, "h-8 gap-1.5 px-3")}
+            >
+              <ChevronDownIcon
+                size={14}
+                className={cn("transition-transform", !showSuggested && "-rotate-90")}
+              />
+              {showSuggested ? "Hide" : "Show"}
+            </button>
+          </div>
           {showSuggested ? <SuggestionGrid items={suggestions} onPick={fromTemplate} /> : null}
         </section>
       ) : null}
@@ -299,6 +341,7 @@ export function EventsView({
           initial={dialog.form}
           onClose={() => setDialog(null)}
           onSaved={() => void refresh()}
+          onReturn={returnTo ? (id) => router.push(withGoalEvent(returnTo, id)) : undefined}
         />
       ) : null}
       {dialog?.kind === "delete" ? (
@@ -315,6 +358,30 @@ export function EventsView({
       ) : null}
       <ToastHost toast={toast} />
     </div>
+  );
+}
+
+/** The Metrics page's project switcher: each project's library is its own URL. */
+function ProjectSwitcher({ projects, current }: { projects: ProjectChoice[]; current: string }) {
+  const router = useRouter();
+  return (
+    <label className="flex w-fit max-w-full items-center gap-2 text-[13px] leading-[18px] font-medium text-[#4B5563]">
+      Project
+      <select
+        value={current}
+        onChange={(e) => router.push(routes.metrics.project(e.target.value))}
+        className={cn(
+          "h-9 max-w-[280px] min-w-0 cursor-pointer truncate rounded-lg border border-[#E5E7EB] bg-white pr-8 pl-3 text-[14px] font-medium text-[#111827]",
+          focusRing,
+        )}
+      >
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -539,15 +606,23 @@ function SuggestionGrid({
           type="button"
           onClick={() => onPick(template)}
           className={cn(
-            "flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2.5 text-left hover:border-[#B3DBFF] hover:bg-[#F0F7FF]",
+            "group flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-[#E5E7EB] bg-white px-3 py-2.5 text-left hover:border-[#B3DBFF] hover:bg-[#F0F7FF]",
             focusRing,
           )}
         >
-          <span className="text-[13px] leading-[19px] font-semibold text-[#111827]">
-            {template.label}
+          <span className="flex min-w-0 flex-auto flex-col gap-0.5">
+            <span className="text-[13px] leading-[19px] font-semibold text-[#111827]">
+              {template.label}
+            </span>
+            <span className="text-[12px] leading-[17px] text-[#6B7280]">
+              {METHOD_LABELS[template.method]} · {template.category}
+            </span>
           </span>
-          <span className="text-[12px] leading-[17px] text-[#6B7280]">
-            {METHOD_LABELS[template.method]} · {template.category}
+          <span
+            aria-hidden
+            className="inline-flex size-7 flex-none items-center justify-center rounded-md bg-[#E6F4FF] text-[#0060AD] group-hover:bg-[#0070C9] group-hover:text-white"
+          >
+            <PlusIcon size={14} />
           </span>
         </button>
       ))}

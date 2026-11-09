@@ -1,19 +1,9 @@
 import "server-only";
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 
-import { VERIFY_HASH_PARAM } from "@routely/sdk/contract";
-
-import type { Prisma } from "@/generated/prisma/client";
-import {
-  type BrowserReport,
-  type InstallMethodName,
-  type StaticLook,
-  type VerifyOutcome,
-  VERIFY_TOKEN_TTL_MS,
-  readVerification,
-} from "@/lib/install-verification";
-import { can } from "@/lib/permissions";
+import { type VerifyOutcome, readServerCheck } from "@/lib/install-verification";
+import { can, rolesWith } from "@/lib/permissions";
 import { isSameSite } from "@/lib/url";
 import { forbidden, notFound, rateLimited, validationFailed } from "@/server/errors";
 import { rateLimit } from "@/server/http/rate-limit";
@@ -21,45 +11,37 @@ import * as verificationRepo from "@/server/repositories/install-verification.re
 import * as websiteRepo from "@/server/repositories/website.repository";
 import { inspectPage } from "@/server/services/pixel.service";
 import { parseOrThrow } from "@/server/validate";
-import {
-  startVerificationSchema,
-  verificationPollSchema,
-  verifySignalSchema,
-} from "@/validation/custom-event";
+import { installCheckSchema, verifySignalSchema } from "@/validation/custom-event";
 
 /**
- * The install check: did this project's SDK actually run on the customer's page?
+ * The install check, and the SDK's signal from the browser-run check it replaced.
  *
- * The server cannot run a page, so the customer's own browser does. The dashboard opens the page
- * with `#_rt_verify=<token>`; the SDK there reports to `/api/v1/verify`; the dashboard polls. The
- * rules that turn those observations into a status live in `lib/install-verification.ts`.
- *
- * The same check serves a pasted tag and a tag in Google Tag Manager. Nothing here signs in to
- * GTM or changes a container.
+ * The dialogs ask `checkInstall`, which reads the page and any published GTM container on the
+ * server. `recordVerifySignal` still answers `/api/v1/verify` for SDKs that carry `verify.ts`, but
+ * nothing issues a token any more (2026-11-09), so it finds no run and records nothing.
  */
 
-/** Per user, as the HTML check. A run makes up to five outbound fetches. */
-const START_RATE_LIMIT = 10;
-const START_RATE_WINDOW_MS = 60_000;
+/** Per user, as the pixel check: each run fetches the page (twice past a cache) and its containers. */
+const CHECK_RATE_LIMIT = 10;
+const CHECK_RATE_WINDOW_MS = 60_000;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export interface StartedVerification {
-  id: string;
-  /** The page with the token in its fragment: what the dashboard opens. */
-  openUrl: string;
-  outcome: VerifyOutcome;
-}
-
-export async function startVerification(
+/**
+ * The tracking dialogs' check: is this project's code on the page, by hand or through a published
+ * Google Tag Manager container? Answered in one request from the server's look; nothing is opened
+ * in the customer's browser. A success stamps the website with the method; a miss writes nothing,
+ * since a slow or cached page is no evidence an earlier install went away.
+ */
+export async function checkInstall(
   actorUserId: string,
   input: unknown,
   now: Date = new Date(),
-): Promise<StartedVerification> {
+): Promise<VerifyOutcome> {
   const { websiteId, url, method } = parseOrThrow(
-    startVerificationSchema,
+    installCheckSchema,
     input,
     "Check the URL you entered.",
   );
@@ -76,14 +58,14 @@ export async function startVerification(
     );
   }
 
-  if (!rateLimit(`pixel-verify:${actorUserId}`, START_RATE_LIMIT, START_RATE_WINDOW_MS).allowed) {
+  if (!rateLimit(`pixel-verify:${actorUserId}`, CHECK_RATE_LIMIT, CHECK_RATE_WINDOW_MS).allowed) {
     throw rateLimited("Too many checks in a minute. Wait a moment and try again.");
   }
 
-  const { fetched, finding, gtm } = await inspectPage(url, website);
+  const { fetched, finding, gtm, antiFlicker } = await inspectPage(url, website);
   if (fetched.refused) throw validationFailed(fetched.refused, { url: [fetched.refused] });
 
-  const look: StaticLook = {
+  const result = readServerCheck(method, {
     pageLoaded: fetched.pageLoaded,
     loadError: fetched.loadError,
     inHtml: finding.scriptFound && !gtm.inContainer,
@@ -92,74 +74,20 @@ export async function startVerification(
     inContainer: gtm.inContainer,
     otherInContainer: gtm.otherInContainer,
     containerUnreadable: gtm.unreadable,
-  };
-
-  const token = randomBytes(32).toString("base64url");
-  const run = await verificationRepo.createVerification({
-    websiteId: website.id,
-    method,
-    url,
-    tokenHash: hashToken(token),
-    createdById: actorUserId,
-    expiresAt: new Date(now.getTime() + VERIFY_TOKEN_TTL_MS),
-    staticLook: look as unknown as Prisma.InputJsonObject,
+    antiFlicker,
+    antiFlickerInContainer: gtm.antiFlickerInContainer,
   });
 
-  const open = new URL(fetched.finalUrl || url);
-  open.hash = `${VERIFY_HASH_PARAM}=${token}`;
-
-  return {
-    id: run.id,
-    openUrl: open.href,
-    outcome: readVerification(observe(run, look, null, 0, method)),
-  };
-}
-
-function observe(
-  run: {
-    loadedAt: Date | null;
-    readyAt: Date | null;
-    failReason: string | null;
-    otherSiteIds: string[];
-    tagCount: number | null;
-  },
-  look: StaticLook | null,
-  browser: BrowserReport | null,
-  elapsedMs: number,
-  method: InstallMethodName,
-) {
-  return {
-    method,
-    look,
-    loadedAt: run.loadedAt,
-    readyAt: run.readyAt,
-    failReason: run.failReason,
-    otherSiteIds: run.otherSiteIds,
-    tagCount: run.tagCount,
-    browser,
-    elapsedMs,
-  };
-}
-
-/** Where a run stands. Any member may read it; the run's own website decides that. */
-export async function pollVerification(
-  actorUserId: string,
-  input: unknown,
-  now: Date = new Date(),
-): Promise<VerifyOutcome> {
-  const { id, browser } = parseOrThrow(verificationPollSchema, input);
-  const run = await verificationRepo.findForActor(id, actorUserId);
-  if (!run) throw notFound("That check has expired. Start it again.");
-
-  return readVerification(
-    observe(
-      run,
-      run.staticLook as unknown as StaticLook | null,
-      browser ?? null,
-      now.getTime() - run.createdAt.getTime(),
-      run.method,
-    ),
-  );
+  if (result.status === "verified") {
+    await verificationRepo.markInstallVerified(
+      website.id,
+      actorUserId,
+      rolesWith("pixel.verify"),
+      method,
+      now,
+    );
+  }
+  return result;
 }
 
 /**

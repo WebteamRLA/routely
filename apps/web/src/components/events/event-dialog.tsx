@@ -71,6 +71,7 @@ export function EventDialog({
   initial,
   onClose,
   onSaved,
+  onReturn,
 }: {
   websiteId: string;
   domain: string;
@@ -80,6 +81,9 @@ export function EventDialog({
   initial: EventForm;
   onClose(): void;
   onSaved(): void;
+  /** Set when the visit came from a wizard: a save goes straight back, with this event as its goal,
+   * instead of showing the "created" screen (user request 2026-11-09). */
+  onReturn?: ((eventId: string) => void) | undefined;
 }) {
   const editing = !!event?.id;
   const nameLocked = !!event?.usage.some((use) => use.status !== "DRAFT");
@@ -120,6 +124,13 @@ export function EventDialog({
     const result = await (
       event?.id ? updateEventAction(event.id, input) : createEventAction(input)
     ).catch(() => null);
+
+    const savedId = result?.ok ? (result.data?.id ?? event?.id ?? null) : null;
+    // From a wizard: straight back to it with this event chosen. Still "Saving…" until it loads.
+    if (savedId && onReturn) {
+      onReturn(savedId);
+      return;
+    }
     setSaving(false);
 
     if (!result) {

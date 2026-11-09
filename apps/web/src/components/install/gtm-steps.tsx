@@ -23,6 +23,12 @@ export function GtmSteps({
         Routely doesn’t change your Google Tag Manager container and can’t publish it for you. You
         add the tag and publish it yourself.
       </p>
+      <p className="m-0 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 text-[13px] leading-[19px] text-pretty text-[#92400E]">
+        <strong className="font-semibold">Running Split URL tests?</strong> Tag Manager starts after
+        the page is visible, so visitors can see the original page for a moment before they’re
+        redirected. For no flash, use Manual installation and paste the code into your site’s{" "}
+        <code className="text-[12px]">{"<head>"}</code> instead.
+      </p>
 
       <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
         <GtmStep n={1} title="Open Google Tag Manager">
@@ -44,7 +50,8 @@ export function GtmSteps({
         </GtmStep>
         <GtmStep n={3} title="Add a Custom HTML tag">
           <Body>
-            Go to Tags, click New, then Tag Configuration, and choose Custom HTML. Paste this code:
+            Go to Tags, click New, then Tag Configuration, and choose Custom HTML. Paste this code.
+            It loads Routely and includes the anti-flicker block, so this one tag is all you need:
           </Body>
           <CodeBox code={buildGtmSnippet({ sdkUrl, publicSiteId })} />
         </GtmStep>
@@ -58,7 +65,10 @@ export function GtmSteps({
           <Body>Saving a tag isn’t enough. Nothing goes live until you publish the container.</Body>
         </GtmStep>
         <GtmStep n={6} title="Come back and click Verify installation" last>
-          <Body>Continue to the next step and we’ll check that the code runs on your page.</Body>
+          <Body>
+            Continue to the next step. We’ll check that your page loads the published tag, with the
+            anti-flicker block in it.
+          </Body>
         </GtmStep>
       </ol>
 
@@ -73,17 +83,16 @@ export function GtmSteps({
             size={16}
             className="flex-none text-[#6B7280] transition-transform group-open:rotate-90 motion-reduce:transition-none"
           />
-          Avoid a flash on redirect tests (optional)
+          No flash at all (optional)
         </summary>
         <div className="flex flex-col gap-2.5 border-t border-[#EEF0F3] px-3.5 pt-3 pb-3.5">
           <Body>
-            Google Tag Manager loads after the page starts rendering, so visitors can see the
-            original page for a moment in a Split URL or A/B test. To hide it, paste this block
+            Tag Manager starts after the page is visible, so visitors may still see the original
+            page for a moment in a Split URL or A/B test. To prevent that, also paste this block
             directly into your site’s <code className="text-[13px]">{"<head>"}</code>, above the
-            Google Tag Manager snippet.
+            Google Tag Manager snippet. The tag above stands down when it’s there.
           </Body>
           <CodeBox code={buildAntiFlickerSnippet()} />
-          <Body>Don’t put it inside Google Tag Manager. Verification doesn’t need it.</Body>
         </div>
       </details>
     </div>

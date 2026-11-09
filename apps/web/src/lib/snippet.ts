@@ -82,7 +82,15 @@ export interface AntiFlickerOptions {
  */
 export const OPTIMIZER_OPT_OUT = 'data-no-optimize="1" data-no-defer="1" data-cfasync="false"';
 
-export function buildAntiFlickerSnippet({
+/**
+ * The anti-flicker JavaScript itself, without its `<script>` element: shared by the `<head>` block
+ * below and the Google Tag Manager tag (`lib/gtm.ts`), so the two can never drift apart.
+ *
+ * It stands down when a cover already exists (`#routely-cloak`) **or once ran** (`__routelyReveal`
+ * is set): a site with the block in `<head>` and in a Tag Manager tag must not get a second cover
+ * after the first was lifted.
+ */
+export function antiFlickerScript({
   timeoutMs = DEFAULT_ANTI_FLICKER_MS,
   background = DEFAULT_ANTI_FLICKER_BACKGROUND,
 }: AntiFlickerOptions = {}): string {
@@ -91,10 +99,14 @@ export function buildAntiFlickerSnippet({
     "right:0!important;bottom:0!important;left:0!important;" +
     `background:${background}!important;z-index:2147483647!important}`;
 
+  return `var routelyTimeout = ${timeoutMs};
+!function(d,w,i,t){try{var h=d.head||d.getElementsByTagName("head")[0];if(!h||d.getElementById(i)||w.__routelyReveal)return;var s=d.createElement("style");s.id=i;s.appendChild(d.createTextNode("${css}"));h.appendChild(s);var done=false;w.__routelyReveal=function(){if(done)return;done=true;try{s.parentNode&&s.parentNode.removeChild(s)}catch(e){}};setTimeout(w.__routelyReveal,t)}catch(e){}}(document,window,"routely-cloak",routelyTimeout);`;
+}
+
+export function buildAntiFlickerSnippet(options: AntiFlickerOptions = {}): string {
   return `<!-- Routely anti-flickering script -->
 <script ${OPTIMIZER_OPT_OUT}>
-var routelyTimeout = ${timeoutMs};
-!function(d,w,i,t){try{var h=d.head||d.getElementsByTagName("head")[0];if(!h||d.getElementById(i))return;var s=d.createElement("style");s.id=i;s.appendChild(d.createTextNode("${css}"));h.appendChild(s);var done=false;w.__routelyReveal=function(){if(done)return;done=true;try{s.parentNode&&s.parentNode.removeChild(s)}catch(e){}};setTimeout(w.__routelyReveal,t)}catch(e){}}(document,window,"routely-cloak",routelyTimeout);
+${antiFlickerScript(options)}
 </script>`;
 }
 

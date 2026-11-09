@@ -1,6 +1,11 @@
 import "server-only";
 
-import type { InstallMethod, InstallVerification, Prisma } from "@/generated/prisma/client";
+import type {
+  InstallMethod,
+  InstallVerification,
+  MemberRole,
+  Prisma,
+} from "@/generated/prisma/client";
 import { type DbClient, db } from "@/server/db";
 import { websiteAccess } from "@/server/repositories/access";
 
@@ -64,6 +69,21 @@ export function recordPageFacts(
   client: DbClient = db,
 ) {
   return client.installVerification.update({ where: { id }, data: facts });
+}
+
+/** The dialog's check passed: stamp the website, if the actor may verify it. */
+export function markInstallVerified(
+  websiteId: string,
+  userId: string,
+  roles: readonly MemberRole[],
+  method: InstallMethod,
+  at: Date,
+  client: DbClient = db,
+): Promise<Prisma.BatchPayload> {
+  return client.website.updateMany({
+    where: { id: websiteId, ...websiteAccess(userId, { roles }) },
+    data: { pixelVerifiedAt: at, installMethod: method },
+  });
 }
 
 export function recordInstalled(

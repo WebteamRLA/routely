@@ -27,6 +27,8 @@ export const VERIFY_POLL_MS = 2_000;
 /** Extra time for the backend signal once the browser says the SDK has finished. */
 export const SIGNAL_GRACE_MS = 8_000;
 
+import type { AntiFlickerPlacement } from "@/lib/gtm";
+
 export type InstallMethodName = "MANUAL" | "GTM";
 
 export type InstallStatus =
@@ -38,6 +40,7 @@ export type InstallStatus =
   | "sdk_failed_to_load"
   | "sdk_not_initialized"
   | "backend_signal_missing"
+  | "anti_flicker"
   | "failed";
 
 export interface StaticLook {
@@ -55,6 +58,10 @@ export interface StaticLook {
   otherInContainer: boolean;
   /** The containers could not be read, so nothing can be said about them. */
   containerUnreadable: boolean;
+  /** Where the anti-flicker block sits (`lib/gtm.ts`). Absent on looks stored before it existed. */
+  antiFlicker?: AntiFlickerPlacement | undefined;
+  /** The published container holding this project's tag also holds the anti-flicker block. */
+  antiFlickerInContainer?: boolean | undefined;
 }
 
 /** The SDK's report through `postMessage`, passed along by the dialog. Advisory: it only ever
@@ -312,6 +319,159 @@ export function readVerification(o: VerifyObservation): VerifyOutcome {
       "Make sure your changes are published, not just saved as a draft.",
       "If you use a caching plugin or CDN, clear the cache.",
       "Check that a cookie banner isn’t blocking the code until visitors accept.",
+    ],
+  );
+}
+
+/**
+ * The dialog's check, read from the server's look alone (user decision 2026-11-09: the dialog no
+ * longer opens the customer's page in a tab). Always final.
+ *
+ * It verifies on the same evidence the launch's tracking check accepts: this project's code in the
+ * page's HTML, or in the published version of a Google Tag Manager container the page loads. That
+ * proves the code is on the site, not that it runs: a GTM trigger that never fires on this page
+ * still passes. The project's tracking status, from real visitors' page hits, is what shows that.
+ */
+export function readServerCheck(method: InstallMethodName, look: StaticLook): VerifyOutcome {
+  const tag = readServerTag(method, look);
+  // Google Tag Manager installs also need the anti-flicker block (2026-11-09): in the published tag
+  // (the GTM tab's code includes it), or in <head> above Tag Manager. A manual install pastes it as
+  // part of the snippet, so only the GTM tab asks.
+  if (method !== "GTM" || !look.pageLoaded || tag.status === "failed") return tag;
+  const placement = look.antiFlicker ?? "missing";
+  if (placement === "ok") return tag;
+  // In the Tag Manager tag itself (the code the GTM tab gives, 2026-11-09): accepted, with a note,
+  // because there it starts only after the page is visible.
+  if (look.antiFlickerInContainer) {
+    return tag.status === "verified" ? { ...tag, warnings: [...tag.warnings, IN_GTM_NOTE] } : tag;
+  }
+
+  const fix = ANTI_FLICKER_FIX[placement];
+  if (tag.status === "verified") {
+    return outcome(
+      "anti_flicker",
+      true,
+      fix.title,
+      `Your Google Tag Manager tag is published. ${fix.detail}`,
+      fix.steps,
+    );
+  }
+  // Both are wrong: the tag's own answer leads, and the block's fix follows it.
+  return { ...tag, detail: `${tag.detail} ${fix.detail}`, steps: [...tag.steps, ...fix.steps] };
+}
+
+const IN_GTM_NOTE =
+  "The anti-flicker block runs inside Google Tag Manager, so visitors may still briefly see the original page. For no flash, also paste it into your site’s <head>.";
+const ANTI_FLICKER_STEP =
+  "Replace your Custom HTML tag’s contents with this project’s Tag Manager code. It includes the anti-flicker block.";
+const OR_USE_TAG =
+  "Or use this project’s Tag Manager code in your tag instead. It includes the anti-flicker block.";
+
+const ANTI_FLICKER_FIX: Record<
+  Exclude<AntiFlickerPlacement, "ok">,
+  { title: string; detail: string; steps: string[] }
+> = {
+  missing: {
+    title: "Anti-flicker block not found",
+    detail: "The anti-flicker block isn’t in your published tag or in this page’s <head>.",
+    steps: [ANTI_FLICKER_STEP, GTM_PUBLISH_STEP],
+  },
+  outside_head: {
+    title: "Anti-flicker block in the wrong place",
+    detail: "The anti-flicker block is in the page’s <body>, so it can’t hide the page in time.",
+    steps: [
+      "Move the anti-flicker block into your site’s <head>, above the Google Tag Manager snippet.",
+      OR_USE_TAG,
+    ],
+  },
+  below_gtm: {
+    title: "Anti-flicker block in the wrong place",
+    detail:
+      "The anti-flicker block comes after the Google Tag Manager snippet, so it runs too late.",
+    steps: [
+      "Move the anti-flicker block above the Google Tag Manager snippet in your site’s <head>.",
+      OR_USE_TAG,
+    ],
+  },
+};
+
+/** Is this project's code on the page, by hand or in a published container? */
+function readServerTag(method: InstallMethodName, look: StaticLook): VerifyOutcome {
+  const gtm = method === "GTM";
+
+  if (!look.pageLoaded) {
+    return outcome(
+      "failed",
+      true,
+      "Verification failed",
+      look.loadError ?? "Routely couldn’t load that page.",
+      ["Check the URL opens in a private window, then check again."],
+    );
+  }
+
+  if (look.inHtml || look.inContainer) {
+    return outcome(
+      "verified",
+      true,
+      "Installation verified",
+      look.inContainer
+        ? "This page loads your Google Tag Manager container, and its published version holds this project’s Routely code."
+        : "This project’s Routely code is in this page.",
+    );
+  }
+
+  if (look.otherInHtml || look.otherInContainer) {
+    return outcome(
+      "wrong_site_id",
+      true,
+      "Incorrect Project ID",
+      look.otherInContainer
+        ? "Your published Google Tag Manager container holds another project’s Routely code."
+        : "Routely found a different project ID in this page.",
+      [
+        "Confirm that you copied this project’s installation snippet.",
+        look.otherInContainer ? GTM_PUBLISH_STEP : CACHE_STEP,
+      ],
+    );
+  }
+
+  if (look.containers.length > 0) {
+    return outcome(
+      "not_installed",
+      true,
+      "Routely pixel not detected",
+      look.containerUnreadable
+        ? "Google Tag Manager is on this page, but Routely couldn’t read its published container, and the Routely code isn’t in the page."
+        : `${look.containers.join(", ")} is on this page, but its published version doesn’t contain this project’s code.`,
+      [
+        GTM_PUBLISH_STEP,
+        "Check you added the tag to the container this site uses.",
+        "Then check again.",
+      ],
+    );
+  }
+
+  if (gtm) {
+    return outcome(
+      "not_installed",
+      true,
+      "Routely pixel not detected",
+      "Google Tag Manager wasn’t found on this page.",
+      [
+        "Check this page has the Google Tag Manager container installed.",
+        "Check you are testing a page on the same site as that container.",
+      ],
+    );
+  }
+
+  return outcome(
+    "not_installed",
+    true,
+    "Routely pixel not detected",
+    "The page loaded, but the Routely code wasn’t in it.",
+    [
+      "Make sure your changes are published, not just saved as a draft.",
+      "If you use a caching plugin or CDN, clear the cache.",
     ],
   );
 }

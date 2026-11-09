@@ -56,13 +56,7 @@ const TONES: Record<
 };
 
 /** One check's answer. All of its words come from `lib/install-verification.ts`. */
-export function VerificationResult({
-  outcome,
-  blockedUrl,
-}: {
-  outcome: VerifyOutcome;
-  blockedUrl: string | null;
-}) {
+export function VerificationResult({ outcome }: { outcome: VerifyOutcome }) {
   const tone = verifyTone(outcome);
   const t = TONES[tone];
   const moreFixes = outcome.status === "not_installed" || outcome.status === "sdk_failed_to_load";
@@ -103,7 +97,6 @@ export function VerificationResult({
         <p className="m-0 text-[14px] leading-5 text-pretty [overflow-wrap:anywhere] text-[#374151]">
           {outcome.detail}
         </p>
-        {blockedUrl ? <BlockedTab url={blockedUrl} final={outcome.final} /> : null}
         {outcome.steps.length > 0 ? (
           <ol className="m-0 flex list-decimal flex-col gap-1 py-0 pr-0 pl-[18px] text-[13px] leading-[19px] text-[#374151]">
             {outcome.steps.map((step) => (
@@ -132,24 +125,5 @@ export function VerificationResult({
         </ul>
       ) : null}
     </section>
-  );
-}
-
-/** Without a tab the SDK can't answer, so a failure here may only mean the page never opened. */
-function BlockedTab({ url, final }: { url: string; final: boolean }) {
-  return (
-    <p className="m-0 rounded-lg bg-[#FFFBEB] px-3 py-2 text-[13px] leading-[19px] text-[#92400E]">
-      {final ? (
-        "Your browser blocked the new tab, so this result may be wrong. Allow pop-ups for this site, then check again."
-      ) : (
-        <>
-          Your browser blocked the new tab.{" "}
-          <a href={url} target="_blank" rel="opener" className="font-semibold underline">
-            Open the page
-          </a>{" "}
-          so the check can run.
-        </>
-      )}
-    </p>
   );
 }

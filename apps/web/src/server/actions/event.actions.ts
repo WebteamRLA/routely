@@ -54,5 +54,7 @@ export async function getEventLibraryAction(
 
 function revalidateLibrary(input: unknown): void {
   const websiteId = (input as { websiteId?: unknown } | null)?.websiteId;
-  if (typeof websiteId === "string") revalidatePath(routes.projects.events(websiteId));
+  if (typeof websiteId !== "string") return;
+  revalidatePath(routes.projects.events(websiteId));
+  revalidatePath(routes.metrics.list);
 }

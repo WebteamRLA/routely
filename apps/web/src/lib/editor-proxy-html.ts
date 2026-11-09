@@ -9,8 +9,39 @@
  *    snippet is added that talks to this Routely app (`data-api`). In editor mode the snippet does
  *    nothing but the handshake — no hit, no assignment — so editing never records a visit;
  *  - `<meta>` tags that would block that script (a CSP), refuse framing, or navigate the page away
- *    (`refresh`) are dropped. The response's own headers decide framing.
+ *    (`refresh`) are dropped. The response's own headers decide framing;
+ *  - a small script runs before anything else (`PAGE_SHIM`), so the page's own code survives being
+ *    somewhere it was not written for (below).
  */
+
+/**
+ * Keeps the customer's own scripts from crashing in the copy, which would leave the editor showing
+ * the site's error page instead of the site (seen on blinto.co, a Next.js site, 2026-11-09).
+ *
+ *  - **History.** A router that resolves URLs against `document.baseURI` asks `replaceState` for a
+ *    URL on the customer's origin while the document is on the proxy's, which the browser refuses
+ *    with a `SecurityError`; Next.js's router does this on hydration. A refused call is retried
+ *    without the URL: the state still changes, the address does not, and the editor blocks
+ *    navigation anyway.
+ *  - **Storage and cookies.** The sandbox's opaque origin makes `localStorage`, `sessionStorage`
+ *    and `document.cookie` throw. Where they throw, the copy gets in-memory stand-ins that last for
+ *    the page load. This gives the customer's scripts nothing real: the sandbox stays the boundary.
+ *
+ * Everything is inside one try, so the shim can never be what breaks a page.
+ */
+export const PAGE_SHIM =
+  "(function(){try{var w=window,d=document,h=w.history;" +
+  '["pushState","replaceState"].forEach(function(k){var o=h[k];if(typeof o!=="function")return;' +
+  "h[k]=function(s,t,u){try{return o.call(h,s,t,u)}catch(e){return o.call(h,s,t)}}});" +
+  "function mem(){var m=Object.create(null);return{getItem:function(k){k=String(k);return k in m?m[k]:null}," +
+  "setItem:function(k,v){m[String(k)]=String(v)},removeItem:function(k){delete m[String(k)]}," +
+  "clear:function(){m=Object.create(null)},key:function(i){var x=Object.keys(m)[i];return x===undefined?null:x}," +
+  "get length(){return Object.keys(m).length}}}" +
+  '["localStorage","sessionStorage"].forEach(function(k){try{void w[k].length}catch(e){' +
+  "Object.defineProperty(w,k,{value:mem(),configurable:true})}});" +
+  'try{void d.cookie}catch(e){Object.defineProperty(d,"cookie",{get:function(){return""},' +
+  "set:function(){},configurable:true})}" +
+  "}catch(e){}})();";
 
 const SCRIPT_BLOCK = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
 const ROUTELY_TAG = /data-site-id\s*=\s*["']?rt_/i;
@@ -42,6 +73,7 @@ export function rewriteForEditor(
 
   const inject =
     `<base href="${escapeAttr(options.baseUrl)}">` +
+    `<script>${PAGE_SHIM}</script>` +
     `<script src="${escapeAttr(options.sdkUrl)}" data-site-id="${escapeAttr(options.siteId)}"` +
     ` data-api="${escapeAttr(options.apiOrigin)}"></script>`;
 

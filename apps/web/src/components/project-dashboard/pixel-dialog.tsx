@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 /*
  * Two-step pixel setup: install by hand (`lib/snippet.ts`, D10) or through Google Tag Manager, then
- * prove it in a real tab (`components/install`, `lib/install-verification.ts`).
+ * check it from the server (`components/install`, `lib/install-verification.ts`).
  *
  * A copy of `components/projects/pixel-setup-dialog.tsx` (same design component), extended for
  * the project dashboard: it reports while a check is running so the page's pixel badge can read
@@ -83,7 +83,7 @@ function PixelPanel({
   onCheckingChange,
 }: Omit<PixelDialogProps, "open">) {
   const [step, setStep] = useState<Step>(initialStep);
-  const [method, setMethod] = useState<InstallMethodName>("MANUAL");
+  const [method, setMethod] = useState<InstallMethodName>("GTM");
   const [url, setUrl] = useState(pixelDefaultUrl(project.domain, project.protocol));
   const [attempted, setAttempted] = useState(false);
   const verification = useInstallVerification({ onVerified, onCheckingChange });
@@ -113,7 +113,6 @@ function PixelPanel({
     if (checking) return;
     setAttempted(true);
     if (urlErr) return;
-    // Synchronous from here to `window.open`, or the browser blocks the new tab.
     verification.start({
       websiteId: project.id,
       url: pixelCheckUrl(url, project.protocol),

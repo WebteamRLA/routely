@@ -1,9 +1,34 @@
 # Custom events and Google Tag Manager
 
-How event tracking and the browser-run install check work, and why. For customer-facing
+How event tracking and the install check work, and why. For customer-facing
 instructions see Help & Guides (`lib/guides.ts`).
 
 ## Install verification
+
+**Since 2026-11-09 the dialogs check from the server only** (user decision: no new tab).
+`checkInstall` reads the page, once more past any page cache, and the published version of every
+GTM container the page loads, and `readServerCheck` (`lib/install-verification.ts`) answers at
+once. It verifies when this project's id is in the HTML or in a published container: the same
+evidence the launch's tracking check accepts. It cannot tell whether a GTM trigger fires on that
+page, or whether the SDK starts; the project's tracking status, from real visitors' hits, shows
+that.
+
+**A Google Tag Manager install also needs the anti-flicker block** (user decisions 2026-11-09).
+The GTM tab's code is one Custom HTML script: the anti-flicker block (`antiFlickerScript` in
+`lib/snippet.ts`, shared with the `<head>` block) and then the loader. The check accepts the block
+in a published container that holds this project's tag (`readContainer` `hasAntiFlicker`), or in
+the page's `<head>` above the `gtm.js` loader (`antiFlickerPlacement` in `lib/gtm.ts`). Inside Tag
+Manager it starts after the page is visible, so it narrows the flash rather than preventing it:
+that pass carries a note, and the tab offers the `<head>` block as "No flash at all (optional)".
+The block stands down if a cover exists or already ran, so both together cover once. Without it
+anywhere the result is `anti_flicker` (amber) with the fix, and the install is not verified. The
+Manual tab is unchanged: its snippet already carries the block.
+
+The browser-run check below is **dormant**: `/api/v1/verify`, the SDK's `verify.ts` and the
+`install_verifications` table remain, but nothing issues a token, so no run exists for a signal
+to answer. Re-enable it by issuing tokens again, or remove it.
+
+### The browser-run check (dormant)
 
 A server fetch cannot see a tag that Google Tag Manager injects at runtime, so reading HTML can
 never confirm a GTM install. It also cannot show that an SDK actually ran. The check therefore
@@ -131,9 +156,9 @@ those visitors are not entered, rather than entered and unable to convert.
 - **Real-site coverage is thin.** Everything above ran in real Chrome against a local site, a local
   stand-in for `gtm.js` and a real Postgres. It has not run against a real published GTM container,
   or on real WordPress, Shopify, React or Next.js sites.
-- **Browser-based verification needs a tab.** A blocked pop-up falls back to a link. A page that
-  strips the fragment before the SDK reads it (a redirect to a client-side router, say) cannot be
-  verified, and reads as the SDK not running.
+- **The server check proves the code is on the site, not that it runs.** A GTM tag whose trigger
+  never fires on the page, a consent tool that holds it back, or a blocked SDK still passes. The
+  tracking status on the project shows whether real visitors' pages report.
 - **The form plugin events follow each plugin's documentation** and have only been exercised with
   simulated events, not real plugins.
 - **`custom_events` has no retention yet**, like other experiment data.

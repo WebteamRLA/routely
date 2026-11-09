@@ -9,7 +9,14 @@ import {
   withCacheBuster,
 } from "@/lib/install-check";
 import { can, rolesWith } from "@/lib/permissions";
-import { GTM_ORIGIN, findGtmContainers, gtmContainerUrl, readContainer } from "@/lib/gtm";
+import {
+  type AntiFlickerPlacement,
+  GTM_ORIGIN,
+  antiFlickerPlacement,
+  findGtmContainers,
+  gtmContainerUrl,
+  readContainer,
+} from "@/lib/gtm";
 import { detectSnippet } from "@/lib/snippet-detect";
 import { isSameSite } from "@/lib/url";
 import { forbidden, notFound, rateLimited, validationFailed } from "@/server/errors";
@@ -155,7 +162,13 @@ const NO_SNIPPET = {
 export async function inspectPage(
   url: string,
   website: { id: string; domain: string; publicSiteId: string },
-): Promise<{ fetched: ReturnType<typeof readFetch>; finding: InstallFinding; gtm: GtmLook }> {
+): Promise<{
+  fetched: ReturnType<typeof readFetch>;
+  finding: InstallFinding;
+  gtm: GtmLook;
+  /** Where the anti-flicker block sits in the page (`lib/gtm.ts`), read from the same copy as `gtm`. */
+  antiFlicker: AntiFlickerPlacement;
+}> {
   const options = { allowUrl: sameSitePolicy(website.domain), allowPrivate: allowPrivateFetch() };
   const fetched = readFetch(await safeFetch(url, options));
   const look = (f: ReturnType<typeof readFetch>): PageLook => ({
@@ -204,7 +217,7 @@ export async function inspectPage(
     }),
   );
 
-  return { fetched, finding, gtm };
+  return { fetched, finding, gtm, antiFlicker: antiFlickerPlacement(html) };
 }
 
 export interface GtmLook {
@@ -216,6 +229,8 @@ export interface GtmLook {
   otherInContainer: boolean;
   /** A container could not be fetched, so nothing can be said about it. */
   unreadable: boolean;
+  /** A published container holding this project's tag also holds the anti-flicker block. */
+  antiFlickerInContainer: boolean;
 }
 
 /** Where containers are read from. Overridable outside production, for testing without Google. */
@@ -255,6 +270,7 @@ async function inspectContainers(html: string, publicSiteId: string): Promise<Gt
     inContainer,
     otherInContainer: !inContainer && reads.some((read) => (read?.otherSiteIds.length ?? 0) > 0),
     unreadable: reads.includes(null),
+    antiFlickerInContainer: reads.some((read) => read?.hasThisProject && read.hasAntiFlicker),
   };
 }
 

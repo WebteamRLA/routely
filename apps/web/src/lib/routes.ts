@@ -58,9 +58,13 @@ export const routes = {
    * moves to `/integrations/google-sheets` — which is one edit here, and nowhere else. */
   integrations: "/integrations",
 
-  /** Conversion goals across every experiment, viewed as a list of measurable actions. */
+  /** The Event Library with a project switcher: where custom events are created and managed. */
   metrics: {
     list: "/metrics",
+    /** One project's events; `returnTo` (a wizard, `wizardReturnPath`) adds "Back to experiment". */
+    project: (projectId: string, returnTo?: string) =>
+      `/metrics?project=${encodeURIComponent(projectId)}` +
+      (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : ""),
     /** A goal's setup page. Addressed by its experiment, because a goal has no id of its own. */
     detail: (experimentId: string) => `/metrics/${encodeURIComponent(experimentId)}`,
   },
@@ -85,6 +89,22 @@ export const routes = {
     },
   },
 } as const;
+
+const WIZARD_RETURN = /^\/experiments\/new\/(?:ab-test|split-url)\?id=[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * A `returnTo` the Metrics page may send someone back to: a wizard reopening one draft, nothing
+ * else. It ends up in a link and a `router.push`, so an open redirect or a `javascript:` URL must
+ * never get through; a path this narrow cannot be either.
+ */
+export function wizardReturnPath(value: unknown): string | null {
+  return typeof value === "string" && WIZARD_RETURN.test(value) ? value : null;
+}
+
+/** Back to a wizard with the event just saved, for its goal step to choose (`goalEvent`). */
+export function withGoalEvent(wizardPath: string, eventId: string): string {
+  return `${wizardPath}&goalEvent=${encodeURIComponent(eventId)}`;
+}
 
 /**
  * Where a signed-in visitor lands when they had no particular destination.

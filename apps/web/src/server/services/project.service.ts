@@ -129,3 +129,19 @@ export async function getProjectRow(
 
   return toProjectRow(record, counts.get(record.id) ?? { running: 0, total: 0 }, visitors, now);
 }
+
+export interface ProjectChoice {
+  id: string;
+  name: string;
+}
+
+/** The workspace's projects as a switcher lists them, in the Projects table's order. */
+export async function listProjectChoices(
+  actorUserId: string,
+  workspaceId: string,
+): Promise<ProjectChoice[]> {
+  const workspace = await workspaceRepo.findWorkspaceForMember(workspaceId, actorUserId);
+  if (!workspace) throw notFound("That workspace does not exist.");
+  const records = await projectRepo.listProjects(workspaceId, actorUserId);
+  return records.map((record) => ({ id: record.id, name: record.name }));
+}

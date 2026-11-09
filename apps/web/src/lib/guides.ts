@@ -113,10 +113,10 @@ export const GUIDES: readonly Guide[] = [
             items: [
               "Open the project’s tracking code and choose “Google Tag Manager”.",
               "In Google Tag Manager, open the container for this website.",
-              "Tags → New → Tag Configuration → Custom HTML, and paste the code.",
+              "Tags → New → Tag Configuration → Custom HTML, and paste the code. It loads Routely and includes the anti-flicker block.",
               "Under Triggering, choose “Initialization - All Pages”.",
               "Save, then Submit and Publish. A saved tag isn’t live until you publish.",
-              "Back in Routely, click “Verify installation”. Your page opens in a new tab so the code can prove it runs.",
+              "Back in Routely, click “Verify installation”. Routely checks that the page loads your container and that its published version holds the code, anti-flicker block included.",
             ],
           },
           {
@@ -128,8 +128,8 @@ export const GUIDES: readonly Guide[] = [
           {
             kind: "note",
             tone: "tip",
-            title: "Avoid a flash on redirect tests",
-            text: "Tag Manager loads after the page starts to show. For A/B and Split URL tests, also paste the anti-flicker block straight into your site’s <head>, above the Tag Manager code. It’s optional and isn’t needed to verify.",
+            title: "For no flash at all",
+            text: "Tag Manager starts after the page is visible, so visitors may briefly see the original page in an A/B or Split URL test. To prevent it, also paste the anti-flicker block straight into your site’s <head>, above the Tag Manager code.",
           },
         ],
       },

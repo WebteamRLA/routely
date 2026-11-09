@@ -4,6 +4,7 @@ import {
   DashboardIcon,
   HelpIcon,
   IntegrationsIcon,
+  MetricsIcon,
   ProjectsIcon,
   SettingsIcon,
 } from "@/components/layout/nav-icons";
@@ -20,8 +21,11 @@ export interface NavItem {
 }
 
 /**
- * The design's navigation: three primary items, and Settings in a "Workspace" group pinned
- * above the account block. Help & Guides (not in the design) sits in that group, above Settings.
+ * The design's navigation: its three primary items plus Metrics (not in the design, user
+ * request 2026-11-09), and Settings in a "Workspace" group pinned above the account block.
+ * Help & Guides (not in the design) sits in that group, above Settings.
+ *
+ * Metrics is the Event Library with a project switcher: where custom events are created.
  *
  * Experiments have no item of their own — an experiment belongs to a project, so its list,
  * results and creation wizards all light Projects.
@@ -34,6 +38,7 @@ export const PRIMARY_NAV: NavItem[] = [
     icon: ProjectsIcon,
     alsoMatches: [routes.experiments.list],
   },
+  { href: routes.metrics.list, label: "Metrics", icon: MetricsIcon },
   { href: routes.integrations, label: "Integrations", icon: IntegrationsIcon },
 ];
 

@@ -63,6 +63,15 @@ export function IntegrationsIcon(props: IconProps) {
   );
 }
 
+/** Metrics: a pulse line, for the events visitors trigger. */
+export function MetricsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M3 12h4l3-8 4 16 3-8h4" />
+    </Svg>
+  );
+}
+
 export function SettingsIcon(props: IconProps) {
   return (
     <Svg {...props}>

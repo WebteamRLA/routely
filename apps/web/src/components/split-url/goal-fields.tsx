@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import { WarningIcon } from "@/components/rt/icons";
+import { PlusIcon, WarningIcon } from "@/components/rt/icons";
+import { btn } from "@/components/rt/styles";
 import { METHOD_LABELS, type EventStatus } from "@/lib/events";
 import { ACCENT, ACCENT_INK, ACCENT_LINE, ACCENT_WASH } from "@/lib/mock/split-url";
-import { routes } from "@/lib/routes";
+import { routes, wizardReturnPath } from "@/lib/routes";
+import { cn } from "@/lib/utils";
 import { type WizardCtx, type WizardEvent, wizardEvents } from "@/lib/wizard-draft";
 import { getEventLibraryAction } from "@/server/actions/event.actions";
 
@@ -68,21 +72,64 @@ export function GoalTypeOption({
   );
 }
 
-const LINK =
-  "font-medium text-[#0060AD] underline underline-offset-2 hover:text-[#004C8A] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0091FF]";
-
-/** Opens the Library beside the wizard; the list refreshes on coming back. */
-function LibraryLink({ projectId, children }: { projectId: string; children: ReactNode }) {
+/**
+ * Opens Metrics for this project in the same tab, with the way back to this draft. Saving an event
+ * there returns here with it chosen (`goalEvent`, handled below). The draft is safe to leave:
+ * autosave sends a pending edit when the wizard unmounts.
+ */
+function LibraryLink({
+  ctx,
+  primary = false,
+  children,
+}: {
+  ctx: WizardCtx;
+  primary?: boolean;
+  children: ReactNode;
+}) {
+  const pathname = usePathname();
+  const back = ctx.draftId ? wizardReturnPath(`${pathname}?id=${ctx.draftId}`) : null;
   return (
-    <a href={routes.projects.events(projectId)} target="_blank" rel="noopener" className={LINK}>
+    <Link
+      href={routes.metrics.project(ctx.projectId, back ?? undefined)}
+      className={cn(primary ? btn.primary : btn.secondary, "flex-none")}
+    >
+      <PlusIcon size={15} />
       {children}
-    </a>
+    </Link>
   );
 }
 
 /**
- * The project's Event Library as a choice. An event's status only ever warns: a draft saves and
- * launches whatever it says, because the event may simply not have happened yet.
+ * Back from Metrics with `?goalEvent=<id>`: choose that event, once, then drop the parameter so a
+ * reload doesn't undo a later change of mind. An id that isn't in this project's list is ignored.
+ */
+function useReturnedEvent(
+  ctx: WizardCtx,
+  events: readonly WizardEvent[],
+  onSelect: (event: WizardEvent) => void,
+) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const handled = useRef<string | null>(null);
+  const wanted = params.get("goalEvent");
+
+  useEffect(() => {
+    if (!wanted || handled.current === wanted) return;
+    handled.current = wanted;
+    const event = events.find((e) => e.id === wanted);
+    if (event && ctx.live && !ctx.readOnly) onSelect(event);
+    const rest = new URLSearchParams(params.toString());
+    rest.delete("goalEvent");
+    const query = rest.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }, [wanted, events, ctx.live, ctx.readOnly, onSelect, params, router, pathname]);
+}
+
+/**
+ * The project's Event Library as a choice. An event's status only ever informs: a draft saves and
+ * launches whatever it says. One not received yet shows no status and no warning (user request
+ * 2026-11-09): a new event usually hasn't happened yet. A broken setup still warns.
  */
 export function EventGoalFields({
   ctx,
@@ -101,8 +148,10 @@ export function EventGoalFields({
   const { live, projectId } = ctx;
   const events = ctx.events ?? [];
   const selected = events.find((event) => event.id === selectedId) ?? null;
+  useReturnedEvent(ctx, events, onSelect);
 
-  // The Library opens in its own tab: an event set up there appears on coming back.
+  // Metrics may still be open in another tab (a middle-click): an event set up there appears here
+  // when this tab regains focus.
   useEffect(() => {
     if (!live) return;
     let current = true;
@@ -124,12 +173,11 @@ export function EventGoalFields({
   if (events.length === 0) {
     return (
       <div className="flex flex-col gap-1.5">
-        <div className="flex flex-col items-start gap-1 rounded-[12px] border border-dashed border-[#D1D5DB] px-4 py-5">
+        <div className="flex flex-col items-start gap-3 rounded-[12px] border border-dashed border-[#D1D5DB] px-4 py-5">
           <span className="text-[14px] font-semibold text-[#111827]">No events yet</span>
-          <p className="m-0 text-[13px] leading-[19px] text-pretty text-[#6B7280]">
-            Set one up for this project, then come back here to choose it.{" "}
-            <LibraryLink projectId={projectId}>Create an event</LibraryLink>
-          </p>
+          <LibraryLink ctx={ctx} primary>
+            Create an event
+          </LibraryLink>
         </div>
         {error}
       </div>
@@ -138,8 +186,16 @@ export function EventGoalFields({
 
   return (
     <div className="flex flex-col gap-3">
-      <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
-        <legend className="mb-1.5 p-0 text-[13px] font-medium text-[#374151]">Event</legend>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span id="rt-goalevent-label" className="text-[13px] font-medium text-[#374151]">
+          Event
+        </span>
+        <LibraryLink ctx={ctx}>Create or configure events</LibraryLink>
+      </div>
+      <fieldset
+        aria-labelledby="rt-goalevent-label"
+        className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0"
+      >
         {events.map((event) => {
           const checked = event.id === selectedId;
           const pill = STATUS_PILL[event.status.tone];
@@ -170,30 +226,23 @@ export function EventGoalFields({
                   </span>
                 ) : null}
               </span>
-              <span
-                className="inline-flex min-h-6 flex-none items-center rounded-[6px] px-2 text-[12px] font-semibold"
-                style={{ background: pill.bg, color: pill.fg }}
-              >
-                {event.status.label}
-              </span>
+              {/* An event nobody has triggered yet is simply new: no pill (user request 2026-11-09). */}
+              {event.status.state === "not_detected" ? null : (
+                <span
+                  className="inline-flex min-h-6 flex-none items-center rounded-[6px] px-2 text-[12px] font-semibold"
+                  style={{ background: pill.bg, color: pill.fg }}
+                >
+                  {event.status.label}
+                </span>
+              )}
             </label>
           );
         })}
       </fieldset>
       {error}
-      {selected?.status.state === "not_detected" ? (
-        <EventWarning>
-          Routely hasn’t received this event yet, so test it before launching. You can still save
-          and launch.
-        </EventWarning>
-      ) : null}
       {selected?.status.state === "config_error" ? (
         <EventWarning>{selected.status.note}</EventWarning>
       ) : null}
-      <p className="m-0 text-[13px] leading-[18px] text-[#6B7280]">
-        Each visitor counts once, however many times the event happens.{" "}
-        <LibraryLink projectId={projectId}>Create or configure events</LibraryLink>
-      </p>
     </div>
   );
 }

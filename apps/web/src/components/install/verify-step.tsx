@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { MethodTabs, methodPanelProps } from "./method-tabs";
 import type { InstallVerification } from "./use-install-verification";
 import { VerificationResult } from "./verification-result";
-import { STARTING_OUTCOME, verifyButtonLabel } from "./verification-state";
+import { CHECKING_OUTCOME, verifyButtonLabel } from "./verification-state";
 
 /** The install dialogs' second step: which page, then what the check found. */
 export function VerifyStep({
@@ -32,9 +32,9 @@ export function VerifyStep({
   urlErr: string;
   onSubmit(e: React.FormEvent): void;
 }) {
-  const { phase, outcome, blockedUrl } = verification;
+  const { phase, outcome } = verification;
   const checking = phase !== "idle";
-  const shown = phase === "starting" ? STARTING_OUTCOME : outcome;
+  const shown = checking ? CHECKING_OUTCOME : outcome;
 
   return (
     <>
@@ -45,10 +45,8 @@ export function VerifyStep({
         </DialogPrimitive.Title>
         <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">
           {method === "GTM"
-            ? `Enter a page on ${domain} where your tag runs. `
-            : `Enter a page on ${domain} where you added the script. `}
-          We’ll open your page in a new tab so the Routely code can prove it runs. Keep the tab open
-          until the check finishes.
+            ? `Enter a page on ${domain} where your tag runs. Routely checks that the page loads your Google Tag Manager container, and that its published version holds this project’s code with the anti-flicker block.`
+            : `Enter a page on ${domain} where you added the script. Routely checks that this project’s code is in the page.`}
         </p>
       </div>
 
@@ -85,7 +83,7 @@ export function VerifyStep({
           ) : null}
         </form>
 
-        {shown ? <VerificationResult outcome={shown} blockedUrl={blockedUrl} /> : null}
+        {shown ? <VerificationResult outcome={shown} /> : null}
       </div>
     </>
   );

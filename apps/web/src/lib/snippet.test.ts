@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { detectSnippet } from "@/lib/snippet-detect";
-import { OPTIMIZER_OPT_OUT, buildInstallSnippet } from "@/lib/snippet";
+import {
+  OPTIMIZER_OPT_OUT,
+  antiFlickerScript,
+  buildAntiFlickerSnippet,
+  buildInstallSnippet,
+} from "@/lib/snippet";
 
 describe("buildInstallSnippet", () => {
   const snippet = buildInstallSnippet({
@@ -28,5 +33,15 @@ describe("buildInstallSnippet", () => {
       scriptFound: true,
       antiFlickerFound: true,
     });
+  });
+});
+
+describe("antiFlickerScript", () => {
+  it("stands down when a cover exists or already ran, so <head> plus Tag Manager covers once", () => {
+    expect(antiFlickerScript()).toContain("if(!h||d.getElementById(i)||w.__routelyReveal)return;");
+  });
+
+  it("is exactly what the <head> block wraps", () => {
+    expect(buildAntiFlickerSnippet()).toContain(antiFlickerScript());
   });
 });
