@@ -38,10 +38,44 @@ describe("buildInstallSnippet", () => {
 
 describe("antiFlickerScript", () => {
   it("stands down when a cover exists or already ran, so <head> plus Tag Manager covers once", () => {
-    expect(antiFlickerScript()).toContain("if(!h||d.getElementById(i)||w.__routelyReveal)return;");
+    expect(antiFlickerScript()).toContain("d.getElementById(i)||w.__routelyReveal");
   });
 
   it("is exactly what the <head> block wraps", () => {
     expect(buildAntiFlickerSnippet()).toContain(antiFlickerScript());
+  });
+});
+
+describe("antiFlickerScript in a browser", () => {
+  /** Runs the block against a minimal document; reports whether it put a cover up. */
+  function run(painted: boolean): boolean {
+    let covered = false;
+    const head = { appendChild: () => (covered = true) };
+    const document = {
+      head,
+      getElementById: () => null,
+      createElement: () => ({ appendChild() {}, id: "" }),
+      createTextNode: () => ({}),
+    };
+    const window = {
+      performance: {
+        getEntriesByName: (name: string) =>
+          painted && name === "first-contentful-paint" ? [{ name }] : [],
+      },
+    };
+    new Function("document", "window", "setTimeout", antiFlickerScript())(
+      document,
+      window,
+      () => 0,
+    );
+    return covered;
+  }
+
+  it("covers a page that hasn't appeared yet, as from <head>", () => {
+    expect(run(false)).toBe(true);
+  });
+
+  it("never covers a page that has already appeared, as from Tag Manager: that would be the blink", () => {
+    expect(run(true)).toBe(false);
   });
 });

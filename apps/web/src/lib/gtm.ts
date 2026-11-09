@@ -10,6 +10,8 @@
  * Routely never signs in to GTM and never changes a container.
  */
 
+import { SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
+
 import { OPTIMIZER_OPT_OUT, antiFlickerScript } from "@/lib/snippet";
 
 /** A container id, as the standard GTM install writes it into the page. */
@@ -100,18 +102,41 @@ export interface GtmSnippetOptions {
  * Both values are escaped for a JavaScript string inside an inline script.
  */
 export function buildGtmSnippet({ sdkUrl, publicSiteId }: GtmSnippetOptions): string {
+  const config = gtmConfigUrl(sdkUrl, publicSiteId);
+  const prefetch = config
+    ? `  try { fetch(${jsString(config)}, { credentials: "omit", mode: "cors" })["catch"](function () {}); } catch (e) {}\n`
+    : "";
   return `<!-- Routely tracking script with anti-flicker (Google Tag Manager: Custom HTML) -->
 <script ${OPTIMIZER_OPT_OUT}>
 ${antiFlickerScript()}
 (function (d) {
   if (d.querySelector("script[data-site-id]")) return;
-  var s = d.createElement("script");
+${prefetch}  var s = d.createElement("script");
   s.async = true;
   s.src = ${jsString(sdkUrl)};
   s.setAttribute("data-site-id", ${jsString(publicSiteId)});
   (d.head || d.documentElement).appendChild(s);
 })(document);
 </script>`;
+}
+
+/**
+ * The configuration request the SDK will make, started by the Tag Manager tag while `sdk.js` is
+ * still downloading (2026-11-09: a Split URL visitor waits for both before the redirect). It must be
+ * byte-for-byte the SDK's own request — same URL (`configUrl` in the SDK's `config.ts`), same
+ * `credentials: "omit"`, `mode: "cors"` — so the browser hands the SDK this response from its HTTP
+ * cache (the endpoint is cacheable for its `ttl`) instead of fetching again.
+ *
+ * The SDK's API is the origin it is served from, as every Routely deployment builds it; an
+ * `sdkUrl` that is not a URL gets no prefetch rather than a wrong one.
+ */
+export function gtmConfigUrl(sdkUrl: string, publicSiteId: string): string | null {
+  try {
+    const { origin } = new URL(sdkUrl);
+    return `${origin}/api/v1/config?siteId=${encodeURIComponent(publicSiteId)}&v=${SDK_PROTOCOL_VERSION}`;
+  } catch {
+    return null;
+  }
 }
 
 /** A JavaScript string literal that cannot close the surrounding `<script>`. */

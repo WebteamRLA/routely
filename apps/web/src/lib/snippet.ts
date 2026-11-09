@@ -89,6 +89,12 @@ export const OPTIMIZER_OPT_OUT = 'data-no-optimize="1" data-no-defer="1" data-cf
  * It stands down when a cover already exists (`#routely-cloak`) **or once ran** (`__routelyReveal`
  * is set): a site with the block in `<head>` and in a Tag Manager tag must not get a second cover
  * after the first was lifted.
+ *
+ * It also stands down when **the page has already appeared** (a `first-contentful-paint` entry
+ * exists). A cover can only prevent a flash before the first paint; put up later — from Google
+ * Tag Manager, which runs after the page shows — it *is* the flash: the visible page blinks
+ * white, and on a Split URL control the white stays through the redirect (seen on blinto.co,
+ * 2026-11-09). In `<head>` nothing has painted yet, so that install is unchanged.
  */
 export function antiFlickerScript({
   timeoutMs = DEFAULT_ANTI_FLICKER_MS,
@@ -100,7 +106,7 @@ export function antiFlickerScript({
     `background:${background}!important;z-index:2147483647!important}`;
 
   return `var routelyTimeout = ${timeoutMs};
-!function(d,w,i,t){try{var h=d.head||d.getElementsByTagName("head")[0];if(!h||d.getElementById(i)||w.__routelyReveal)return;var s=d.createElement("style");s.id=i;s.appendChild(d.createTextNode("${css}"));h.appendChild(s);var done=false;w.__routelyReveal=function(){if(done)return;done=true;try{s.parentNode&&s.parentNode.removeChild(s)}catch(e){}};setTimeout(w.__routelyReveal,t)}catch(e){}}(document,window,"routely-cloak",routelyTimeout);`;
+!function(d,w,i,t){try{var h=d.head||d.getElementsByTagName("head")[0];var p=w.performance;if(!h||d.getElementById(i)||w.__routelyReveal||p&&p.getEntriesByName&&p.getEntriesByName("first-contentful-paint").length)return;var s=d.createElement("style");s.id=i;s.appendChild(d.createTextNode("${css}"));h.appendChild(s);var done=false;w.__routelyReveal=function(){if(done)return;done=true;try{s.parentNode&&s.parentNode.removeChild(s)}catch(e){}};setTimeout(w.__routelyReveal,t)}catch(e){}}(document,window,"routely-cloak",routelyTimeout);`;
 }
 
 export function buildAntiFlickerSnippet(options: AntiFlickerOptions = {}): string {

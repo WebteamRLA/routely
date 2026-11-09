@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
+
 import {
   antiFlickerPlacement,
   buildGtmSnippet,
   findGtmContainers,
+  gtmConfigUrl,
   gtmContainerUrl,
   readContainer,
 } from "@/lib/gtm";
@@ -126,5 +129,28 @@ describe("antiFlickerPlacement", () => {
     expect(antiFlickerPlacement(`<HEAD>${gtm}</HEAD><BODY class="x">${block}</BODY>`)).toBe(
       "outside_head",
     );
+  });
+});
+
+describe("the config prefetch in the Tag Manager tag", () => {
+  const snippet = buildGtmSnippet({ sdkUrl: "https://app.test/sdk.js", publicSiteId: OWN });
+
+  it("requests exactly what the SDK will, so the browser can reuse it", () => {
+    const url = `https://app.test/api/v1/config?siteId=${OWN}&v=${SDK_PROTOCOL_VERSION}`;
+    expect(gtmConfigUrl("https://app.test/sdk.js", OWN)).toBe(url);
+    expect(snippet).toContain(`fetch("${url}", { credentials: "omit", mode: "cors" })`);
+  });
+
+  it("starts before the SDK is added, and only when no Routely tag is on the page", () => {
+    const guard = snippet.indexOf("script[data-site-id]");
+    const prefetch = snippet.indexOf("fetch(");
+    const sdk = snippet.indexOf('d.createElement("script")');
+    expect(guard).toBeLessThan(prefetch);
+    expect(prefetch).toBeLessThan(sdk);
+  });
+
+  it("is left out for an SDK address that isn't a URL", () => {
+    expect(gtmConfigUrl("not a url", OWN)).toBeNull();
+    expect(buildGtmSnippet({ sdkUrl: "not a url", publicSiteId: OWN })).not.toContain("fetch(");
   });
 });

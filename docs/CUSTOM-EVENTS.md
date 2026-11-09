@@ -20,7 +20,12 @@ in a published container that holds this project's tag (`readContainer` `hasAnti
 the page's `<head>` above the `gtm.js` loader (`antiFlickerPlacement` in `lib/gtm.ts`). Inside Tag
 Manager it starts after the page is visible, so it narrows the flash rather than preventing it:
 that pass carries a note, and the tab offers the `<head>` block as "No flash at all (optional)".
-The block stands down if a cover exists or already ran, so both together cover once. Without it
+The block stands down if a cover exists or already ran, so both together cover once, and
+**if the page has already appeared** (`first-contentful-paint`): from Tag Manager a late cover was
+itself the blink, white over the control page through the redirect (blinto.co, 2026-11-09). The
+GTM tag also starts the SDK's exact config request while `sdk.js` downloads (`gtmConfigUrl`), so
+the SDK's own request is answered from the browser cache. Measured at 150 ms per request: the
+white flash gone, and the variant shown 0.15 s sooner. Without it
 anywhere the result is `anti_flicker` (amber) with the fix, and the install is not verified. The
 Manual tab is unchanged: its snippet already carries the block.
 

@@ -361,7 +361,7 @@ export function readServerCheck(method: InstallMethodName, look: StaticLook): Ve
 }
 
 const IN_GTM_NOTE =
-  "The anti-flicker block runs inside Google Tag Manager, so visitors may still briefly see the original page. For no flash, also paste it into your site’s <head>.";
+  "The anti-flicker block runs inside Google Tag Manager, which starts after the page shows, so visitors briefly see the original page before a Split URL redirect. For no flash, install the code in your site’s <head> (Manual installation).";
 const ANTI_FLICKER_STEP =
   "Replace your Custom HTML tag’s contents with this project’s Tag Manager code. It includes the anti-flicker block.";
 const OR_USE_TAG =
