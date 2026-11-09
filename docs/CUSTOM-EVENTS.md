@@ -25,7 +25,14 @@ The block stands down if a cover exists or already ran, so both together cover o
 itself the blink, white over the control page through the redirect (blinto.co, 2026-11-09). The
 GTM tag also starts the SDK's exact config request while `sdk.js` downloads (`gtmConfigUrl`), so
 the SDK's own request is answered from the browser cache. Measured at 150 ms per request: the
-white flash gone, and the variant shown 0.15 s sooner. Without it
+white flash gone, and the variant shown 0.15 s sooner.
+
+**The SDK covers a Split URL redirect itself** (`coverPage` in `cloak.ts`, user request
+2026-11-09): just before `location.replace` it puts the same white cover up when none is, so the
+browser shows white, not the control, until the variant paints (measured: cover painted 3 ms
+after it was added, variant painted 170 ms later). Only a redirect is covered: covering from the
+moment a control matched also blinked white for visitors who stay (0.15 s), so it was moved. The
+cover lifts itself after 3 s if the navigation stalls. Without it
 anywhere the result is `anti_flicker` (amber) with the fix, and the install is not verified. The
 Manual tab is unchanged: its snippet already carries the block.
 

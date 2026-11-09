@@ -33,7 +33,7 @@ import {
 } from "./assignment";
 import { applyChanges } from "./apply";
 import type { ApplyResult } from "./apply";
-import { revealPage } from "./cloak";
+import { coverPage, revealPage } from "./cloak";
 import { claimConversion, findGoalMatches } from "./conversion";
 import { loadConfig } from "./config";
 import { claimPageView } from "./dedupe";
@@ -392,6 +392,8 @@ export async function boot(): Promise<RoutelyState | null> {
 
   if (decision.action === "redirect") {
     log(`redirecting to ${decision.target}`);
+    // White until the variant replaces the page, rather than the control (cloak.ts `coverPage`).
+    coverPage();
     performRedirect(decision.target, decision.experiment.id);
     return publish();
   }

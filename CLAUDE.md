@@ -531,7 +531,7 @@ Application-level rules enforced in `experiment.service.ts`:
 ## 7. The SDK
 
 `packages/sdk` — vanilla TypeScript, **zero runtime dependencies**, one IIFE bundle.
-Currently **9.68 kB gzipped (26.68 kB raw) against a 10 kB budget the build enforces** (it exits
+Currently **9.87 kB gzipped (27.20 kB raw) against a 10 kB budget the build enforces** (it exits
 non-zero if exceeded; `npm run sdk:build`, 2026-11-05). The budget was 6 kB until the user raised it
 for v4 (decision D3), then 8 kB. It went to 10 kB on 2026-11-05 for custom events and the install
 check, because the bundle had 16 bytes left. **That rise was flagged to the user, not asked of them:
@@ -564,7 +564,7 @@ carry a synchronous tag, which still works.
 | `conversion.ts` | Goal matching and once-per-assignment claiming |
 | `engagement.ts` | Visible-time accumulator (`performance.now()`, delta reporting) |
 | `dedupe.ts` | Page-view guard against repeated SDK initialisation |
-| `cloak.ts` | Calls `window.__routelyReveal` — the overlay itself lives in the install snippet |
+| `cloak.ts` | Calls `window.__routelyReveal` (the overlay lives in the install snippet); `coverPage` puts a white cover up itself just before a Split URL redirect, for installs whose snippet cover came too late (GTM) |
 | `config.ts` / `transport.ts` / `track.ts` | Fetch + cache config (`?v=4`); timeouts; `sendBeacon` |
 | `events.ts` | `routely.track`, click and form triggers (one listener each), offline queue, selector checks |
 | `verify.ts` | Reports to an install check opened with `#_rt_verify=<token>` (dormant since 2026-11-09) |

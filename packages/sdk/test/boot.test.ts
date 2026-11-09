@@ -167,6 +167,66 @@ describe("boot", () => {
     expect(String(replace.mock.calls[0]![0])).toContain("https://acme.test/v2?_rt_vid=");
   });
 
+  describe("the white cover on a Split URL control, installed through Tag Manager", () => {
+    const SPLIT: ExperimentConfig = {
+      id: "exp_split",
+      kind: "split_url",
+      devices: [],
+      control: { url: PAGE, match: "EXACT" },
+      controlWeight: 50,
+      variants: [{ id: "var_1", url: "https://acme.test/v2", weight: 50 }],
+      goal: { url: "https://acme.test/thanks", match: "EXACT" },
+      trafficAllocation: 100,
+    };
+
+    /** A page whose snippet cover never went up (Tag Manager: it stands down once painted). */
+    function withoutSnippetCover(page: ReturnType<typeof setup>) {
+      delete page.win.__routelyReveal;
+      const covers: unknown[] = [];
+      const head = {
+        appendChild: (node: unknown) => {
+          (node as { parentNode: unknown }).parentNode = head;
+          covers.push(node);
+        },
+        removeChild: (node: unknown) => void covers.splice(covers.indexOf(node), 1),
+      };
+      Object.assign(document, {
+        head,
+        documentElement: head,
+        getElementById: (id: string) =>
+          covers.find((node) => (node as { id: string }).id === id) ?? null,
+        createElement: () => ({ id: "", textContent: "", parentNode: null }),
+      });
+      vi.stubGlobal("setTimeout", vi.fn());
+      return covers;
+    }
+
+    it("keeps the control covered through a redirect to the variant", async () => {
+      const page = setup({ experiments: [SPLIT], assign: { variantId: "var_1" } });
+      const covers = withoutSnippetCover(page);
+      const state = await boot();
+      expect(state?.action).toBe("redirect");
+      expect(covers).toHaveLength(1);
+    });
+
+    it("lifts it at once for a visitor who stays on the control", async () => {
+      const page = setup({ experiments: [SPLIT], assign: { variantId: null } });
+      const covers = withoutSnippetCover(page);
+      const state = await boot();
+      expect(state?.action).toBe("stay");
+      expect(covers).toHaveLength(0);
+    });
+
+    it("never covers the variant page or a page with no test", async () => {
+      for (const href of ["https://acme.test/v2", "https://acme.test/other"]) {
+        const page = setup({ href, experiments: [SPLIT] });
+        const covers = withoutSnippetCover(page);
+        await boot();
+        expect(covers).toHaveLength(0);
+      }
+    });
+  });
+
   it("in the editor, only starts the bridge: no hit, no config, no events", async () => {
     const app = { postMessage: vi.fn() };
     const page = setup({ href: `${PAGE}#_rt_edit=tok_abcdefghijklmnop`, framedBy: app });

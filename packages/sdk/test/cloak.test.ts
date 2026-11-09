@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { revealPage } from "../src/cloak";
+import { coverPage, revealPage } from "../src/cloak";
 
 /**
  * The overlay itself is created by the anti-flickering script the customer pastes into their
@@ -54,5 +54,67 @@ describe("revealPage", () => {
     revealPage(host);
 
     expect(reveal).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** A head that holds elements, and a document that finds them by id. */
+function fakeDoc() {
+  const nodes: { id: string; textContent: string; parentNode: unknown }[] = [];
+  const head = {
+    appendChild(node: { id: string; parentNode: unknown }) {
+      node.parentNode = head;
+      nodes.push(node as never);
+    },
+    removeChild(node: unknown) {
+      nodes.splice(nodes.indexOf(node as never), 1);
+    },
+  };
+  const doc = {
+    head,
+    documentElement: head,
+    getElementById: (id: string) => nodes.find((n) => n.id === id) ?? null,
+    createElement: () => ({ id: "", textContent: "", parentNode: null }),
+  };
+  return { doc: doc as unknown as Document, nodes };
+}
+
+describe("coverPage", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("puts up a white cover and publishes the function that lifts it", () => {
+    const { doc, nodes } = fakeDoc();
+    const host: { __routelyReveal?: () => void } = {};
+    coverPage(doc, host);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0]!.id).toBe("routely-cloak");
+    expect(nodes[0]!.textContent).toContain("background:#fff");
+    revealPage(host);
+    expect(nodes).toHaveLength(0);
+  });
+
+  it("leaves a cover that is already up alone, so the snippet's stays in charge", () => {
+    const { doc, nodes } = fakeDoc();
+    coverPage(doc, {});
+    const reveal = vi.fn();
+    const host = { __routelyReveal: reveal };
+    coverPage(doc, host);
+    expect(nodes).toHaveLength(1);
+    expect(host.__routelyReveal).toBe(reveal);
+  });
+
+  it("lifts itself if nothing else does: a page never stays blank", () => {
+    vi.useFakeTimers();
+    const { doc, nodes } = fakeDoc();
+    coverPage(doc, {});
+    vi.advanceTimersByTime(2999);
+    expect(nodes).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(nodes).toHaveLength(0);
+  });
+
+  it("never throws, whatever the page is missing", () => {
+    expect(() => coverPage(undefined, {})).not.toThrow();
+    expect(() => coverPage({} as Document, {})).not.toThrow();
+    expect(() => coverPage(fakeDoc().doc, undefined)).not.toThrow();
   });
 });

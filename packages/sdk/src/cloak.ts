@@ -52,3 +52,48 @@ export function revealPage(
     // and the snippet's timeout will still lift the overlay.
   }
 }
+
+/** The snippet's id and overlay, so a cover from either source is the same element. */
+const CLOAK_ID = "routely-cloak";
+const CLOAK_CSS =
+  "body::after{content:''!important;position:fixed!important;inset:0!important;background:#fff!important;z-index:2147483647!important}";
+/** Lifts a cover the SDK put up if nothing else does: a page must never stay blank. */
+const COVER_MAX_MS = 3000;
+
+/**
+ * Puts the white cover up from the SDK itself, the moment a Split URL visitor is being sent to
+ * the variant (user request 2026-11-09: "if traffic goes to the variant, show white until the
+ * variant shows").
+ *
+ * An install through Google Tag Manager runs after the page is visible, so the snippet's cover
+ * either comes too late or (now) stands down, and the visitor watched the control page through the
+ * navigation and then the variant. Covering just before the redirect leaves the browser showing
+ * white until the variant paints. Only a redirect is covered: a visitor who stays sees no white at
+ * all, and no other page is ever covered. (Covering earlier, before the arm is known, also blinked
+ * white for visitors who stay, measured at 0.15 s.)
+ *
+ * A cover already up (the `<head>` snippet's) is left alone. Never throws.
+ */
+export function coverPage(
+  doc: Document | undefined = typeof document === "undefined" ? undefined : document,
+  host: RevealHost | undefined = typeof window === "undefined" ? undefined : (window as RevealHost),
+): void {
+  try {
+    if (!doc || !host || doc.getElementById(CLOAK_ID)) return;
+    const style = doc.createElement("style");
+    style.id = CLOAK_ID;
+    style.textContent = CLOAK_CSS;
+    (doc.head || doc.documentElement).appendChild(style);
+    const lift = () => {
+      try {
+        style.parentNode?.removeChild(style);
+      } catch {
+        // Gone already.
+      }
+    };
+    host.__routelyReveal = lift;
+    setTimeout(lift, COVER_MAX_MS);
+  } catch {
+    // No cover is a visible flash, never a broken page.
+  }
+}
