@@ -179,7 +179,7 @@ describe("boot", () => {
       trafficAllocation: 100,
     };
 
-    /** A page whose snippet cover never went up (Tag Manager: it stands down once painted). */
+    /** A page whose snippet cover never went up, or is gone (a tag without the block). */
     function withoutSnippetCover(page: ReturnType<typeof setup>) {
       delete page.win.__routelyReveal;
       const covers: unknown[] = [];

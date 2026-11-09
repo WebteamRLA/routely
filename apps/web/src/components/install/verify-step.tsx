@@ -4,10 +4,8 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { Spinner } from "@/components/rt/icons";
 import { btn } from "@/components/rt/styles";
-import type { InstallMethodName } from "@/lib/install-verification";
 import { cn } from "@/lib/utils";
 
-import { MethodTabs, methodPanelProps } from "./method-tabs";
 import type { InstallVerification } from "./use-install-verification";
 import { VerificationResult } from "./verification-result";
 import { CHECKING_OUTCOME, verifyButtonLabel } from "./verification-state";
@@ -15,8 +13,6 @@ import { CHECKING_OUTCOME, verifyButtonLabel } from "./verification-state";
 /** The install dialogs' second step: which page, then what the check found. */
 export function VerifyStep({
   domain,
-  method,
-  onMethodChange,
   verification,
   url,
   setUrl,
@@ -24,8 +20,6 @@ export function VerifyStep({
   onSubmit,
 }: {
   domain: string;
-  method: InstallMethodName;
-  onMethodChange(method: InstallMethodName): void;
   verification: InstallVerification;
   url: string;
   setUrl(v: string): void;
@@ -39,18 +33,15 @@ export function VerifyStep({
   return (
     <>
       <div className="flex flex-col gap-1.5">
-        <MethodTabs value={method} onChange={onMethodChange} disabled={checking} className="mb-2" />
         <DialogPrimitive.Title className="m-0 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-[#111827]">
           Verify your installation
         </DialogPrimitive.Title>
         <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">
-          {method === "GTM"
-            ? `Enter a page on ${domain} where your tag runs. Routely checks that the page loads your Google Tag Manager container, and that its published version holds this project’s code with the anti-flicker block.`
-            : `Enter a page on ${domain} where you added the script. Routely checks that this project’s code is in the page.`}
+          {`Enter a page on ${domain} where you added the script. Routely checks that this project’s code is in the page or in your published Google Tag Manager container.`}
         </p>
       </div>
 
-      <div {...methodPanelProps(method)} className="flex flex-col gap-5">
+      <div className="flex flex-col gap-5">
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-1.5">
           <label htmlFor="rt-pm-url" className="text-[13px] font-medium text-[#374151]">
             Page URL

@@ -66,8 +66,8 @@ const COVER_MAX_MS = 3000;
  * variant shows").
  *
  * An install through Google Tag Manager runs after the page is visible, so the snippet's cover
- * either comes too late or (now) stands down, and the visitor watched the control page through the
- * navigation and then the variant. Covering just before the redirect leaves the browser showing
+ * comes too late or may have lifted on its timeout, and the visitor watched the control page through
+ * the navigation and then the variant. Covering just before the redirect leaves the browser showing
  * white until the variant paints. Only a redirect is covered: a visitor who stays sees no white at
  * all, and no other page is ever covered. (Covering earlier, before the arm is known, also blinked
  * white for visitors who stay, measured at 0.15 s.)

@@ -540,13 +540,21 @@ tracking tag — pasted into `<head>`. The same pair works on every platform, wh
 framework-independent:
 
 ```html
-<script async src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
+<script async src="https://cdn.example.com/sdk.js?key=rt_abc123" data-site-id="rt_abc123"></script>
 ```
 
 In `<head>`, **`async`** (user decision 2026-10-29, as Mida does): the inline anti-flicker cover
 above it hides the page until the SDK decides or `routelyTimeout` (default 3000 ms) fires, so the tag
 need not block parsing, and a slow SDK host can no longer stall the page. Installs from before then
 carry a synchronous tag, which still works.
+
+**The same snippet goes into Google Tag Manager, as Mida's does** (user decisions 2026-11-09): the
+dialogs' separate GTM tab and its GTM-only tag were removed. GTM strips custom attributes from a
+script it injects, so the site id is also in the URL (`?key=`) and the SDK reads it there
+(`siteIdOf`). The anti-flicker block **covers even after the page has painted**, as Mida's does
+(reversing a `first-contentful-paint` stand-down added that day): from GTM every page shows its
+first frames, then white until the SDK reveals or redirects (at most 3 s). Don't re-add the
+stand-down or a separate GTM tag without asking. Details in `docs/CUSTOM-EVENTS.md`.
 
 | Module | Responsibility |
 | --- | --- |
@@ -564,7 +572,7 @@ carry a synchronous tag, which still works.
 | `conversion.ts` | Goal matching and once-per-assignment claiming |
 | `engagement.ts` | Visible-time accumulator (`performance.now()`, delta reporting) |
 | `dedupe.ts` | Page-view guard against repeated SDK initialisation |
-| `cloak.ts` | Calls `window.__routelyReveal` (the overlay lives in the install snippet, or in the GTM tag's control-page hide, `apps/web/src/lib/gtm.ts`); `coverPage` puts a cover up itself just before a Split URL redirect when none is up |
+| `cloak.ts` | Calls `window.__routelyReveal` (the overlay lives in the install snippet); `coverPage` puts a cover up itself just before a Split URL redirect when none is up |
 | `config.ts` / `transport.ts` / `track.ts` | Fetch + cache config (`?v=4`); timeouts; `sendBeacon` |
 | `events.ts` | `routely.track`, click and form triggers (one listener each), offline queue, selector checks |
 | `verify.ts` | Reports to an install check opened with `#_rt_verify=<token>` (dormant since 2026-11-09) |
@@ -990,9 +998,9 @@ Working:
 - **Crons** — Sheets refresh (00:20 UTC) and notifications (00:40 UTC: result-ready backstop,
   tracking-stopped alerts, 400-day retention of the visitor-day tables).
 - **Demo seed** of the design's workspace (§8).
-- **Google Tag Manager install** (2026-11-05) — GTM (the default, 2026-11-09) and Manual tabs in
-  both pixel dialogs, checked on the server from the page and its published containers
-  (`docs/CUSTOM-EVENTS.md`).
+- **Google Tag Manager install** (2026-11-05) — since 2026-11-09 one snippet for `<head>` or a GTM
+  Custom HTML tag (no separate GTM tab), checked on the server from the page and its published
+  containers (`docs/CUSTOM-EVENTS.md`).
   Routely never signs in to GTM or changes a container.
 - **Custom events** (2026-11-05) — project Event Library; click, form and JavaScript tracking; real
   element picker on the editor bridge (frame, then proxy); `window.routely.track()`; events as goals

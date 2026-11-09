@@ -334,9 +334,9 @@ export function readVerification(o: VerifyObservation): VerifyOutcome {
  */
 export function readServerCheck(method: InstallMethodName, look: StaticLook): VerifyOutcome {
   const tag = readServerTag(method, look);
-  // Google Tag Manager installs also need the anti-flicker block (2026-11-09): in the published tag
-  // (the GTM tab's code includes it), or in <head> above Tag Manager. A manual install pastes it as
-  // part of the snippet, so only the GTM tab asks.
+  // Google Tag Manager installs also need the anti-flicker block (2026-11-09): in the published tag,
+  // or in <head> above Tag Manager. Only a `GTM` caller asks; since the GTM tab was removed
+  // (2026-11-09) the dialogs send `MANUAL`, whose one snippet already carries the block.
   if (method !== "GTM" || !look.pageLoaded || tag.status === "failed") return tag;
   const placement = look.antiFlicker ?? "missing";
   if (placement === "ok") return tag;

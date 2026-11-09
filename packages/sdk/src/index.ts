@@ -3,7 +3,7 @@
  *
  * A dependency-free browser bundle installed with a single tag:
  *
- *   <script async src="https://cdn.example.com/sdk.js" data-site-id="rt_abc123"></script>
+ *   <script async src="https://cdn.example.com/sdk.js?key=rt_abc123" data-site-id="rt_abc123"></script>
  *
  * It is framework-independent because it asks nothing of the host page beyond a `<script>`
  * element — no bundler, no npm package, no lifecycle to hook into. That is what makes the same
@@ -147,7 +147,7 @@ declare global {
  * mis-pasted snippet must never break the page it was pasted into.
  */
 export function readOptions(script: HTMLScriptElement | null): RoutelyOptions | null {
-  const siteId = script?.dataset.siteId?.trim();
+  const siteId = siteIdOf(script);
   if (!siteId) return null;
 
   const timeout = Number(script?.dataset.timeout);
@@ -161,6 +161,15 @@ export function readOptions(script: HTMLScriptElement | null): RoutelyOptions | 
 }
 
 /**
+ * The site id a script tag carries: `data-site-id`, else `?key=` in its URL (2026-11-09, as Mida
+ * does). Google Tag Manager strips custom attributes from a script pasted into a Custom HTML tag
+ * but keeps its `src`, so the key in the URL is what lets the one install snippet work there too.
+ */
+export function siteIdOf(script: HTMLScriptElement | null | undefined): string {
+  return (script?.dataset?.siteId || /[?&]key=([^&#]+)/.exec(script?.src || "")?.[1] || "").trim();
+}
+
+/**
  * Finds the script tag that loaded this bundle.
  *
  * `document.currentScript` is correct and cheap, but it is null when the bundle is loaded
@@ -169,9 +178,9 @@ export function readOptions(script: HTMLScriptElement | null): RoutelyOptions | 
  */
 export function findScript(): HTMLScriptElement | null {
   const current = document.currentScript as HTMLScriptElement | null;
-  if (current?.dataset?.siteId) return current;
+  if (siteIdOf(current)) return current;
 
-  return document.querySelector<HTMLScriptElement>("script[data-site-id]");
+  return document.querySelector<HTMLScriptElement>('script[data-site-id],script[src*="key=rt_"]');
 }
 
 /**

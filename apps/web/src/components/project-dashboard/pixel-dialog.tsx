@@ -4,19 +4,17 @@ import { useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { CodeBox } from "@/components/install/code-box";
-import { GtmSteps } from "@/components/install/gtm-steps";
-import { MethodTabs, methodPanelProps } from "@/components/install/method-tabs";
 import { Connector, StepNum } from "@/components/install/step-marks";
 import { useInstallVerification } from "@/components/install/use-install-verification";
 import { VerifyStep } from "@/components/install/verify-step";
-import type { InstallMethodName } from "@/lib/install-verification";
 import { pixelCheckUrl, pixelDefaultUrl, pixelUrlError } from "@/lib/projects";
 import { buildInstallSnippet } from "@/lib/snippet";
 import { cn } from "@/lib/utils";
 
 /*
- * Two-step pixel setup: install by hand (`lib/snippet.ts`, D10) or through Google Tag Manager, then
- * check it from the server (`components/install`, `lib/install-verification.ts`).
+ * Two-step pixel setup: one snippet (`lib/snippet.ts`, D10) for the site's `<head>` or a Google Tag
+ * Manager Custom HTML tag, as Mida does (2026-11-09: the separate GTM tab was removed), then a check
+ * from the server (`components/install`, `lib/install-verification.ts`).
  *
  * A copy of `components/projects/pixel-setup-dialog.tsx` (same design component), extended for
  * the project dashboard: it reports while a check is running so the page's pixel badge can read
@@ -82,7 +80,6 @@ function PixelPanel({
   onCheckingChange,
 }: Omit<PixelDialogProps, "open">) {
   const [step, setStep] = useState<Step>(initialStep);
-  const [method, setMethod] = useState<InstallMethodName>("GTM");
   const [url, setUrl] = useState(pixelDefaultUrl(project.domain, project.protocol));
   const [attempted, setAttempted] = useState(false);
   const verification = useInstallVerification({ onVerified, onCheckingChange });
@@ -101,12 +98,6 @@ function PixelPanel({
     if (n === 1 && !found) verification.reset();
   }
 
-  function chooseMethod(next: InstallMethodName) {
-    setMethod(next);
-    // A miss's advice is written for one method, so it can't stand for the other.
-    if (!found) verification.reset();
-  }
-
   function runCheck(e: React.FormEvent) {
     e.preventDefault();
     if (checking) return;
@@ -115,7 +106,8 @@ function PixelPanel({
     verification.start({
       websiteId: project.id,
       url: pixelCheckUrl(url, project.protocol),
-      method,
+      // The one snippet: the check finds it in the page or in a published GTM container.
+      method: "MANUAL",
     });
   }
 
@@ -188,48 +180,37 @@ function PixelPanel({
       <div className="flex min-h-0 flex-auto flex-col gap-5 overflow-y-auto px-7 py-6 max-[641px]:px-4 max-[641px]:py-5">
         {step === 1 ? (
           <>
-            <div className="flex flex-col gap-1.5">
-              <MethodTabs value={method} onChange={chooseMethod} className="mb-2" />
-              <DialogPrimitive.Title className="m-0 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-[#111827]">
-                Add the Routely script to your site
-              </DialogPrimitive.Title>
-            </div>
+            <DialogPrimitive.Title className="m-0 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-[#111827]">
+              Add the Routely script to your site
+            </DialogPrimitive.Title>
 
-            <div {...methodPanelProps(method)}>
-              {method === "GTM" ? (
-                <GtmSteps domain={domain} sdkUrl={sdkUrl} publicSiteId={project.key} />
-              ) : (
-                <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
-                  <li className="relative flex min-w-0 items-start gap-3">
-                    <Connector />
-                    <StepNum n={1} />
-                    <div className="flex min-w-0 flex-auto flex-col gap-2.5 pt-0.5">
-                      <span className="text-sm leading-[22px] font-semibold text-[#111827]">
-                        Copy the script and paste it into the header
-                      </span>
-                      <CodeBox code={snippet} />
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <StepNum n={2} />
-                    <div className="flex min-w-0 flex-col gap-0.5 pt-0.5">
-                      <span className="text-sm leading-[22px] font-semibold text-[#111827]">
-                        Publish your changes
-                      </span>
-                      <span className="text-sm leading-5 text-pretty text-[#4B5563]">
-                        Then continue to check that Routely can see the script.
-                      </span>
-                    </div>
-                  </li>
-                </ol>
-              )}
-            </div>
+            <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
+              <li className="relative flex min-w-0 items-start gap-3">
+                <Connector />
+                <StepNum n={1} />
+                <div className="flex min-w-0 flex-auto flex-col gap-2.5 pt-0.5">
+                  <span className="text-sm leading-[22px] font-semibold text-[#111827]">
+                    Copy the script and paste it into the header or Google Tag Manager
+                  </span>
+                  <CodeBox code={snippet} />
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <StepNum n={2} />
+                <div className="flex min-w-0 flex-col gap-0.5 pt-0.5">
+                  <span className="text-sm leading-[22px] font-semibold text-[#111827]">
+                    Publish your changes
+                  </span>
+                  <span className="text-sm leading-5 text-pretty text-[#4B5563]">
+                    Then continue to check that Routely can see the script.
+                  </span>
+                </div>
+              </li>
+            </ol>
           </>
         ) : (
           <VerifyStep
             domain={domain}
-            method={method}
-            onMethodChange={chooseMethod}
             verification={verification}
             url={url}
             setUrl={(v) => {

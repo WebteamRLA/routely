@@ -13,47 +13,28 @@ evidence the launch's tracking check accepts. It cannot tell whether a GTM trigg
 page, or whether the SDK starts; the project's tracking status, from real visitors' hits, shows
 that.
 
-**A Google Tag Manager install also needs the anti-flicker block** (user decisions 2026-11-09).
-The GTM tab's code is one Custom HTML script: the anti-flicker block (`antiFlickerScript` in
-`lib/snippet.ts`, shared with the `<head>` block) and then the loader. The check accepts the block
-in a published container that holds this project's tag (`readContainer` `hasAntiFlicker`), or in
-the page's `<head>` above the `gtm.js` loader (`antiFlickerPlacement` in `lib/gtm.ts`). Without it
-anywhere the result is `anti_flicker` (amber) with the fix, and the install is not verified. The
-Manual tab is unchanged: its snippet already carries the block.
+**One snippet for `<head>` and Google Tag Manager, as Mida does** (user decisions 2026-11-09).
+The dialogs have no GTM tab any more: a GTM user pastes the ordinary install snippet
+(`buildInstallSnippet` in `lib/snippet.ts`, anti-flicker block plus tracking tag) into a Custom HTML
+tag. GTM strips custom attributes from a script it injects but keeps `src`, so the tag carries the
+site id in its URL as well (`sdk.js?key=rt_…`), and the SDK reads it from there when `data-site-id`
+is gone (`siteIdOf` in `packages/sdk/src/index.ts`). The dialogs check with method `MANUAL`, which
+verifies on this project's id in the page or in a published container. The GTM method's
+anti-flicker rule (`antiFlickerPlacement`, `readContainer` `hasAntiFlicker`, `anti_flicker`) is still
+in `readServerCheck` for a caller that sends `GTM`; the dialogs no longer do.
 
-The block stands down if a cover exists or already ran, so both together cover once, and **if the
-page has already appeared** (`first-contentful-paint`): from Tag Manager a late cover over every
-page was itself the blink (blinto.co, 2026-11-09). Inside Tag Manager it therefore only matters in
-the rare case the tag runs before the first paint; the `<head>` block remains the way to prevent
-the first frames from showing.
+The block stands down if a cover exists or already ran, so `<head>` plus GTM covers once. **It covers
+even when the page has already appeared, as Mida's does** (user decision 2026-11-09, reversing the
+`first-contentful-paint` stand-down added earlier that day after the blink on blinto.co). From Tag
+Manager every page carrying the tag shows its first frames, then goes white until the SDK reveals
+it (once the config answers) or redirects, at most `routelyTimeout` (3 s). That white is the
+intended trade: the visitor never watches the control page during the decision. The `<head>` install
+remains the way to hide the first frames too.
 
-**Split URL tests through Tag Manager.** Tag Manager runs after the page starts to paint, so the
-first frames are always visible: never claim zero flicker. Three pieces handle the rest:
-
-- **The GTM tag prefetches the config** (`gtmConfigUrl`): the SDK's exact request, started while
-  `sdk.js` downloads, so the SDK's own request is answered from the browser cache.
-- **The GTM tag hides a control page while the decision is made** (`controlHideScript` in
-  `lib/gtm.ts`): with the same `#routely-cloak` and `__routelyReveal` the SDK uses, when this page
-  is the control of an active Split URL test (origin and path, `EXACT`/`PREFIX`) and the visitor
-  may be redirected: no stored control arm (`routely_a_`), not stored as excluded (`routely_i_`), no
-  `_rt_` handoff, no pending redirect (`routely_r_`), no device targeting. It knows at once from the
-  SDK's per-tab config cache (`routely_cfg_`), otherwise when its prefetched config answers (no
-  extra request), and never after the SDK finished (`routely.ready`). The cover takes the page's
-  background colour and lifts itself after 2.5 s. **It remembers control pages** (`routely_ctl_<site>`,
-  rewritten from every config, trusted 7 days, user choice 2026-11-09): a returning visitor is
-  covered the instant the tag runs, and the cover comes off when the fresh config shows the test
-  has ended.
-- **The SDK decides where the visitor goes, unchanged**: `revealPage` lifts the cover for a visitor
-  who stays; `coverPage` (`cloak.ts`) keeps it, or puts one up when none is, just before
-  `location.replace`, so the browser shows the cover until the variant paints. It lifts itself
-  after 3 s if the navigation stalls.
-
-Measured in Chrome, GTM injected 300 ms in, 150 ms per request: the control is visible until about
-0.62 s, then covered until the variant paints (about 0.97 s), or for about 0.16 s for a visitor
-assigned to control. Returning control visitors are never covered; returning variant visitors are
-covered as soon as the tag runs (about 0.47 s). At 400 ms per request: covered at 1.12 s, variant at
-1.98 s. A slow assignment lifts the cover at 2.5 s; a failed config never covers; a failed
-assignment reveals at once.
+**Removed with the GTM tab** (2026-11-09): the GTM-only tag (`buildGtmSnippet`) with its config
+prefetch, Split URL control-page hide and `routely_ctl_<site>` memory. Tags customers already
+published keep running that code from their containers, and still work. The SDK's `coverPage`
+(`cloak.ts`) still keeps a cover up, or puts one up, just before a Split URL redirect.
 
 The browser-run check below is **dormant**: `/api/v1/verify`, the SDK's `verify.ts` and the
 `install_verifications` table remain, but nothing issues a token, so no run exists for a signal
@@ -102,11 +83,12 @@ behind another project's is reported as the wrong project: its data goes to the 
 | `backend_signal_missing` | The browser says the SDK finished, and the signal never arrived |
 | `failed` | The page would not load |
 
-### Why the GTM snippet builds its own script element
+### Why the install snippet carries the site id in its URL
 
-GTM re-creates a pasted `<script src>`, and we did not want to rely on which attributes survive.
-`setAttribute` is plain DOM. The snippet also stands down if a Routely tag is already on the page,
-and the SDK refuses to start twice for the case it cannot see.
+GTM re-creates a script pasted into a Custom HTML tag and strips its custom attributes, so
+`data-site-id` does not survive there; `src` does, so `?key=` carries the id. `data-site-id` stays
+for the page-HTML checks. A site with the snippet in `<head>` and in GTM gets one cover (the
+anti-flicker block stands down) and one SDK (it refuses to start twice).
 
 Routely never signs in to GTM and never changes a container.
 

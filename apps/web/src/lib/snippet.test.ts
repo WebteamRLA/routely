@@ -23,9 +23,17 @@ describe("buildInstallSnippet", () => {
   it("loads the tracking tag async, behind an inline anti-flicker block that comes first", () => {
     const [cover, tracking] = snippet.match(/<script[^>]*>/g) ?? [];
     expect(cover).not.toMatch(/\s(async|defer|src)[\s>=]/);
-    expect(tracking).toMatch(/^<script async src="https:\/\/cdn\.example\.com\/sdk\.js"/);
+    expect(tracking).toMatch(/^<script async src="https:\/\/cdn\.example\.com\/sdk\.js\?key=/);
     expect(tracking).not.toMatch(/\sdefer[\s>=]/);
     expect(snippet.indexOf("routelyTimeout")).toBeLessThan(snippet.indexOf("data-site-id"));
+  });
+
+  it("carries the site id in the URL too, which Google Tag Manager keeps when it strips attributes", () => {
+    expect(snippet).toContain('src="https://cdn.example.com/sdk.js?key=rt_abc123"');
+    expect(snippet).toContain('data-site-id="rt_abc123"');
+    expect(
+      buildInstallSnippet({ sdkUrl: "https://cdn.example.com/sdk.js?v=2", publicSiteId: "rt_abc" }),
+    ).toContain('src="https://cdn.example.com/sdk.js?v=2&amp;key=rt_abc"');
   });
 
   it("is still recognised by the install check", () => {
@@ -75,7 +83,7 @@ describe("antiFlickerScript in a browser", () => {
     expect(run(false)).toBe(true);
   });
 
-  it("never covers a page that has already appeared, as from Tag Manager: that would be the blink", () => {
-    expect(run(true)).toBe(false);
+  it("covers a page that has already appeared too, as from Tag Manager (like Mida)", () => {
+    expect(run(true)).toBe(true);
   });
 });
