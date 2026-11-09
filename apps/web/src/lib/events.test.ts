@@ -139,12 +139,12 @@ describe("trackSnippet", () => {
 
 describe("elementTrackScript", () => {
   function load(code: string) {
-    const tracked: unknown[][] = [];
     let onClick: (e: { target: unknown }) => void = () => {};
-    const window = { routely: { track: (...args: unknown[]) => tracked.push(args) } };
+    const window: { rtq?: unknown[] } = {};
     const document = { addEventListener: (_t: string, fn: typeof onClick) => (onClick = fn) };
     const inner = code.replace(/^<script[^>]*>/, "").replace(/<\/script>$/, "");
     new Function("window", "document", inner)(window, document);
+    const tracked = () => (window.rtq ?? []).map((c) => (c as unknown[]).slice(1));
     return { tracked, click: (target: unknown) => onClick({ target }) };
   }
   const el = (match: boolean) => ({ closest: (s: string) => (match && s === "#buy" ? {} : null) });
@@ -153,7 +153,7 @@ describe("elementTrackScript", () => {
     const page = load(elementTrackScript("buy_clicked", "#buy"));
     page.click(el(false));
     page.click(el(true));
-    expect(page.tracked).toEqual([["buy_clicked"]]);
+    expect(page.tracked()).toEqual([["buy_clicked"]]);
   });
 
   it("cannot be closed early by a selector", () => {

@@ -531,7 +531,7 @@ Application-level rules enforced in `experiment.service.ts`:
 ## 7. The SDK
 
 `packages/sdk` — vanilla TypeScript, **zero runtime dependencies**, one IIFE bundle.
-Currently **10.17 kB gzipped (28.04 kB raw) against a 10.5 kB budget the build enforces** (it exits
+Currently **10.22 kB gzipped (28.20 kB raw) against a 10.5 kB budget the build enforces** (it exits
 non-zero if exceeded; `npm run sdk:build`, 2026-11-10). The budget was 6 kB until the user raised it
 for v4 (decision D3), then 8 kB. It went to 10 kB on 2026-11-05 for custom events and the install
 check, and to 10.5 kB on 2026-11-10 (user decision) for the success message found without a

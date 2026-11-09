@@ -210,7 +210,7 @@ export function suggestedEvents(existing: readonly { name: string }[]): readonly
 
 /** The call inside the handler that knows the action worked; the setup line is the main snippet's. */
 export function handleSubmitSnippet(name: string): string {
-  const call = `    window.routely.track(${JSON.stringify(name)});`;
+  const call = `    window.rtq.push(["track", ${JSON.stringify(name)}]);`;
   return `async function handleSubmit(event) {
   event.preventDefault();
   const result = await sendToYourServer(event.target);
@@ -223,10 +223,10 @@ ${call}
 
 /** The second argument: flat details about the event. */
 export function detailsSnippet(name: string): string {
-  return `window.routely.track(${JSON.stringify(name)}, { value: 150, currency: "USD" });`;
+  return `window.rtq.push(["track", ${JSON.stringify(name)}, { value: 150, currency: "USD" }]);`;
 }
 
 /** The third argument: a repeat of the same id counts once. */
 export function idempotentSnippet(name: string): string {
-  return `window.routely.track(${JSON.stringify(name)}, { value: 150, currency: "USD" }, { id: "order_123" });`;
+  return `window.rtq.push(["track", ${JSON.stringify(name)}, { value: 150, currency: "USD" }, { id: "order_123" }]);`;
 }

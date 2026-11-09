@@ -192,36 +192,30 @@ export function toEventTrigger(source: TriggerSource): EventTrigger | null {
 }
 
 /**
- * The main JavaScript-event snippet, laid out to read without scrolling: the queue line (safe before
- * the Routely script loads, harmless when it is blocked) and the call, in a `<script>` tag for a
+ * The main JavaScript-event snippet, Mida-style (2026-11-10): `rtq.push(["track", name])`, safe
+ * before the Routely script loads and harmless when it is blocked, in a `<script>` tag for a
  * page or a Google Tag Manager Custom HTML tag.
  */
 export function trackScript(name: string): string {
   return `<script type="text/javascript">
-  window.routely = window.routely || {
-    q: [],
-    track: function () { this.q.push(arguments); },
-  };
-  window.routely.track(${JSON.stringify(name).replace(/</g, "\\u003C")});
+  window.rtq = window.rtq || [];
+  window.rtq.push(["track", ${JSON.stringify(name).replace(/</g, "\\u003C")}]);
 </script>`;
 }
 
 /**
  * A JavaScript event tied to a chosen element (user request 2026-11-10): a Google Tag Manager Custom
  * HTML tag (trigger: All Pages) that reports a click on that element, or on anything inside it,
- * through `routely.track`. The event is saved as JavaScript, so the pixel never listens for the
+ * through the `rtq` queue. The event is saved as JavaScript, so the pixel never listens for the
  * same click: this script is the only thing that counts it. Plain ES5 for older containers.
  */
 export function elementTrackScript(name: string, selector: string): string {
   const literal = (value: string) => JSON.stringify(value).replace(/</g, "\\u003C");
   return `<script type="text/javascript">
-  window.routely = window.routely || {
-    q: [],
-    track: function () { this.q.push(arguments); },
-  };
+  window.rtq = window.rtq || [];
   document.addEventListener("click", function (e) {
     var el = e.target && e.target.closest && e.target.closest(${literal(selector)});
-    if (el) window.routely.track(${literal(name)});
+    if (el) window.rtq.push(["track", ${literal(name)}]);
   }, true);
 </script>`;
 }

@@ -253,6 +253,18 @@ describe("boot", () => {
     expect((page.win.routely as { isLoaded?: boolean }).isLoaded).toBe(true);
   });
 
+  it("sends Mida-style rtq.push track commands, queued before it loaded and pushed after", async () => {
+    const page = setup({ experiments: [] });
+    page.win.rtq = [["track", "lead_sent"], ["ignored"], "junk"];
+    await boot();
+    const sent = () =>
+      sentTo(page.beacons, "/api/v1/track").length;
+    expect(sent()).toBe(1);
+
+    (page.win.rtq as { push(...c: unknown[]): number }).push(["track", "second_event"]);
+    expect(sent()).toBe(2);
+  });
+
   it("ignores the editor fragment in a top-level tab and runs normally", async () => {
     const page = setup({ href: `${PAGE}#_rt_edit=tok_abcdefghijklmnop` });
     const state = await boot();

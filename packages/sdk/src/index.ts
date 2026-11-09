@@ -137,6 +137,8 @@ interface RoutelyStub {
 declare global {
   interface Window {
     routely?: (RoutelyState | RoutelyStub) & Partial<RoutelyState>;
+    /** Mida-style command queue: `rtq.push(["track", name, properties?, options?])`. */
+    rtq?: unknown[] | { push(...commands: unknown[]): number };
   }
 }
 
@@ -280,6 +282,15 @@ export async function boot(): Promise<RoutelyState | null> {
   for (const call of Array.from(queued ?? [])) {
     state.track(...(Array.from(call) as Parameters<RoutelyState["track"]>));
   }
+  // The Mida-style queue (2026-11-10): `window.rtq.push(["track", "name"])` works before and after
+  // this bundle loads. What waited is sent now; later pushes are sent at once.
+  const command = (entry: unknown) => {
+    if (Array.isArray(entry) && entry[0] === "track") {
+      state.track(...(entry.slice(1) as Parameters<RoutelyState["track"]>));
+    }
+  };
+  if (Array.isArray(window.rtq)) window.rtq.forEach(command);
+  window.rtq = { push: (...entries: unknown[]) => (entries.forEach(command), 0) };
 
   const config = await pending;
   state.experiments = config?.experiments ?? [];

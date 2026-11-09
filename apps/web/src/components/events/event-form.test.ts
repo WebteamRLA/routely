@@ -194,7 +194,7 @@ describe("feedback", () => {
   });
 
   it("puts the name into the code it shows", () => {
-    expect(handleSubmitSnippet("signup")).toContain(`window.routely.track("signup");`);
+    expect(handleSubmitSnippet("signup")).toContain(`window.rtq.push(["track", "signup"]);`);
     expect(handleSubmitSnippet("signup")).toContain("if (result.success)");
     expect(idempotentSnippet("signup")).toContain(`{ id: "order_123" }`);
   });

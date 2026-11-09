@@ -121,7 +121,9 @@ SDK hands selectors only to `closest()` and `querySelector()`.
   message without those signs would count. Tested in headless Edge: a "Thanks" replacing the form
   counts; an error message, or no message, does not.
 - **Form, `CALLBACK`.** Listens for a plugin's success event, on the DOM and through jQuery.
-- **Code.** `window.routely.track(name, properties?, { id? })`.
+- **Code.** `window.routely.track(name, properties?, { id? })`, or Mida-style
+  `window.rtq.push(["track", name, properties?, { id? }])` (2026-11-10): commands pushed before the
+  SDK loads are sent when it does, later ones at once. The dialog shows the `rtq` form.
 
 `SUBMIT` cannot tell an accepted form from a rejected one, and the UI says so.
 

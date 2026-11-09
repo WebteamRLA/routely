@@ -768,8 +768,8 @@ function CodeInstructions({ name, selector = "" }: { name: string; selector?: st
       {more ? (
         <div className="flex flex-col gap-3 border-l-2 border-[#EEF0F3] pl-3">
           <p className={help}>
-            Each needs the <code className={mono}>window.routely = …</code> line from the snippet
-            above to run first on the page.
+            Each needs the <code className={mono}>window.rtq = …</code> line from the snippet above
+            to run first on the page.
           </p>
           <Snippet title="Send details" code={detailsSnippet(name)} />
           <Snippet title="Inside a form handler" code={handleSubmitSnippet(name)} />
