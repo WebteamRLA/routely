@@ -46,11 +46,11 @@ A server fetch cannot see a tag that Google Tag Manager injects at runtime, so r
 never confirm a GTM install. It also cannot show that an SDK actually ran. The check therefore
 uses three witnesses, and only one of them can pass it.
 
-| Witness | Source | Can say |
-| --- | --- | --- |
-| Server | Page HTML, plus the public `gtm.js?id=GTM-…` for each container the page loads | A tag exists, is unpublished, or holds another project's id |
-| Backend signal | SDK in the customer's browser → `POST /api/v1/verify` | **This project's SDK ran and reached Routely** |
-| Browser message | Same SDK → `postMessage` to the window that opened the page | The SDK ran, even if its signal never arrived |
+| Witness         | Source                                                                         | Can say                                                     |
+| --------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Server          | Page HTML, plus the public `gtm.js?id=GTM-…` for each container the page loads | A tag exists, is unpublished, or holds another project's id |
+| Backend signal  | SDK in the customer's browser → `POST /api/v1/verify`                          | **This project's SDK ran and reached Routely**              |
+| Browser message | Same SDK → `postMessage` to the window that opened the page                    | The SDK ran, even if its signal never arrived               |
 
 The flow is in `install-verification.service.ts`, the status rules in
 `lib/install-verification.ts`:
@@ -71,17 +71,17 @@ about the page being checked, and an old tag elsewhere would pass a page that ha
 backwards. The first id in `siteIds` is the one the SDK runs as, so a page with this project's tag
 behind another project's is reported as the wrong project: its data goes to the other one.
 
-| Status | Means |
-| --- | --- |
-| `not_installed` | No tag in the HTML or a live container, and nothing ran |
-| `waiting` | Nothing seen yet, still inside the window |
-| `in_progress` | A tag or the SDK has been seen, still inside the window |
-| `verified` | This run's backend signal arrived from this project's SDK |
-| `wrong_site_id` | Another project's SDK reported, or only another project's id was found |
-| `sdk_failed_to_load` | A tag exists but nothing ran |
-| `sdk_not_initialized` | The SDK started but could not finish, or its tag has no id |
-| `backend_signal_missing` | The browser says the SDK finished, and the signal never arrived |
-| `failed` | The page would not load |
+| Status                   | Means                                                                  |
+| ------------------------ | ---------------------------------------------------------------------- |
+| `not_installed`          | No tag in the HTML or a live container, and nothing ran                |
+| `waiting`                | Nothing seen yet, still inside the window                              |
+| `in_progress`            | A tag or the SDK has been seen, still inside the window                |
+| `verified`               | This run's backend signal arrived from this project's SDK              |
+| `wrong_site_id`          | Another project's SDK reported, or only another project's id was found |
+| `sdk_failed_to_load`     | A tag exists but nothing ran                                           |
+| `sdk_not_initialized`    | The SDK started but could not finish, or its tag has no id             |
+| `backend_signal_missing` | The browser says the SDK finished, and the signal never arrived        |
+| `failed`                 | The page would not load                                                |
 
 ### Why the install snippet carries the site id in its URL
 
@@ -127,10 +127,8 @@ SDK hands selectors only to `closest()` and `querySelector()`.
 
 ### What the event dialog offers (user requests 2026-11-10)
 
-- **Element click**: the pixel detects the click. For Google Tag Manager the dialog also shows the
-  one-line `trackScript` and the trigger that fires it: Click – All Elements, Some Clicks, Click
-  Element matches CSS selector `<selector>, <selector> *`. With the pixel also detecting the click,
-  the SDK's 500 ms burst rule keeps one click one event.
+- **Element click**: the chosen element only; the pixel detects the click. (Copyable GTM scripts
+  under the element were tried and removed the same day at the user's request.)
 - **Form submission**: only **Success page** and **Success message**. `SUBMIT`, `CALLBACK` and the
   developer callback are no longer offered; events saved with them keep working, and editing one
   means choosing one of the two.
@@ -186,11 +184,11 @@ the existing conversion rate, Bayesian verdict and winner gate apply unchanged.
 
 ### Counting rules
 
-| Number | Rule | Guaranteed by |
-| --- | --- | --- |
-| Total events | Every occurrence | `custom_events` rows, `events` rows per arm |
-| Converting visitors | One per visitor per experiment | `conversions.assignmentId` unique |
-| Conversion rate | Converting visitors ÷ assigned visitors | `lib/verdict.ts` |
+| Number              | Rule                                    | Guaranteed by                               |
+| ------------------- | --------------------------------------- | ------------------------------------------- |
+| Total events        | Every occurrence                        | `custom_events` rows, `events` rows per arm |
+| Converting visitors | One per visitor per experiment          | `conversions.assignmentId` unique           |
+| Conversion rate     | Converting visitors ÷ assigned visitors | `lib/verdict.ts`                            |
 
 Repeats: the same event id is stored once (`custom_events (websiteId, eventKey)` unique), which
 covers retries, a second SDK and `{ id: "order_123" }`. Identical calls within 500 ms count as one
