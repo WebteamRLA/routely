@@ -4,6 +4,7 @@ import { SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
 
 import {
   GTM_HIDE_MAX_MS,
+  GTM_MEMORY_MS,
   antiFlickerPlacement,
   buildGtmSnippet,
   findGtmContainers,
@@ -212,6 +213,7 @@ describe("the Tag Manager tag hides a Split URL control while the decision is ma
     };
     const store = (data: Record<string, string> = {}) => ({
       getItem: (k: string) => data[k] ?? null,
+      setItem: (k: string, v: string) => void (data[k] = v),
     });
     const session: Record<string, string> = { ...page.session };
     if (page.cached) {
@@ -338,5 +340,105 @@ describe("the Tag Manager tag hides a Split URL control while the decision is ma
       gtmConfigUrl("https://app.test/sdk.js", OWN),
       { credentials: "omit", mode: "cors" },
     ]);
+  });
+});
+
+describe("the Tag Manager tag remembers control pages for returning visitors", () => {
+  const CONTROL = "https://shop.test/pricing";
+  const exp = {
+    id: "exp_1",
+    kind: "split_url",
+    devices: [],
+    control: { url: CONTROL, match: "EXACT" },
+    variants: [{ id: "v1", url: "https://shop.test/b", weight: 1 }],
+  };
+  const memory = (
+    t: number,
+    experiments: unknown[] = [{ id: "exp_1", devices: [], control: exp.control }],
+  ) => ({ [`routely_ctl_${OWN}`]: JSON.stringify({ t, experiments }) });
+
+  /** Runs the real tag on the control page with `local` as localStorage; the config answers later. */
+  async function run(local: Record<string, string>, config: unknown) {
+    const head: { children: { id: string }[] } & Record<string, unknown> = { children: [] };
+    head.appendChild = (node: { parentNode?: unknown }) => {
+      node.parentNode = head;
+      head.children.push(node as never);
+    };
+    head.removeChild = (node: never) => void head.children.splice(head.children.indexOf(node), 1);
+    const document = {
+      head,
+      documentElement: head,
+      body: {},
+      querySelector: () => null,
+      getElementById: (id: string) => head.children.find((n) => n.id === id) ?? null,
+      getElementsByTagName: () => [head],
+      createElement: () => ({ id: "", appendChild() {}, setAttribute() {} }),
+      createTextNode: () => ({}),
+    };
+    const store = (data: Record<string, string>) => ({
+      getItem: (k: string) => data[k] ?? null,
+      setItem: (k: string, v: string) => void (data[k] = v),
+    });
+    const window: Record<string, unknown> = {
+      localStorage: store(local),
+      sessionStorage: store({}),
+      performance: { getEntriesByName: () => [{}] },
+    };
+    let answer: (value: unknown) => void = () => {};
+    const fetch = () => new Promise((resolve) => (answer = resolve));
+    const tag = buildGtmSnippet({ sdkUrl: "https://app.test/sdk.js", publicSiteId: OWN });
+    const inner = tag.replace(/^[\s\S]*?<script[^>]*>/, "").replace(/<\/script>\s*$/, "");
+    new Function(
+      "document",
+      "window",
+      "location",
+      "fetch",
+      "setTimeout",
+      "getComputedStyle",
+      inner,
+    )(
+      document,
+      window,
+      new URL(CONTROL),
+      fetch,
+      () => 0,
+      () => ({ backgroundColor: "" }),
+    );
+    const atOnce = !!document.getElementById("routely-cloak");
+    answer({ ok: true, json: async () => config });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { atOnce, afterConfig: !!document.getElementById("routely-cloak"), local };
+  }
+
+  const cfg = (...experiments: unknown[]) => ({ v: 5, siteId: OWN, ttl: 60, experiments });
+
+  it("covers a remembered control the instant the tag runs", async () => {
+    const r = await run(memory(Date.now() - 60_000), cfg(exp));
+    expect(r.atOnce).toBe(true);
+    expect(r.afterConfig).toBe(true);
+  });
+
+  it("ignores a memory older than a week", async () => {
+    const r = await run(memory(Date.now() - GTM_MEMORY_MS - 1), cfg(exp));
+    expect(r.atOnce).toBe(false);
+    expect(r.afterConfig).toBe(true);
+  });
+
+  it("uncovers as soon as the fresh config shows the test has ended", async () => {
+    const r = await run(memory(Date.now() - 60_000), cfg());
+    expect(r.atOnce).toBe(true);
+    expect(r.afterConfig).toBe(false);
+  });
+
+  it("remembers only Split URL controls from each fresh config, replacing the old list", async () => {
+    const r = await run({}, cfg(exp, { ...exp, id: "exp_ab", kind: "ab_test" }));
+    const saved = JSON.parse(r.local[`routely_ctl_${OWN}`]!) as {
+      t: number;
+      experiments: { id: string }[];
+    };
+    expect(saved.experiments.map((e) => e.id)).toEqual(["exp_1"]);
+    expect(Date.now() - saved.t).toBeLessThan(5_000);
+    const ended = await run({ ...memory(Date.now()) }, cfg());
+    expect(JSON.parse(ended.local[`routely_ctl_${OWN}`]!).experiments).toEqual([]);
   });
 });

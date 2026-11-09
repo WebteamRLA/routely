@@ -39,7 +39,10 @@ first frames are always visible: never claim zero flicker. Three pieces handle t
   `_rt_` handoff, no pending redirect (`routely_r_`), no device targeting. It knows at once from the
   SDK's per-tab config cache (`routely_cfg_`), otherwise when its prefetched config answers (no
   extra request), and never after the SDK finished (`routely.ready`). The cover takes the page's
-  background colour and lifts itself after 2.5 s.
+  background colour and lifts itself after 2.5 s. **It remembers control pages** (`routely_ctl_<site>`,
+  rewritten from every config, trusted 7 days, user choice 2026-11-09): a returning visitor is
+  covered the instant the tag runs, and the cover comes off when the fresh config shows the test
+  has ended.
 - **The SDK decides where the visitor goes, unchanged**: `revealPage` lifts the cover for a visitor
   who stays; `coverPage` (`cloak.ts`) keeps it, or puts one up when none is, just before
   `location.replace`, so the browser shows the cover until the variant paints. It lifts itself

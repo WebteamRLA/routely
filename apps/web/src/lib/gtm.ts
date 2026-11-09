@@ -117,6 +117,13 @@ ${config ? controlHideScript(publicSiteId, config) : ""}  var s = d.createElemen
 </script>`;
 }
 
+/**
+ * How long the tag trusts its remembered list of Split URL control pages (`routely_ctl_<site>`,
+ * user choice 2026-11-09). Rewritten from every fresh config, so it is only ever as old as the
+ * visitor's last visit; past this it is ignored.
+ */
+export const GTM_MEMORY_MS = 7 * 24 * 60 * 60 * 1000;
+
 /** How long the tag's own cover may stay up if nothing lifts it: a page must never stay hidden. */
 export const GTM_HIDE_MAX_MS = 2500;
 
@@ -139,21 +146,24 @@ export const GTM_HIDE_MAX_MS = 2500;
  * are the SDK's own storage keys (`assignment.ts`, `inclusion.ts`, `redirect.ts`).
  *
  * When it can tell: at once, from the SDK's per-tab config cache (`routely_cfg_`, every page after
- * the first); otherwise when the prefetched config answers, which is the SDK's own request so the
- * SDK still gets it from the HTTP cache. Never after the SDK has finished (`routely.ready`), so it
+ * the first) or from the tag's own memory of control pages (`routely_ctl_<site>`, written from every
+ * config it receives, trusted for `GTM_MEMORY_MS`: a returning visitor is covered the instant Tag
+ * Manager runs); otherwise when the prefetched config answers, which is the SDK's own request so
+ * the SDK still gets it from the HTTP cache. A cover put up from memory is lifted as soon as the
+ * fresh config shows the page is no longer a control (a test ended since the last visit). Never after the SDK has finished (`routely.ready`), so it
  * can't hide a page the SDK already revealed. The cover takes the page's background colour and lifts
  * itself after ${"`GTM_HIDE_MAX_MS`"}.
  */
 function controlHideScript(publicSiteId: string, configUrl: string): string {
-  return `  var site = ${jsString(publicSiteId)};
+  return `  var site = ${jsString(publicSiteId)}, memKey = "routely_ctl_" + site, cover = null;
   var read = function (store, key) { try { return JSON.parse(w[store].getItem(key)); } catch (e) { return null; } };
   var norm = function (u) {
     try { var x = new URL(u, location.href); return ("//" + x.host + x.pathname).toLowerCase().replace(/\\/+$/, ""); } catch (e) { return ""; }
   };
-  var hide = function (cfg) {
+  var sdkDone = function () { return !!(w.routely && w.routely.ready); };
+  var isControl = function (cfg) {
     try {
-      if (!cfg || !cfg.experiments || d.getElementById("routely-cloak") || (w.routely && w.routely.ready)) return;
-      if (/[?&]_rt_/.test(location.search)) return;
+      if (!cfg || !cfg.experiments || /[?&]_rt_/.test(location.search)) return false;
       var here = norm(location.href), now = new Date().getTime();
       for (var n = 0; n < cfg.experiments.length; n++) {
         var e = cfg.experiments[n], c = e.control || {}, ctl = norm(c.url || "");
@@ -161,25 +171,45 @@ function controlHideScript(publicSiteId: string, configUrl: string): string {
         if (!(here === ctl || (c.match === "PREFIX" && here.indexOf(ctl + "/") === 0))) continue;
         var a = read("localStorage", "routely_a_" + e.id), i = read("localStorage", "routely_i_" + e.id), r = read("sessionStorage", "routely_r_" + e.id);
         if ((a && a.variantId === null) || (i && i.included === false) || (r > 0 && now - r < 30000)) continue;
-        var bg = "#fff";
-        try { var b = getComputedStyle(d.body).backgroundColor; if (b && b !== "transparent" && !/^rgba\\(.*,\\s*0\\)$/.test(b)) bg = b; } catch (x) {}
-        var st = d.createElement("style");
-        st.id = "routely-cloak";
-        st.appendChild(d.createTextNode("body::after{content:''!important;position:fixed!important;inset:0!important;background:" + bg + "!important;z-index:2147483647!important}"));
-        (d.head || d.documentElement).appendChild(st);
-        var done = false;
-        w.__routelyReveal = function () { if (done) return; done = true; try { st.parentNode && st.parentNode.removeChild(st); } catch (x) {} };
-        setTimeout(w.__routelyReveal, ${GTM_HIDE_MAX_MS});
-        return;
+        return true;
       }
     } catch (x) {}
+    return false;
   };
-  var cached = read("sessionStorage", "routely_cfg_" + site);
-  if (cached && cached.expiresAt > new Date().getTime()) hide(cached.config);
+  var hide = function (cfg) {
+    try {
+      if (!isControl(cfg) || d.getElementById("routely-cloak") || sdkDone()) return;
+      var bg = "#fff";
+      try { var b = getComputedStyle(d.body).backgroundColor; if (b && b !== "transparent" && !/^rgba\\(.*,\\s*0\\)$/.test(b)) bg = b; } catch (x) {}
+      var st = d.createElement("style");
+      st.id = "routely-cloak";
+      st.appendChild(d.createTextNode("body::after{content:''!important;position:fixed!important;inset:0!important;background:" + bg + "!important;z-index:2147483647!important}"));
+      (d.head || d.documentElement).appendChild(st);
+      cover = st;
+      var done = false;
+      w.__routelyReveal = function () { if (done) return; done = true; try { st.parentNode && st.parentNode.removeChild(st); } catch (x) {} };
+      setTimeout(w.__routelyReveal, ${GTM_HIDE_MAX_MS});
+    } catch (x) {}
+  };
+  var now0 = new Date().getTime(), cached = read("sessionStorage", "routely_cfg_" + site), mem = read("localStorage", memKey);
+  if (cached && cached.expiresAt > now0) hide(cached.config);
+  else if (mem && mem.t > now0 - ${GTM_MEMORY_MS}) hide(mem);
   try {
     fetch(${jsString(configUrl)}, { credentials: "omit", mode: "cors" })
       .then(function (res) { return res.ok ? res.json() : null; })
-      .then(hide)["catch"](function () {});
+      .then(function (cfg) {
+        if (!cfg || !cfg.experiments) return;
+        try {
+          var keep = [];
+          for (var n = 0; n < cfg.experiments.length; n++) {
+            var e = cfg.experiments[n];
+            if ((e.kind || "split_url") === "split_url") keep.push({ id: e.id, devices: e.devices, control: e.control });
+          }
+          w.localStorage.setItem(memKey, JSON.stringify({ t: new Date().getTime(), experiments: keep }));
+        } catch (x) {}
+        if (isControl(cfg)) hide(cfg);
+        else if (cover && cover.parentNode && !sdkDone() && w.__routelyReveal) w.__routelyReveal();
+      })["catch"](function () {});
   } catch (x) {}
 `;
 }
