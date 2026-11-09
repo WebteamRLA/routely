@@ -19,18 +19,6 @@ export function GtmSteps({
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="m-0 text-[14px] leading-[21px] text-pretty text-[#4B5563]">
-        Routely doesn’t change your Google Tag Manager container and can’t publish it for you. You
-        add the tag and publish it yourself.
-      </p>
-      <p className="m-0 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 text-[13px] leading-[19px] text-pretty text-[#92400E]">
-        <strong className="font-semibold">Running Split URL tests?</strong> Tag Manager starts after
-        the page begins to show, so visitors may see the original page for a moment. Routely then
-        hides it while it decides, and sends them to their version. For no flash at all, use Manual
-        installation and paste the code into your site’s{" "}
-        <code className="text-[12px]">{"<head>"}</code> instead.
-      </p>
-
       <ol className="m-0 flex list-none flex-col gap-3.5 p-0">
         <GtmStep n={1} title="Open Google Tag Manager">
           <a

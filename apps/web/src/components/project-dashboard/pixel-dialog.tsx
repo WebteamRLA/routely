@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
-import { HelpLink } from "@/components/common/help-link";
 import { CodeBox } from "@/components/install/code-box";
 import { GtmSteps } from "@/components/install/gtm-steps";
 import { MethodTabs, methodPanelProps } from "@/components/install/method-tabs";
@@ -194,13 +193,6 @@ function PixelPanel({
               <DialogPrimitive.Title className="m-0 text-lg leading-[26px] font-semibold tracking-[-0.01em] text-[#111827]">
                 Add the Routely script to your site
               </DialogPrimitive.Title>
-              <p className="m-0 text-sm leading-[21px] text-pretty text-[#4B5563]">
-                It goes on every page of {domain} you want to test, so Routely can show variants and
-                count conversions.
-              </p>
-              <HelpLink anchor="tracking-install" newTab>
-                Installation guide
-              </HelpLink>
             </div>
 
             <div {...methodPanelProps(method)}>
