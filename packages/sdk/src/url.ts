@@ -74,6 +74,17 @@ export function normalizeUrl(input: string): string | null {
 }
 
 /**
+ * A page's identity for matching: its normalised URL without the scheme. `http://` and `https://`
+ * name the same page for a test (2026-11-09: a test saved as `http://blinto.co/` never matched the
+ * `https://` site visitors were on, so it never redirected). Keys and counts still use the full
+ * `normalizeUrl`.
+ */
+function pageKey(url: string): string | null {
+  const normal = normalizeUrl(url);
+  return normal === null ? null : normal.replace(/^https?:/, "");
+}
+
+/**
  * True when `candidate` satisfies a configured URL under the given match type.
  *
  * `PREFIX` requires a boundary after the prefix, so an experiment on `/pricing` does not claim
@@ -85,8 +96,8 @@ export function urlMatches(
   configured: string,
   matchType: UrlMatchType,
 ): boolean {
-  const left = normalizeUrl(candidate);
-  const right = normalizeUrl(configured);
+  const left = pageKey(candidate);
+  const right = pageKey(configured);
 
   if (left === null || right === null) return false;
   if (matchType === "EXACT") return left === right;
@@ -98,8 +109,8 @@ export function urlMatches(
 
 /** True when two URLs refer to the same page after normalisation. */
 export function isSameUrl(a: string, b: string): boolean {
-  const left = normalizeUrl(a);
-  return left !== null && left === normalizeUrl(b);
+  const left = pageKey(a);
+  return left !== null && left === pageKey(b);
 }
 
 /**

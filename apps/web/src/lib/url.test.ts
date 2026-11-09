@@ -90,3 +90,27 @@ describe("isSameUrl", () => {
     expect(isSameUrl("https://acme.test/p/", "https://acme.test/p?utm_source=x")).toBe(true);
   });
 });
+
+describe("http and https name the same page (2026-11-09)", () => {
+  it("matches a control saved with http:// on the https:// site, EXACT and PREFIX", () => {
+    expect(urlMatches("https://blinto.co/", "http://blinto.co/", "EXACT")).toBe(true);
+    expect(urlMatches("https://blinto.co/?utm_source=x", "http://blinto.co", "EXACT")).toBe(true);
+    expect(
+      urlMatches("https://shop.test/pricing/annual", "http://shop.test/pricing", "PREFIX"),
+    ).toBe(true);
+    expect(urlMatches("http://shop.test/pricing", "https://shop.test/pricing", "EXACT")).toBe(true);
+  });
+
+  it("still tells different pages apart", () => {
+    expect(urlMatches("https://blinto.co/about", "http://blinto.co/", "EXACT")).toBe(false);
+    expect(urlMatches("https://shop.test/pricing-old", "http://shop.test/pricing", "PREFIX")).toBe(
+      false,
+    );
+    expect(urlMatches("https://other.test/", "http://blinto.co/", "EXACT")).toBe(false);
+  });
+
+  it("isSameUrl agrees", () => {
+    expect(isSameUrl("http://blinto.co/a", "https://blinto.co/a/")).toBe(true);
+    expect(isSameUrl("http://blinto.co/a", "https://blinto.co/b")).toBe(false);
+  });
+});

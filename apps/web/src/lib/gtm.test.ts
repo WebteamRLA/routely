@@ -307,6 +307,11 @@ describe("the Tag Manager tag hides a Split URL control while the decision is ma
     for (const page of cases) expect((await runTag(page)).hidden).toBe(false);
   });
 
+  it("treats a control saved with http:// as the https:// page, like the SDK", async () => {
+    const http = split({ control: { url: "http://shop.test/pricing/", match: "EXACT" } });
+    expect((await runTag({ config: config(http) })).hidden).toBe(true);
+  });
+
   it("hides a visitor whose stored arm is a variant", async () => {
     const local = { routely_a_exp_1: JSON.stringify({ variantId: "v2" }) };
     expect((await runTag({ config: config(split()), local })).hidden).toBe(true);

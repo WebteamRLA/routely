@@ -531,7 +531,7 @@ Application-level rules enforced in `experiment.service.ts`:
 ## 7. The SDK
 
 `packages/sdk` — vanilla TypeScript, **zero runtime dependencies**, one IIFE bundle.
-Currently **9.87 kB gzipped (27.20 kB raw) against a 10 kB budget the build enforces** (it exits
+Currently **9.89 kB gzipped (27.27 kB raw) against a 10 kB budget the build enforces** (it exits
 non-zero if exceeded; `npm run sdk:build`, 2026-11-05). The budget was 6 kB until the user raised it
 for v4 (decision D3), then 8 kB. It went to 10 kB on 2026-11-05 for custom events and the install
 check, because the bundle had 16 bytes left. **That rise was flagged to the user, not asked of them:
@@ -682,7 +682,7 @@ Plus a final check that the target is not the page already displayed. `location.
 
 `apps/web/src/lib/url.ts` and `packages/sdk/src/url.ts` implement the same normalisation. The
 SDK cannot import from the app, and a shared package would add a module graph to a bundle whose
-whole point is being one small file. **Both have mirrored test suites — change both together.**
+whole point is being one small file. **Both have mirrored test suites — change both together.** Matching (`urlMatches`, `isSameUrl`) ignores `http`/`https` (2026-11-09: a test saved as `http://` never matched the `https://` site); `normalizeUrl` keys and counts keep the scheme.
 
 ### Time on page is approximate, and must be labelled so
 

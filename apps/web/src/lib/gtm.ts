@@ -131,7 +131,8 @@ export const GTM_HIDE_MAX_MS = 2500;
  * `keepParams` are untouched, and the SDK reveals or redirects exactly as before: `revealPage` lifts
  * this cover for a visitor who stays, and `coverPage` keeps it through a redirect.
  *
- * It hides only when this page is the control of an active Split URL test (origin and path,
+ * It hides only when this page is the control of an active Split URL test (host and path, either
+ * scheme like the SDK's `urlMatches`,
  * `EXACT`/`PREFIX`) **and** the visitor may be redirected: no stored control arm (`routely_a_`), not
  * stored as excluded (`routely_i_`), not arriving by a Routely redirect (`_rt_` parameters), and no
  * redirect already pending (`routely_r_`, 30 s). A device-targeted test is left to the SDK. These
@@ -147,7 +148,7 @@ function controlHideScript(publicSiteId: string, configUrl: string): string {
   return `  var site = ${jsString(publicSiteId)};
   var read = function (store, key) { try { return JSON.parse(w[store].getItem(key)); } catch (e) { return null; } };
   var norm = function (u) {
-    try { var x = new URL(u, location.href); return (x.protocol + "//" + x.host + x.pathname).toLowerCase().replace(/\\/+$/, ""); } catch (e) { return ""; }
+    try { var x = new URL(u, location.href); return ("//" + x.host + x.pathname).toLowerCase().replace(/\\/+$/, ""); } catch (e) { return ""; }
   };
   var hide = function (cfg) {
     try {
