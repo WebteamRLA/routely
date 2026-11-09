@@ -114,7 +114,7 @@ export const GUIDES: readonly Guide[] = [
               "Open the project’s tracking code and choose “Google Tag Manager”.",
               "In Google Tag Manager, open the container for this website.",
               "Tags → New → Tag Configuration → Custom HTML, and paste the code. It loads Routely and includes the anti-flicker block.",
-              "Under Triggering, choose “Initialization - All Pages”.",
+              "Under Triggering, choose “Consent Initialization - All Pages”, which fires first. “Initialization - All Pages” also works.",
               "Save, then Submit and Publish. A saved tag isn’t live until you publish.",
               "Back in Routely, click “Verify installation”. Routely checks that the page loads your container and that its published version holds the code, anti-flicker block included.",
             ],

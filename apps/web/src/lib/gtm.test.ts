@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { SDK_PROTOCOL_VERSION } from "@routely/sdk/contract";
 
 import {
+  GTM_HIDE_MAX_MS,
   antiFlickerPlacement,
   buildGtmSnippet,
   findGtmContainers,
@@ -152,5 +153,185 @@ describe("the config prefetch in the Tag Manager tag", () => {
   it("is left out for an SDK address that isn't a URL", () => {
     expect(gtmConfigUrl("not a url", OWN)).toBeNull();
     expect(buildGtmSnippet({ sdkUrl: "not a url", publicSiteId: OWN })).not.toContain("fetch(");
+  });
+});
+
+describe("the Tag Manager tag hides a Split URL control while the decision is made", () => {
+  const CONTROL = "https://shop.test/pricing";
+  const split = (over: Record<string, unknown> = {}) => ({
+    id: "exp_1",
+    kind: "split_url",
+    devices: [],
+    control: { url: CONTROL, match: "EXACT" },
+    variants: [
+      { id: "v1", url: "https://shop.test/pricing-b", weight: 1 },
+      { id: "v2", url: "https://shop.test/pricing-c", weight: 1 },
+    ],
+    ...over,
+  });
+
+  interface Page {
+    href?: string;
+    config?: unknown;
+    cached?: unknown;
+    local?: Record<string, string>;
+    session?: Record<string, string>;
+    fetchFails?: boolean;
+    sdkReady?: boolean;
+    bodyColor?: string;
+  }
+
+  /** Runs the real tag against a stubbed page; returns what it did. */
+  async function runTag(page: Page = {}) {
+    const href = page.href ?? `${CONTROL}?utm_source=x`;
+    const head: { children: { id: string; text: string; src?: string }[] } & Record<
+      string,
+      unknown
+    > = { children: [] };
+    head.appendChild = (node: { parentNode?: unknown }) => {
+      node.parentNode = head;
+      head.children.push(node as never);
+    };
+    head.removeChild = (node: never) => void head.children.splice(head.children.indexOf(node), 1);
+    const document = {
+      head,
+      documentElement: head,
+      body: {},
+      querySelector: () => null,
+      getElementById: (id: string) => head.children.find((n) => n.id === id) ?? null,
+      getElementsByTagName: () => [head],
+      createElement: () => {
+        const node = { id: "", text: "", async: false, setAttribute() {} } as Record<
+          string,
+          unknown
+        >;
+        node.appendChild = (t: { text: string }) => (node.text = String(node.text) + t.text);
+        return node;
+      },
+      createTextNode: (text: string) => ({ text }),
+    };
+    const store = (data: Record<string, string> = {}) => ({
+      getItem: (k: string) => data[k] ?? null,
+    });
+    const session: Record<string, string> = { ...page.session };
+    if (page.cached) {
+      session[`routely_cfg_${OWN}`] = JSON.stringify({
+        expiresAt: Date.now() + 60_000,
+        config: page.cached,
+      });
+    }
+    const window: Record<string, unknown> = {
+      localStorage: store(page.local),
+      sessionStorage: store(session),
+      performance: { getEntriesByName: () => [{}] }, // painted: the snippet's own cover stands down
+      ...(page.sdkReady ? { routely: { ready: true } } : {}),
+    };
+    const timers: number[] = [];
+    const fetch = vi.fn(async () => {
+      if (page.fetchFails) throw new Error("offline");
+      return { ok: page.config !== undefined, json: async () => page.config };
+    });
+    const tag = buildGtmSnippet({ sdkUrl: "https://app.test/sdk.js", publicSiteId: OWN });
+    const inner = tag.replace(/^[\s\S]*?<script[^>]*>/, "").replace(/<\/script>\s*$/, "");
+    new Function(
+      "document",
+      "window",
+      "location",
+      "fetch",
+      "setTimeout",
+      "getComputedStyle",
+      inner,
+    )(
+      document,
+      window,
+      new URL(href),
+      fetch,
+      (fn: () => void, ms: number) => timers.push(ms),
+      () => ({ backgroundColor: page.bodyColor ?? "rgba(0, 0, 0, 0)" }),
+    );
+    const hiddenAtOnce = !!document.getElementById("routely-cloak");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const cover = document.getElementById("routely-cloak") as { text: string } | null;
+    return {
+      hiddenAtOnce,
+      hidden: !!cover,
+      css: cover?.text ?? "",
+      timers,
+      fetch,
+      reveal: () => (window.__routelyReveal as () => void)(),
+      isHidden: () => !!document.getElementById("routely-cloak"),
+      loadsSdk: head.children.some(
+        (n) => (n as { src?: string }).src === "https://app.test/sdk.js",
+      ),
+    };
+  }
+
+  const config = (...experiments: unknown[]) => ({ v: 5, siteId: OWN, ttl: 60, experiments });
+
+  it("hides a control page when the config answers, and still loads the SDK", async () => {
+    const tag = await runTag({ config: config(split()) });
+    expect(tag.hiddenAtOnce).toBe(false);
+    expect(tag.hidden).toBe(true);
+    expect(tag.loadsSdk).toBe(true);
+  });
+
+  it("hides at once from the SDK's cached config, on every page after the first", async () => {
+    const tag = await runTag({ cached: config(split()), config: config(split()) });
+    expect(tag.hiddenAtOnce).toBe(true);
+  });
+
+  it("matches PREFIX controls on a path boundary, ignoring case and a trailing slash", async () => {
+    const prefix = split({ control: { url: "https://shop.test/Pricing/", match: "PREFIX" } });
+    expect(
+      (await runTag({ href: "https://shop.test/pricing/annual", config: config(prefix) })).hidden,
+    ).toBe(true);
+    expect(
+      (await runTag({ href: "https://shop.test/pricing-old", config: config(prefix) })).hidden,
+    ).toBe(false);
+  });
+
+  it("does not hide where no redirect can follow", async () => {
+    const cases: Page[] = [
+      { href: "https://shop.test/other", config: config(split()) },
+      { config: config(split({ kind: "ab_test" })) },
+      { config: config(split({ devices: ["mobile"] })) },
+      { config: config(split()), local: { routely_a_exp_1: JSON.stringify({ variantId: null }) } },
+      { config: config(split()), local: { routely_i_exp_1: JSON.stringify({ included: false }) } },
+      { href: `${CONTROL}?_rt_vid=abc`, config: config(split()) },
+      { config: config(split()), session: { routely_r_exp_1: String(Date.now()) } },
+      { config: config(split()), sdkReady: true },
+      { config: config() },
+      { fetchFails: true },
+      {},
+    ];
+    for (const page of cases) expect((await runTag(page)).hidden).toBe(false);
+  });
+
+  it("hides a visitor whose stored arm is a variant", async () => {
+    const local = { routely_a_exp_1: JSON.stringify({ variantId: "v2" }) };
+    expect((await runTag({ config: config(split()), local })).hidden).toBe(true);
+  });
+
+  it("can be lifted by the SDK, and lifts itself after the safety timeout", async () => {
+    const tag = await runTag({ config: config(split()) });
+    expect(tag.timers).toContain(GTM_HIDE_MAX_MS);
+    tag.reveal();
+    expect(tag.isHidden()).toBe(false);
+  });
+
+  it("covers in the page's own background colour, white when it has none", async () => {
+    expect((await runTag({ config: config(split()) })).css).toContain("background:#fff");
+    expect((await runTag({ config: config(split()), bodyColor: "rgb(17, 24, 39)" })).css).toContain(
+      "background:rgb(17, 24, 39)",
+    );
+  });
+
+  it("makes no request the SDK would not make: one prefetch, the SDK's own", async () => {
+    const tag = await runTag({ config: config(split()) });
+    expect(tag.fetch).toHaveBeenCalledTimes(1);
+    expect(tag.fetch.mock.calls[0]).toEqual([
+      gtmConfigUrl("https://app.test/sdk.js", OWN),
+      { credentials: "omit", mode: "cors" },
+    ]);
   });
 });

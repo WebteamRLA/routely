@@ -564,7 +564,7 @@ carry a synchronous tag, which still works.
 | `conversion.ts` | Goal matching and once-per-assignment claiming |
 | `engagement.ts` | Visible-time accumulator (`performance.now()`, delta reporting) |
 | `dedupe.ts` | Page-view guard against repeated SDK initialisation |
-| `cloak.ts` | Calls `window.__routelyReveal` (the overlay lives in the install snippet); `coverPage` puts a white cover up itself just before a Split URL redirect, for installs whose snippet cover came too late (GTM) |
+| `cloak.ts` | Calls `window.__routelyReveal` (the overlay lives in the install snippet, or in the GTM tag's control-page hide, `apps/web/src/lib/gtm.ts`); `coverPage` puts a cover up itself just before a Split URL redirect when none is up |
 | `config.ts` / `transport.ts` / `track.ts` | Fetch + cache config (`?v=4`); timeouts; `sendBeacon` |
 | `events.ts` | `routely.track`, click and form triggers (one listener each), offline queue, selector checks |
 | `verify.ts` | Reports to an install check opened with `#_rt_verify=<token>` (dormant since 2026-11-09) |

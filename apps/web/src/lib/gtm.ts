@@ -103,21 +103,84 @@ export interface GtmSnippetOptions {
  */
 export function buildGtmSnippet({ sdkUrl, publicSiteId }: GtmSnippetOptions): string {
   const config = gtmConfigUrl(sdkUrl, publicSiteId);
-  const prefetch = config
-    ? `  try { fetch(${jsString(config)}, { credentials: "omit", mode: "cors" })["catch"](function () {}); } catch (e) {}\n`
-    : "";
   return `<!-- Routely tracking script with anti-flicker (Google Tag Manager: Custom HTML) -->
 <script ${OPTIMIZER_OPT_OUT}>
 ${antiFlickerScript()}
-(function (d) {
+(function (d, w) {
   if (d.querySelector("script[data-site-id]")) return;
-${prefetch}  var s = d.createElement("script");
+${config ? controlHideScript(publicSiteId, config) : ""}  var s = d.createElement("script");
   s.async = true;
   s.src = ${jsString(sdkUrl)};
   s.setAttribute("data-site-id", ${jsString(publicSiteId)});
   (d.head || d.documentElement).appendChild(s);
-})(document);
+})(document, window);
 </script>`;
+}
+
+/** How long the tag's own cover may stay up if nothing lifts it: a page must never stay hidden. */
+export const GTM_HIDE_MAX_MS = 2500;
+
+/**
+ * Hides a Split URL **control** page from the moment the tag can tell it is one, so a visitor who is
+ * then sent to a variant never watches the control during the decision (user request 2026-11-09).
+ *
+ * Tag Manager runs after the page has started to paint, so the first frames are always visible;
+ * what this removes is the rest of the wait (`sdk.js`, the config and, for a new visitor,
+ * `/api/v1/assign`). The tag only decides **whether to hide**. Where the visitor goes is still the
+ * SDK's decision, with the server's arm, so balancing, traffic allocation, loop guards and
+ * `keepParams` are untouched, and the SDK reveals or redirects exactly as before: `revealPage` lifts
+ * this cover for a visitor who stays, and `coverPage` keeps it through a redirect.
+ *
+ * It hides only when this page is the control of an active Split URL test (origin and path,
+ * `EXACT`/`PREFIX`) **and** the visitor may be redirected: no stored control arm (`routely_a_`), not
+ * stored as excluded (`routely_i_`), not arriving by a Routely redirect (`_rt_` parameters), and no
+ * redirect already pending (`routely_r_`, 30 s). A device-targeted test is left to the SDK. These
+ * are the SDK's own storage keys (`assignment.ts`, `inclusion.ts`, `redirect.ts`).
+ *
+ * When it can tell: at once, from the SDK's per-tab config cache (`routely_cfg_`, every page after
+ * the first); otherwise when the prefetched config answers, which is the SDK's own request so the
+ * SDK still gets it from the HTTP cache. Never after the SDK has finished (`routely.ready`), so it
+ * can't hide a page the SDK already revealed. The cover takes the page's background colour and lifts
+ * itself after ${"`GTM_HIDE_MAX_MS`"}.
+ */
+function controlHideScript(publicSiteId: string, configUrl: string): string {
+  return `  var site = ${jsString(publicSiteId)};
+  var read = function (store, key) { try { return JSON.parse(w[store].getItem(key)); } catch (e) { return null; } };
+  var norm = function (u) {
+    try { var x = new URL(u, location.href); return (x.protocol + "//" + x.host + x.pathname).toLowerCase().replace(/\\/+$/, ""); } catch (e) { return ""; }
+  };
+  var hide = function (cfg) {
+    try {
+      if (!cfg || !cfg.experiments || d.getElementById("routely-cloak") || (w.routely && w.routely.ready)) return;
+      if (/[?&]_rt_/.test(location.search)) return;
+      var here = norm(location.href), now = new Date().getTime();
+      for (var n = 0; n < cfg.experiments.length; n++) {
+        var e = cfg.experiments[n], c = e.control || {}, ctl = norm(c.url || "");
+        if ((e.kind || "split_url") !== "split_url" || (e.devices && e.devices.length) || !ctl) continue;
+        if (!(here === ctl || (c.match === "PREFIX" && here.indexOf(ctl + "/") === 0))) continue;
+        var a = read("localStorage", "routely_a_" + e.id), i = read("localStorage", "routely_i_" + e.id), r = read("sessionStorage", "routely_r_" + e.id);
+        if ((a && a.variantId === null) || (i && i.included === false) || (r > 0 && now - r < 30000)) continue;
+        var bg = "#fff";
+        try { var b = getComputedStyle(d.body).backgroundColor; if (b && b !== "transparent" && !/^rgba\\(.*,\\s*0\\)$/.test(b)) bg = b; } catch (x) {}
+        var st = d.createElement("style");
+        st.id = "routely-cloak";
+        st.appendChild(d.createTextNode("body::after{content:''!important;position:fixed!important;inset:0!important;background:" + bg + "!important;z-index:2147483647!important}"));
+        (d.head || d.documentElement).appendChild(st);
+        var done = false;
+        w.__routelyReveal = function () { if (done) return; done = true; try { st.parentNode && st.parentNode.removeChild(st); } catch (x) {} };
+        setTimeout(w.__routelyReveal, ${GTM_HIDE_MAX_MS});
+        return;
+      }
+    } catch (x) {}
+  };
+  var cached = read("sessionStorage", "routely_cfg_" + site);
+  if (cached && cached.expiresAt > new Date().getTime()) hide(cached.config);
+  try {
+    fetch(${jsString(configUrl)}, { credentials: "omit", mode: "cors" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(hide)["catch"](function () {});
+  } catch (x) {}
+`;
 }
 
 /**

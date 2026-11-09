@@ -25,8 +25,9 @@ export function GtmSteps({
       </p>
       <p className="m-0 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 text-[13px] leading-[19px] text-pretty text-[#92400E]">
         <strong className="font-semibold">Running Split URL tests?</strong> Tag Manager starts after
-        the page is visible, so visitors can see the original page for a moment before they’re
-        redirected. For no flash, use Manual installation and paste the code into your site’s{" "}
+        the page begins to show, so visitors may see the original page for a moment. Routely then
+        hides it while it decides, and sends them to their version. For no flash at all, use Manual
+        installation and paste the code into your site’s{" "}
         <code className="text-[12px]">{"<head>"}</code> instead.
       </p>
 
@@ -57,8 +58,9 @@ export function GtmSteps({
         </GtmStep>
         <GtmStep n={4} title="Choose when it runs">
           <Body>
-            Under Triggering, choose “Initialization - All Pages”, which fires earliest. “All Pages”
-            also works. The tag must fire on every page your experiments run on.
+            Under Triggering, choose “Consent Initialization - All Pages”, which fires first, so
+            Routely can hide a Split URL control page sooner. “Initialization - All Pages” also
+            works. The tag must fire on every page your experiments run on.
           </Body>
         </GtmStep>
         <GtmStep n={5} title="Save the tag, then Submit and Publish">

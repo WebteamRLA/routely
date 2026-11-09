@@ -17,24 +17,40 @@ that.
 The GTM tab's code is one Custom HTML script: the anti-flicker block (`antiFlickerScript` in
 `lib/snippet.ts`, shared with the `<head>` block) and then the loader. The check accepts the block
 in a published container that holds this project's tag (`readContainer` `hasAntiFlicker`), or in
-the page's `<head>` above the `gtm.js` loader (`antiFlickerPlacement` in `lib/gtm.ts`). Inside Tag
-Manager it starts after the page is visible, so it narrows the flash rather than preventing it:
-that pass carries a note, and the tab offers the `<head>` block as "No flash at all (optional)".
-The block stands down if a cover exists or already ran, so both together cover once, and
-**if the page has already appeared** (`first-contentful-paint`): from Tag Manager a late cover was
-itself the blink, white over the control page through the redirect (blinto.co, 2026-11-09). The
-GTM tag also starts the SDK's exact config request while `sdk.js` downloads (`gtmConfigUrl`), so
-the SDK's own request is answered from the browser cache. Measured at 150 ms per request: the
-white flash gone, and the variant shown 0.15 s sooner.
-
-**The SDK covers a Split URL redirect itself** (`coverPage` in `cloak.ts`, user request
-2026-11-09): just before `location.replace` it puts the same white cover up when none is, so the
-browser shows white, not the control, until the variant paints (measured: cover painted 3 ms
-after it was added, variant painted 170 ms later). Only a redirect is covered: covering from the
-moment a control matched also blinked white for visitors who stay (0.15 s), so it was moved. The
-cover lifts itself after 3 s if the navigation stalls. Without it
+the page's `<head>` above the `gtm.js` loader (`antiFlickerPlacement` in `lib/gtm.ts`). Without it
 anywhere the result is `anti_flicker` (amber) with the fix, and the install is not verified. The
 Manual tab is unchanged: its snippet already carries the block.
+
+The block stands down if a cover exists or already ran, so both together cover once, and **if the
+page has already appeared** (`first-contentful-paint`): from Tag Manager a late cover over every
+page was itself the blink (blinto.co, 2026-11-09). Inside Tag Manager it therefore only matters in
+the rare case the tag runs before the first paint; the `<head>` block remains the way to prevent
+the first frames from showing.
+
+**Split URL tests through Tag Manager.** Tag Manager runs after the page starts to paint, so the
+first frames are always visible: never claim zero flicker. Three pieces handle the rest:
+
+- **The GTM tag prefetches the config** (`gtmConfigUrl`): the SDK's exact request, started while
+  `sdk.js` downloads, so the SDK's own request is answered from the browser cache.
+- **The GTM tag hides a control page while the decision is made** (`controlHideScript` in
+  `lib/gtm.ts`): with the same `#routely-cloak` and `__routelyReveal` the SDK uses, when this page
+  is the control of an active Split URL test (origin and path, `EXACT`/`PREFIX`) and the visitor
+  may be redirected: no stored control arm (`routely_a_`), not stored as excluded (`routely_i_`), no
+  `_rt_` handoff, no pending redirect (`routely_r_`), no device targeting. It knows at once from the
+  SDK's per-tab config cache (`routely_cfg_`), otherwise when its prefetched config answers (no
+  extra request), and never after the SDK finished (`routely.ready`). The cover takes the page's
+  background colour and lifts itself after 2.5 s.
+- **The SDK decides where the visitor goes, unchanged**: `revealPage` lifts the cover for a visitor
+  who stays; `coverPage` (`cloak.ts`) keeps it, or puts one up when none is, just before
+  `location.replace`, so the browser shows the cover until the variant paints. It lifts itself
+  after 3 s if the navigation stalls.
+
+Measured in Chrome, GTM injected 300 ms in, 150 ms per request: the control is visible until about
+0.62 s, then covered until the variant paints (about 0.97 s), or for about 0.16 s for a visitor
+assigned to control. Returning control visitors are never covered; returning variant visitors are
+covered as soon as the tag runs (about 0.47 s). At 400 ms per request: covered at 1.12 s, variant at
+1.98 s. A slow assignment lifts the cover at 2.5 s; a failed config never covers; a failed
+assignment reveals at once.
 
 The browser-run check below is **dormant**: `/api/v1/verify`, the SDK's `verify.ts` and the
 `install_verifications` table remain, but nothing issues a token, so no run exists for a signal
