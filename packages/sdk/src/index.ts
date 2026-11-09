@@ -214,6 +214,12 @@ export async function boot(): Promise<RoutelyState | null> {
   if (editToken && startEditorBridge(editToken, options.apiBase)) {
     log("visual editor mode");
     revealPage();
+    // A second copy on the page (a Tag Manager tag, beside the editor proxy's own) must stand
+    // down: its hello would restart the handshake, and the agent already running never says ready
+    // twice (2026-11-10, organictaste.shop). A later anti-flicker block must not cover the page
+    // being edited either.
+    window.routely = { isLoaded: true };
+    (window as { __routelyReveal?: () => void }).__routelyReveal ||= () => {};
     return null;
   }
 

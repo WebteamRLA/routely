@@ -242,6 +242,17 @@ describe("boot", () => {
     );
   });
 
+  it("in the editor, a second copy of the SDK (a Tag Manager tag) stands down", async () => {
+    const app = { postMessage: vi.fn() };
+    const page = setup({ href: `${PAGE}#_rt_edit=tok_abcdefghijklmnop`, framedBy: app });
+    await boot();
+    expect(app.postMessage).toHaveBeenCalledTimes(1);
+
+    await boot(); // the second copy
+    expect(app.postMessage).toHaveBeenCalledTimes(1);
+    expect((page.win.routely as { isLoaded?: boolean }).isLoaded).toBe(true);
+  });
+
   it("ignores the editor fragment in a top-level tab and runs normally", async () => {
     const page = setup({ href: `${PAGE}#_rt_edit=tok_abcdefghijklmnop` });
     const state = await boot();

@@ -477,9 +477,27 @@ function place(div: HTMLDivElement, el: Element | null): void {
 
 export function startAgent(win: Win = window as Win): boolean {
   const ctx = win.__routelyEditor;
-  if (!ctx || win.__routelyAgent) return false;
+  if (!ctx) return false;
   const target: Window | null = ctx.via === "parent" ? win.parent : (win.opener as Window | null);
   if (!target || target === win) return false;
+  if (win.__routelyAgent) {
+    // Loaded again (a second hello and init, from a second copy of the SDK): the editor is waiting
+    // for a ready that the running agent will not send twice. Say it again; start nothing new.
+    try {
+      target.postMessage(
+        {
+          type: "routely:ready",
+          v: EDITOR_PROTOCOL_VERSION,
+          token: ctx.token,
+          url: String(win.location.href).split("#")[0] as string,
+        } satisfies EditorPageMessage,
+        ctx.origin,
+      );
+    } catch {
+      // The editor closed.
+    }
+    return false;
+  }
   win.__routelyAgent = true;
   const doc = win.document;
 
