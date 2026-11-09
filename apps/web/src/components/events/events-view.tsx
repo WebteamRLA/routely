@@ -429,9 +429,17 @@ function EventRow({
         <span className={cellText}>
           {event.method ? METHOD_LABELS[event.method] : "Not set up"}
         </span>
-        {event.method === "FORM" && event.formSuccess ? (
+        {/* A code event is always stored with the pixel, so GTM here is a click or form tag. */}
+        {(event.method === "FORM" && event.formSuccess) || event.install === "GTM" ? (
           <span className="text-[12px] leading-[17px] text-[#6B7280]">
-            {FORM_SUCCESS_LABELS[event.formSuccess]}
+            {[
+              event.method === "FORM" && event.formSuccess
+                ? FORM_SUCCESS_LABELS[event.formSuccess]
+                : null,
+              event.install === "GTM" ? "Google Tag Manager" : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
         ) : null}
       </div>

@@ -862,6 +862,10 @@ model EventDefinition {
   description     String?
   category        String?
   method          EventTrackingMethod @default(CODE)
+  /// CLICK and FORM: what detects it. MANUAL is the Routely pixel (the trigger is in its
+  /// configuration); GTM is the event's own Tag Manager tag (`lib/gtm-event.ts`), and the pixel
+  /// then leaves it out so the same action is never counted twice. CODE events ignore it.
+  install         InstallMethod       @default(MANUAL)
   /// CLICK: the element. FORM: the form (optional for URL and CALLBACK confirmation).
   selector        String?
   /// The page the element was chosen on. The SDK checks the selector still resolves here.

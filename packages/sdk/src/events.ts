@@ -1,7 +1,11 @@
 import type { CustomEventPayload, EventIssue, EventTrigger, TrackBatch } from "./contract";
 import {
+  EVENT_BURST_MS,
   EVENT_NAME_PATTERN,
   EVENT_PROPERTY_KEY_PATTERN,
+  FORM_SUBMITTED_KEY,
+  FORM_SUBMIT_MEMORY_MS,
+  FORM_SUCCESS_WATCH_MS,
   MAX_EVENT_PROPERTIES,
   MAX_EVENT_PROPERTY_LENGTH,
   SDK_PROTOCOL_VERSION,
@@ -18,7 +22,7 @@ import { isSameUrl, normalizeUrl, urlMatches } from "./url";
  * The browser only says *what happened*. It names no experiment and no arm: the server reads the
  * visitor's stored assignment, so an event can never be attributed to an arm the visitor is not in.
  *
- * Counting rules. Every occurrence is reported; a repeat within `BURST_MS` is treated as one action
+ * Counting rules. Every occurrence is reported; a repeat within `EVENT_BURST_MS` is treated as one action
  * (a double click, a callback firing twice, two listeners). A real second click later is a second
  * event. Conversions are a different number: at most one per visitor per experiment, by the
  * database's unique index, so repeats can never raise a conversion rate.
@@ -30,16 +34,10 @@ export interface EventContext {
   visitorId: string;
 }
 
-const BURST_MS = 500;
-/** A form's success page must follow its submission this closely. */
-const SUBMIT_MEMORY_MS = 30 * 60 * 1000;
-/** How long after a submission a success element may still appear. */
-const SUCCESS_WATCH_MS = 15_000;
 /** Left for a page's scripts to render, before a selector counts as missing. */
 const CHECK_DELAY_MS = 3000;
 const QUEUE_KEY = "routely_evq";
 const MAX_QUEUED = 20;
-const SUBMITTED_KEY = "routely_sub_";
 const CHECKED_KEY = "routely_chk_";
 
 const lastSent = new Map<string, number>();
@@ -119,7 +117,7 @@ export function trackEvent(
 
   const props = safeProperties(properties);
   const burstKey = name + JSON.stringify(props);
-  if (now - (lastSent.get(burstKey) ?? -Infinity) < BURST_MS) return false;
+  if (now - (lastSent.get(burstKey) ?? -Infinity) < EVENT_BURST_MS) return false;
   lastSent.set(burstKey, now);
 
   const href = typeof location === "undefined" ? "" : location.href;
@@ -162,7 +160,7 @@ function watchForSuccess(selector: string, fire: () => void): void {
     fire();
   });
   observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
-  setTimeout(() => observer.disconnect(), SUCCESS_WATCH_MS);
+  setTimeout(() => observer.disconnect(), FORM_SUCCESS_WATCH_MS);
 }
 
 /** Reports a form confirmed by reaching a page: this page is it, and (when a form is named) that
@@ -171,10 +169,10 @@ function checkSuccessPage(trigger: EventTrigger, href: string, fire: () => void)
   const page = trigger.successUrl;
   if (trigger.success !== "url" || !page || !urlMatches(href, page.url, page.match)) return;
   const session = getSessionStorage();
-  const key = SUBMITTED_KEY + trigger.name;
+  const key = FORM_SUBMITTED_KEY + trigger.name;
   try {
     const at = Number(session?.getItem(key));
-    if (trigger.selector && !(Date.now() - at < SUBMIT_MEMORY_MS)) return;
+    if (trigger.selector && !(Date.now() - at < FORM_SUBMIT_MEMORY_MS)) return;
     if (!trigger.selector && at < 0) return; // Already counted this session; a reload is not new.
     session?.setItem(key, "-1");
   } catch {
@@ -271,7 +269,7 @@ export function startTriggers(context: EventContext, triggers: EventTrigger[], h
         if (!closest(event.target, trigger.selector!)) continue;
         if (trigger.success === "url") {
           try {
-            getSessionStorage()?.setItem(SUBMITTED_KEY + trigger.name, String(Date.now()));
+            getSessionStorage()?.setItem(FORM_SUBMITTED_KEY + trigger.name, String(Date.now()));
           } catch {
             // Without session storage the success page cannot tie back to this form.
           }

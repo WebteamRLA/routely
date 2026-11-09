@@ -2,15 +2,22 @@ import "server-only";
 
 import type { EventDefinition, Prisma } from "@/generated/prisma/client";
 import { type EventStatus, eventStatus, submissionUnverified } from "@/lib/events";
+import { type EventTagStatus, eventTagStatus } from "@/lib/gtm-event";
 import { type MemberRole, can, rolesWith } from "@/lib/permissions";
 import { isSameSite } from "@/lib/url";
-import { conflict, forbidden, notFound, validationFailed } from "@/server/errors";
+import { conflict, forbidden, notFound, rateLimited, validationFailed } from "@/server/errors";
+import { rateLimit } from "@/server/http/rate-limit";
 import * as customEventRepo from "@/server/repositories/custom-event.repository";
 import * as definitionRepo from "@/server/repositories/event-definition.repository";
 import type { EventDefinitionWithUsage } from "@/server/repositories/event-definition.repository";
 import * as websiteRepo from "@/server/repositories/website.repository";
+import { inspectEventTag } from "@/server/services/pixel.service";
 import { parseOrThrow } from "@/server/validate";
-import { type EventDefinitionInput, eventDefinitionSchema } from "@/validation/custom-event";
+import {
+  type EventDefinitionInput,
+  eventDefinitionSchema,
+  eventTagCheckSchema,
+} from "@/validation/custom-event";
 import { idSchema } from "@/validation/common";
 
 /**
@@ -35,6 +42,8 @@ export interface LibraryEvent {
   description: string | null;
   category: string | null;
   method: EventDefinition["method"] | null;
+  /** What detects a click or form event: the pixel (`MANUAL`) or its own Tag Manager tag. */
+  install: EventDefinition["install"];
   selector: string | null;
   pageUrl: string | null;
   pageMatch: EventDefinition["pageMatch"];
@@ -70,6 +79,7 @@ function toLibraryEvent(
     description: definition.description,
     category: definition.category,
     method: definition.method,
+    install: definition.install,
     selector: definition.selector,
     pageUrl: definition.pageUrl,
     pageMatch: definition.pageMatch,
@@ -103,6 +113,7 @@ function toUndeclaredEvent(summary: customEventRepo.EventNameSummary, now: Date)
     description: null,
     category: null,
     method: null,
+    install: "MANUAL",
     selector: null,
     pageUrl: null,
     pageMatch: null,
@@ -165,6 +176,8 @@ function storedFields(
     description: input.description ?? null,
     category: input.category ?? null,
     method: input.method,
+    // Code reports itself; only a click or form has something for GTM to detect.
+    install: input.method === "CODE" ? "MANUAL" : (input.install ?? "MANUAL"),
     selector: input.method === "CODE" ? null : (input.selector ?? null),
     pageUrl: input.method === "CODE" ? null : (input.pageUrl ?? null),
     pageMatch: input.method === "CODE" ? null : (input.pageMatch ?? null),
@@ -264,6 +277,41 @@ export async function updateEvent(
     }
     throw error;
   }
+}
+
+/** Per user, like the install check: each run fetches the page and its containers. */
+const TAG_CHECK_RATE_LIMIT = 10;
+const TAG_CHECK_RATE_WINDOW_MS = 60_000;
+
+/**
+ * The GTM option's check: is this event's tag published in a container the page loads, next to the
+ * Routely script it reports through? Read on the server; nothing runs in the customer's browser. It
+ * works before the event is saved, since it needs only the name.
+ */
+export async function checkEventTag(actorUserId: string, input: unknown): Promise<EventTagStatus> {
+  const { websiteId, name, url } = parseOrThrow(
+    eventTagCheckSchema,
+    input,
+    "Check the URL you entered.",
+  );
+  const access = await websiteRepo.findWebsiteAccess(websiteId, actorUserId);
+  if (!access) throw notFound("That project does not exist.");
+  if (!can(access.role, "events.manage")) throw forbidden();
+  const { website } = access;
+
+  if (!isSameSite(url, website.domain)) {
+    const message = `Must be a URL on ${website.domain} or one of its subdomains.`;
+    throw validationFailed(message, { url: [message] });
+  }
+  if (
+    !rateLimit(`event-tag:${actorUserId}`, TAG_CHECK_RATE_LIMIT, TAG_CHECK_RATE_WINDOW_MS).allowed
+  ) {
+    throw rateLimited("Too many checks in a minute. Wait a moment and try again.");
+  }
+
+  const look = await inspectEventTag(url, website, name);
+  if (look.refused) throw validationFailed(look.refused, { url: [look.refused] });
+  return eventTagStatus(look);
 }
 
 export async function deleteEvent(actorUserId: string, idInput: unknown): Promise<void> {

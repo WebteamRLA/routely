@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import type { EventTagStatus } from "@/lib/gtm-event";
 import { routes } from "@/lib/routes";
 import { type ActionResult, toActionResult } from "@/server/actions/result";
 import { requireUser } from "@/server/auth/session";
@@ -40,6 +41,14 @@ export async function deleteEventAction(
   });
   revalidateLibrary({ websiteId });
   return result;
+}
+
+/** Whether an event's Google Tag Manager tag is published on a page. Changes nothing. */
+export async function checkEventTagAction(input: unknown): Promise<ActionResult<EventTagStatus>> {
+  return toActionResult(async () => {
+    const user = await requireUser();
+    return eventService.checkEventTag(user.id, input);
+  });
 }
 
 /** The library as it stands now, for the page's refresh and the wizards' goal step. */

@@ -17,6 +17,7 @@ import {
   gtmContainerUrl,
   readContainer,
 } from "@/lib/gtm";
+import { type EventTagLook, containerHasEventTag } from "@/lib/gtm-event";
 import { detectSnippet } from "@/lib/snippet-detect";
 import { isSameSite } from "@/lib/url";
 import { forbidden, notFound, rateLimited, validationFailed } from "@/server/errors";
@@ -247,22 +248,30 @@ function isProduction(): boolean {
  * fetched, and the id in the URL comes from a strict pattern, so a customer's page cannot steer
  * this request anywhere else.
  */
-async function inspectContainers(html: string, publicSiteId: string): Promise<GtmLook> {
+async function readPublishedContainers(
+  html: string,
+): Promise<{ containers: string[]; bodies: (string | null)[] }> {
   const containers = findGtmContainers(html);
   const origin = gtmOrigin();
   const allowUrl = (target: URL) =>
     target.origin === origin ? null : "Only Google Tag Manager is read.";
 
-  const reads = await Promise.all(
+  const bodies = await Promise.all(
     containers.map(async (id) => {
       const result = await safeFetch(gtmContainerUrl(id, origin), {
         allowUrl,
         allowPrivate: allowPrivateFetch(),
         maxRedirects: 0,
       });
-      return result.ok && result.status < 400 ? readContainer(result.body, publicSiteId) : null;
+      return result.ok && result.status < 400 ? result.body : null;
     }),
   );
+  return { containers, bodies };
+}
+
+async function inspectContainers(html: string, publicSiteId: string): Promise<GtmLook> {
+  const { containers, bodies } = await readPublishedContainers(html);
+  const reads = bodies.map((body) => (body === null ? null : readContainer(body, publicSiteId)));
 
   const inContainer = reads.some((read) => read?.hasThisProject);
   return {
@@ -271,6 +280,43 @@ async function inspectContainers(html: string, publicSiteId: string): Promise<Gt
     otherInContainer: !inContainer && reads.some((read) => (read?.otherSiteIds.length ?? 0) > 0),
     unreadable: reads.includes(null),
     antiFlickerInContainer: reads.some((read) => read?.hasThisProject && read.hasAntiFlicker),
+  };
+}
+
+/**
+ * Is this event's Tag Manager tag published in a container the page loads? Same fetch rules as the
+ * install check: the website's own domain, then only Google Tag Manager's host.
+ */
+export async function inspectEventTag(
+  url: string,
+  website: { domain: string; publicSiteId: string },
+  eventName: string,
+): Promise<EventTagLook> {
+  const options = { allowUrl: sameSitePolicy(website.domain), allowPrivate: allowPrivateFetch() };
+  const fetched = readFetch(await safeFetch(url, options));
+  const empty = { containers: [], unreadable: false, tagPublished: false, pixelFound: false };
+  if (fetched.refused || !fetched.pageLoaded) {
+    return {
+      pageLoaded: false,
+      loadError: fetched.loadError,
+      refused: fetched.refused ?? null,
+      ...empty,
+    };
+  }
+
+  const { containers, bodies } = await readPublishedContainers(fetched.html);
+  return {
+    pageLoaded: true,
+    loadError: null,
+    refused: null,
+    containers,
+    unreadable: bodies.includes(null),
+    tagPublished: bodies.some((body) => body !== null && containerHasEventTag(body, eventName)),
+    pixelFound:
+      detectSnippet(fetched.html, website.publicSiteId).scriptFound ||
+      bodies.some(
+        (body) => body !== null && readContainer(body, website.publicSiteId).hasThisProject,
+      ),
   };
 }
 

@@ -1,5 +1,6 @@
 import type { ConfigResponse, ExperimentConfig, VisualChange } from "./contract";
 import {
+  CONFIG_CACHE_PREFIX,
   LEGACY_PROTOCOL_VERSION,
   PREVIOUS_PROTOCOL_VERSION,
   SDK_PROTOCOL_VERSION,
@@ -15,8 +16,6 @@ import { getJson } from "./transport";
  * carries its own expiry, taken from the server's `ttl` — the server decides how stale a
  * browser may be, because it is the side that knows when an experiment was paused.
  */
-
-const CACHE_PREFIX = "routely_cfg_";
 
 /** Ceiling on a server-supplied TTL, so a bad value cannot pin a stale config for a session. */
 const MAX_TTL_SECONDS = 600;
@@ -102,7 +101,7 @@ function isVisualChange(value: unknown): boolean {
 }
 
 export function cacheKey(siteId: string): string {
-  return CACHE_PREFIX + siteId;
+  return CONFIG_CACHE_PREFIX + siteId;
 }
 
 /** Reads a cached config, ignoring anything expired, malformed, or from another protocol. */

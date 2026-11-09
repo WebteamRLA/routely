@@ -6,6 +6,7 @@ import {
   formFromEvent,
   formFromReceived,
   formFromTemplate,
+  formTrigger,
   handleSubmitSnippet,
   idempotentSnippet,
   isStepOneError,
@@ -29,6 +30,7 @@ const saved: LibraryEvent = {
   description: "From the footer",
   category: "Lead",
   method: "FORM",
+  install: "GTM",
   selector: "#signup",
   pageUrl: "https://acme.com/join",
   pageMatch: "PREFIX",
@@ -134,6 +136,7 @@ describe("starting points", () => {
       description: "From the footer",
       category: "Lead",
       method: "FORM",
+      install: "GTM",
       selector: "#signup",
       pageUrl: "https://acme.com/join",
       pageMatch: "PREFIX",
@@ -143,6 +146,15 @@ describe("starting points", () => {
       successSelector: null,
       successEvent: null,
     });
+  });
+
+  it("defaults a new click or form event to the pixel, and saves code events without one", () => {
+    expect(input({ method: "CLICK", selector: "#apply" })).toMatchObject({ install: "MANUAL" });
+    expect(
+      input({ method: "FORM", install: "GTM", selector: "#f", success: "SUBMIT" }),
+    ).toMatchObject({ install: "GTM" });
+    expect(input({ method: "CODE", install: "GTM" })).not.toHaveProperty("install");
+    expect(valid(input({ method: "CLICK", install: "GTM", selector: "#apply" }))).toBe(true);
   });
 
   it("fills a suggestion and a received name, which only code can have sent", () => {
@@ -185,5 +197,42 @@ describe("feedback", () => {
     expect(handleSubmitSnippet("signup")).toContain(`window.routely.track("signup");`);
     expect(handleSubmitSnippet("signup")).toContain("if (result.success)");
     expect(idempotentSnippet("signup")).toContain(`{ id: "order_123" }`);
+  });
+});
+
+describe("formTrigger: what the Tag Manager tag is built from", () => {
+  it("is the trigger the pixel would get for the same settings", () => {
+    expect(formTrigger(form({ method: "CLICK", selector: "#apply" }))).toEqual({
+      name: "cta",
+      kind: "click",
+      selector: "#apply",
+    });
+    expect(
+      formTrigger(
+        form({
+          method: "FORM",
+          selector: "#lead",
+          picked: true,
+          pageUrl: "acme.com/contact",
+          success: "URL",
+          successUrl: "acme.com/thanks",
+        }),
+      ),
+    ).toEqual({
+      name: "cta",
+      kind: "form",
+      selector: "#lead",
+      check: "https://acme.com/contact",
+      success: "url",
+      successUrl: { url: "https://acme.com/thanks", match: "EXACT" },
+    });
+  });
+
+  it("is null while incomplete, and for events the site's own code reports", () => {
+    expect(formTrigger(form({ method: "CLICK", selector: "" }))).toBeNull();
+    expect(formTrigger(form({ method: "FORM", selector: "#f", success: "ELEMENT" }))).toBeNull();
+    expect(formTrigger(form({ method: "FORM", success: "DEVELOPER" }))).toBeNull();
+    expect(formTrigger(form({ method: "CODE" }))).toBeNull();
+    expect(formTrigger(form({ name: "has space", method: "CLICK", selector: "#a" }))).toBeNull();
   });
 });

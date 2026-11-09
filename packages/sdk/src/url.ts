@@ -14,22 +14,7 @@
  */
 
 import type { UrlMatchType } from "./contract";
-import { HANDOFF_PARAMS } from "./contract";
-
-/** Tracking parameters that never identify a distinct page. */
-const IGNORED_QUERY_PARAMS = [
-  "gclid",
-  "fbclid",
-  "msclkid",
-  "utm_source",
-  "utm_medium",
-  "utm_campaign",
-  "utm_term",
-  "utm_content",
-  "utm_id",
-];
-
-const HANDOFF_PREFIX = "_rt_";
+import { HANDOFF_PARAMS, HANDOFF_PREFIX, IGNORED_QUERY_PARAMS } from "./contract";
 
 /**
  * Reduces a URL to a comparable form: lowercase host, no fragment, no trailing slash, no

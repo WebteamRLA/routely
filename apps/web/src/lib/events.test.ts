@@ -5,6 +5,7 @@ import {
   EVENT_TEMPLATES,
   type EventSignals,
   type TriggerSource,
+  clickTrackSnippet,
   eventStatus,
   submissionUnverified,
   toEventTrigger,
@@ -133,5 +134,42 @@ describe("trackSnippet", () => {
 
   it("escapes the name", () => {
     expect(trackSnippet(`a"b`)).toContain(`"a\\"b"`);
+  });
+});
+
+describe("clickTrackSnippet", () => {
+  /** Runs the snippet against a stub page; returns the click handler and what was tracked. */
+  function load(code: string, routely?: { track: (...args: unknown[]) => void }) {
+    let onClick: (e: { target: unknown }) => void = () => {};
+    const window: Record<string, unknown> = routely ? { routely } : {};
+    const document = { addEventListener: (_t: string, fn: typeof onClick) => (onClick = fn) };
+    const inner = code.replace(/^<script[^>]*>/, "").replace(/<\/script>$/, "");
+    new Function("window", "document", inner)(window, document);
+    return { click: (target: unknown) => onClick({ target }), window };
+  }
+  const inside = (match: boolean) => ({
+    closest: (s: string) => (match && s === "#buy" ? {} : null),
+  });
+
+  it("reports clicks on the chosen element through routely.track, and ignores others", () => {
+    const tracked: unknown[][] = [];
+    const page = load(clickTrackSnippet("buy_clicked", "#buy"), {
+      track: (...args) => tracked.push(args),
+    });
+    page.click(inside(true));
+    page.click(inside(false));
+    expect(tracked).toEqual([["buy_clicked"]]);
+  });
+
+  it("queues the click until the Routely script loads", () => {
+    const page = load(clickTrackSnippet("buy_clicked", "#buy"));
+    page.click(inside(true));
+    const routely = page.window["routely"] as { q: ArrayLike<unknown>[] };
+    expect(routely.q.map((args) => Array.from(args))).toEqual([["buy_clicked"]]);
+  });
+
+  it("cannot be closed early by a selector", () => {
+    const code = clickTrackSnippet("x", "a[title='</script>']");
+    expect(code.match(/<\/script>/g)).toHaveLength(1);
   });
 });

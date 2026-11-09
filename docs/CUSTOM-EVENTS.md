@@ -121,6 +121,56 @@ SDK hands selectors only to `closest()` and `querySelector()`.
 
 `SUBMIT` cannot tell an accepted form from a rejected one, and the UI says so.
 
+### What the event dialog offers (user requests 2026-11-10)
+
+- **Element click**: once an element is chosen, a short script under it
+  (`clickTrackSnippet` in `lib/events.ts`, after Mida's `mdq.push(["track", …])`) that reports clicks
+  on that element through `routely.track`, for a site's `<head>` or a GTM Custom HTML tag. With the
+  pixel also listening, the SDK's 500 ms burst rule makes one click one event.
+- **Form submission**: only **Success page** and **Success message**. `SUBMIT`, `CALLBACK` and the
+  developer callback are no longer offered; events saved with them keep working, and editing one
+  means choosing one of the two.
+- **JavaScript**: one `<script>` snippet (`trackScript`), with the other examples under "More
+  examples", showing only the call.
+
+### Detected by Google Tag Manager instead (2026-11-10, not in the dialog)
+
+A click or form event has an install method, `EventDefinition.install`: **`MANUAL`** (the default:
+the pixel detects it, everything above) or **`GTM`**. The dialog briefly showed the two as cards;
+they were removed the same day at the user's request, so every event is saved as `MANUAL` now. The
+column, the tag generator and the check below remain, unused by the UI, should the option return.
+
+For `GTM` the dialog generates a Custom HTML tag for that one event (`buildGtmEventSnippet` in
+`lib/gtm-event.ts`), from the same trigger data the pixel would get (`formTrigger` →
+`toEventTrigger`). It runs the same detection as the SDK, with the same timings and storage keys
+(shared in `@routely/sdk/contract`): click by `closest()`, cancelled submits never count, the success
+page only within 30 minutes of sending that form in this tab (the SDK's own `routely_sub_` key), the
+success message only when it goes from hidden to visible within 15 s, a plugin's success event. It
+reads no field values and sends only the event name, through `window.routely.track()`, so the
+visitor id, event id, offline queue, server dedupe and attribution are the pixel's. The Routely
+tracking script therefore has to be on the page too; until it loads, calls wait in its queue. Plain
+ES5, since older containers refuse newer syntax. Trigger: **All Pages**. It runs once per page however
+often Tag Manager fires it.
+
+**Never counted twice.** A `GTM` event is left out of the pixel's configuration (`listTriggers`), so
+the pixel never listens for it. The reverse — an event switched back to the pixel with its tag still
+published — is caught by the tag: it stands down whenever the pixel's cached configuration
+(`routely_cfg_<site>`) lists the event, and on a success page it checks that before marking the
+submission counted, so the pixel's count is never blocked. Beneath both: one action within 500 ms is
+one report, the server stores an event id once, and a visitor converts once per experiment. The tag
+also sends nothing through another project's Routely script.
+
+**The check** (`checkEventTag`, a server action): fetches the page and the published GTM containers
+it loads, like the install check, and answers in order: page didn't load · no Tag Manager on the page
+(a missing container) · container unreadable · this event's tag not published · tag published but no
+Routely script on the page or in a container · published. It looks for the tag's unquoted mark
+(`__routelyEventTags`) and the event's quoted name, however the container escaped them. It proves the
+tag is published, not that it fires: the event's status (an event arriving) shows that.
+
+Tested in real headless Edge with the built SDK and a stand-in API: clicks (a double click once, a
+later click again), the pixel and a stale tag together (one event), success message (and none when
+it never shows), success page (and none for a direct visit), submit (and none when cancelled).
+
 ### Attribution
 
 The browser names no experiment and no arm. For each stored occurrence `ingestCustomEvents` finds
@@ -177,5 +227,9 @@ those visitors are not entered, rather than entered and unable to convert.
 - **`custom_events` has no retention yet**, like other experiment data.
 - **Event goals can be forged** by anyone holding a visitor's anonymous id, as URL goals can. A
   conversion still needs a stored assignment.
+- **A Google Tag Manager event tag reports no configuration problems.** The pixel's selector check
+  (`selector_missing`) and `form_ajax` report don't run for a `GTM` event; its status comes only
+  from events arriving. A tag copied before the event was edited keeps the old settings until it is
+  copied again. Like the pixel, it does not follow single-page-app route changes.
 - **The Library's totals are computed per request** by a grouped count. Fine at current volumes; a
   very busy project may want a time-bounded window.

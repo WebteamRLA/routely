@@ -11,6 +11,7 @@ import {
   type EventForm,
   type SuccessChoice,
   type UrlMatch,
+  detailsSnippet,
   eventNameError,
   handleSubmitSnippet,
   idempotentSnippet,
@@ -18,13 +19,7 @@ import {
   savesAsCode,
   toEventInput,
 } from "@/components/events/event-form";
-import {
-  AlertCircleIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  Spinner,
-  WarningIcon,
-} from "@/components/rt/icons";
+import { AlertCircleIcon, CheckIcon, ChevronDownIcon, Spinner } from "@/components/rt/icons";
 import { Modal, ModalBody, ModalFooter, ModalHeader, ModalIcon } from "@/components/rt/modal";
 import {
   ACCENT,
@@ -38,9 +33,9 @@ import {
 import {
   EVENT_TEMPLATES,
   type EventMethodName,
-  FORM_PLATFORMS,
   METHOD_LABELS,
-  trackSnippet,
+  clickTrackSnippet,
+  trackScript,
 } from "@/lib/events";
 import { isValidPageUrl, sameSiteMessage, withScheme } from "@/lib/launch-rules";
 import { isSameSite } from "@/lib/url";
@@ -528,6 +523,13 @@ function ElementChooser({
           </div>
         ) : null}
         {errors.selector ? <ErrorLine>{errors.selector}</ErrorLine> : null}
+        {target === "click" && selector && !eventNameError(form.name) ? (
+          <Snippet
+            title="Track this element with the following JavaScript"
+            note="Optional: paste it into your site's <head> or a Google Tag Manager Custom HTML tag (trigger: All Pages). With the Routely script also on the page, a click still counts once."
+            code={clickTrackSnippet(form.name.trim(), selector)}
+          />
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-2">
@@ -687,79 +689,49 @@ function FormSuccess({
           )}
         </Field>,
       )}
-
-      {option(
-        "CALLBACK",
-        "Form plugin",
-        "Your form comes from a plugin Routely knows.",
-        <Field
-          id="ev-success-event"
-          label="Form plugin"
-          error={errors.successEvent}
-          hint="Built from each plugin’s documented success event, so test it once on your site. It counts every form from that plugin, not only the one chosen above."
-        >
-          {(aria) => (
-            <select
-              {...aria}
-              value={form.successEvent}
-              onChange={(e) => patch({ successEvent: e.target.value })}
-              className={input}
-            >
-              <option value="">Choose your plugin</option>
-              {FORM_PLATFORMS.map((platform) => (
-                <option key={platform.id} value={platform.event}>
-                  {platform.label}
-                </option>
-              ))}
-            </select>
-          )}
-        </Field>,
-      )}
-
-      {option(
-        "DEVELOPER",
-        "Developer callback",
-        "Your developer reports it once the server has accepted the form.",
-        <>
-          <p className={help}>This saves as a JavaScript event. The form above isn’t used.</p>
-          <CodeInstructions name={form.name.trim()} />
-        </>,
-      )}
-
-      {option(
-        "SUBMIT",
-        "Form submitted",
-        "Counts the moment the visitor sends the form.",
-        <p className="m-0 flex items-start gap-2 rounded-lg bg-[#FEF3C7] px-3 py-2.5 text-[13px] leading-[19px] text-[#92400E]">
-          <WarningIcon size={15} className="mt-0.5 flex-none" />
-          <span>
-            Counts every submit the browser sends, including ones your server rejects. For AJAX
-            forms it counts nothing.
-          </span>
-        </p>,
-      )}
     </fieldset>
   );
 }
 
+/** A JavaScript event: one snippet to start from, the other examples folded away until wanted. */
 function CodeInstructions({ name }: { name: string }) {
+  const [more, setMore] = useState(false);
   return (
     <div className="flex flex-col gap-3">
-      <p className="m-0 text-[13px] leading-[19px] font-medium text-[#374151]">
-        Call this only after the action has succeeded, not when the button is pressed.
-      </p>
-      <Snippet title="The event" code={trackSnippet(name)} />
-      <Snippet title="With details" code={trackSnippet(name, true)} />
-      <Snippet title="Inside a form handler" code={handleSubmitSnippet(name)} />
       <Snippet
-        title="Count a repeat once"
-        note="Pass a unique id as the third argument. A retry or a refresh with the same id isn’t counted again."
-        code={idempotentSnippet(name)}
+        title="Track this event with the following JavaScript"
+        note="Run it right after the action succeeds (a signup, a purchase), not when the button is pressed. It works on your page or in a Google Tag Manager Custom HTML tag."
+        code={trackScript(name)}
       />
-      <p className={help}>
-        Never send passwords, card data, emails, phone numbers or names as properties. Routely drops
-        them. Up to {MAX_EVENT_PROPERTIES} properties per event.
-      </p>
+
+      <button
+        type="button"
+        aria-expanded={more}
+        onClick={() => setMore(!more)}
+        className={cn(btn.link, "h-auto gap-1 self-start px-0")}
+      >
+        <ChevronDownIcon size={14} className={cn("transition-transform", !more && "-rotate-90")} />
+        More examples
+      </button>
+      {more ? (
+        <div className="flex flex-col gap-3 border-l-2 border-[#EEF0F3] pl-3">
+          <p className={help}>
+            Each needs the <code className={mono}>window.routely = …</code> line from the snippet
+            above to run first on the page.
+          </p>
+          <Snippet title="Send details" code={detailsSnippet(name)} />
+          <Snippet title="Inside a form handler" code={handleSubmitSnippet(name)} />
+          <Snippet
+            title="Count a repeat once"
+            note="A unique id as the third argument: a retry or a refresh with the same id isn’t counted again."
+            code={idempotentSnippet(name)}
+          />
+          <p className={help}>
+            Never send passwords, card data, emails, phone numbers or names as details. Routely
+            drops them. Up to {MAX_EVENT_PROPERTIES} details per event.
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 }

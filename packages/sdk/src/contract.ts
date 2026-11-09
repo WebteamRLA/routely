@@ -243,6 +243,36 @@ export const SENSITIVE_PROPERTY_VALUE = /[^\s@]+@[^\s@]+\.[^\s@]+|\d(?:[ ()-]{0,
 export const MAX_EVENT_PROPERTIES = 10;
 export const MAX_EVENT_PROPERTY_LENGTH = 200;
 
+/*
+ * Event detection rules the SDK (`events.ts`) and the generated Google Tag Manager event tag
+ * (`apps/web/src/lib/gtm-event.ts`) must share, so both count the same actions the same way and
+ * each can see what the other has already counted.
+ */
+/** Repeats of the same event within this long are one action. */
+export const EVENT_BURST_MS = 500;
+/** A form's success page must follow its submission this closely. */
+export const FORM_SUBMIT_MEMORY_MS = 30 * 60 * 1000;
+/** How long after a submission a success element may still appear. */
+export const FORM_SUCCESS_WATCH_MS = 15_000;
+/** `sessionStorage` key prefix (+ event name): when the form was sent, or `-1` once counted. */
+export const FORM_SUBMITTED_KEY = "routely_sub_";
+/** `sessionStorage` key prefix (+ site id) of the cached configuration document. */
+export const CONFIG_CACHE_PREFIX = "routely_cfg_";
+/** Query parameters that never identify a distinct page (`url.ts`). */
+export const IGNORED_QUERY_PARAMS = [
+  "gclid",
+  "fbclid",
+  "msclkid",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "utm_id",
+];
+/** Every handoff parameter starts with this; none identifies a page. */
+export const HANDOFF_PREFIX = "_rt_";
+
 /** Values an event property may hold. Nested data is dropped rather than flattened. */
 export type EventPropertyValue = string | number | boolean;
 

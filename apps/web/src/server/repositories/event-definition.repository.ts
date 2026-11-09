@@ -76,10 +76,13 @@ export function deleteDefinition(
   });
 }
 
-/** Definitions the SDK needs: those with something to listen for. */
+/**
+ * Definitions the SDK needs: those with something to listen for. An event detected by its own
+ * Google Tag Manager tag is left out, so the pixel and the tag never both count one action.
+ */
 export function listTriggers(websiteId: string, client: DbClient = db) {
   return client.eventDefinition.findMany({
-    where: { websiteId, method: { not: "CODE" } },
+    where: { websiteId, method: { not: "CODE" }, install: "MANUAL" },
     orderBy: { createdAt: "asc" },
     select: {
       name: true,

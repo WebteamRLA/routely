@@ -13,26 +13,29 @@
  *    would silently count nothing.
  */
 
-import { EVENT_NAME_PATTERN } from "@routely/sdk/contract";
+import { EVENT_NAME_PATTERN, type EventTrigger } from "@routely/sdk/contract";
 
 import {
   EVENT_TEMPLATES,
   type EventMethodName,
   type EventTemplate,
   type FormSuccessName,
-  trackSnippet,
+  toEventTrigger,
 } from "@/lib/events";
 import { withScheme } from "@/lib/launch-rules";
 import type { LibraryEvent } from "@/server/services/custom-event.service";
 
 export type UrlMatch = "EXACT" | "PREFIX";
 export type SuccessChoice = FormSuccessName | "DEVELOPER";
+/** What detects a click or form event: the Routely pixel, or the event's own Tag Manager tag. */
+export type InstallChoice = "MANUAL" | "GTM";
 
 export interface EventForm {
   name: string;
   description: string;
   category: string;
   method: EventMethodName;
+  install: InstallChoice;
   selector: string;
   /** What the picker called the element. Null for a typed or previously saved selector. */
   elementLabel: string | null;
@@ -56,6 +59,7 @@ export function blankForm(homepage: string, seed: Partial<EventForm> = {}): Even
     description: "",
     category: "",
     method: "CLICK",
+    install: "MANUAL",
     selector: "",
     elementLabel: null,
     pageUrl: homepage,
@@ -89,6 +93,7 @@ export function formFromEvent(homepage: string, event: LibraryEvent): EventForm 
     description: event.description ?? "",
     category: event.category ?? "",
     method: event.method ?? "CODE",
+    install: event.install,
     selector: event.selector ?? "",
     pageUrl: event.pageUrl ?? homepage,
     picked: !!event.pageUrl && !!event.selector,
@@ -125,10 +130,11 @@ export function toEventInput(websiteId: string, form: EventForm): Record<string,
   const pageUrl = selector && (form.picked || form.pageMatch) ? url(form.pageUrl) : null;
   const where = { selector, pageUrl, pageMatch: selector ? form.pageMatch : null };
 
-  if (!isForm) return { ...base, method: "CLICK", ...where };
+  if (!isForm) return { ...base, method: "CLICK", install: form.install, ...where };
   return {
     ...base,
     method: "FORM",
+    install: form.install,
     ...where,
     formSuccess: success,
     successUrl: success === "URL" ? url(form.successUrl) : null,
@@ -136,6 +142,39 @@ export function toEventInput(websiteId: string, form: EventForm): Record<string,
     successSelector: success === "ELEMENT" ? text(form.successSelector) : null,
     successEvent: success === "CALLBACK" ? text(form.successEvent) : null,
   };
+}
+
+/**
+ * The trigger this form describes, as the pixel and the Tag Manager tag read it, or null while it is
+ * incomplete (or for an event the site's own code reports). Built from the same input the server
+ * saves, so the tag copied from the dialog matches the saved event.
+ */
+export function formTrigger(form: EventForm): EventTrigger | null {
+  if (savesAsCode(form) || eventNameError(form.name)) return null;
+  const input = toEventInput("", form) as {
+    method: EventMethodName;
+    selector?: string | null;
+    pageUrl?: string | null;
+    pageMatch?: UrlMatch | null;
+    formSuccess?: FormSuccessName | null;
+    successUrl?: string | null;
+    successMatch?: UrlMatch;
+    successSelector?: string | null;
+    successEvent?: string | null;
+  };
+  return toEventTrigger({
+    name: form.name.trim(),
+    method: input.method,
+    selector: input.selector ?? null,
+    pageUrl: input.pageUrl ?? null,
+    pageMatch: input.pageMatch ?? null,
+    formSuccess: input.formSuccess ?? null,
+    successUrl: input.successUrl ?? null,
+    successMatch: input.successMatch ?? "EXACT",
+    successSelector: input.successSelector ?? null,
+    successEvent: input.successEvent ?? null,
+    issueCode: null,
+  });
 }
 
 export const EVENT_NAME_HINT =
@@ -160,12 +199,9 @@ export function suggestedEvents(existing: readonly { name: string }[]): readonly
   return EVENT_TEMPLATES.filter((template) => !names.has(template.name));
 }
 
-/** `trackSnippet(name)` inside the handler that knows the action worked. */
+/** The call inside the handler that knows the action worked; the setup line is the main snippet's. */
 export function handleSubmitSnippet(name: string): string {
-  const call = trackSnippet(name)
-    .split("\n")
-    .map((line) => `    ${line}`)
-    .join("\n");
+  const call = `    window.routely.track(${JSON.stringify(name)});`;
   return `async function handleSubmit(event) {
   event.preventDefault();
   const result = await sendToYourServer(event.target);
@@ -174,6 +210,11 @@ export function handleSubmitSnippet(name: string): string {
 ${call}
   }
 }`;
+}
+
+/** The second argument: flat details about the event. */
+export function detailsSnippet(name: string): string {
+  return `window.routely.track(${JSON.stringify(name)}, { value: 150, currency: "USD" });`;
 }
 
 /** The third argument: a repeat of the same id counts once. */

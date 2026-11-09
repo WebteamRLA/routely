@@ -55,6 +55,8 @@ export const eventDefinitionSchema = z
     description: optionalText(300),
     category: optionalText(60),
     method: z.enum(["CLICK", "FORM", "CODE"]),
+    /** CLICK and FORM: the Routely pixel (default) or the event's own Google Tag Manager tag. */
+    install: z.enum(["MANUAL", "GTM"]).optional(),
     selector: selectorSchema.nullable().optional(),
     pageUrl: absoluteUrlSchema.nullable().optional(),
     /** Null listens on every page. */
@@ -166,4 +168,11 @@ export const installCheckSchema = z.strictObject({
   websiteId: idSchema,
   url: absoluteUrlSchema,
   method: installMethodSchema,
+});
+
+/** Is this event's Google Tag Manager tag published where `url` loads Tag Manager? */
+export const eventTagCheckSchema = z.strictObject({
+  websiteId: idSchema,
+  name: eventNameSchema,
+  url: absoluteUrlSchema,
 });
