@@ -87,8 +87,8 @@ export const eventDefinitionSchema = z
       need("successUrl", "Enter the page visitors reach after submitting");
     }
     if (value.formSuccess === "ELEMENT") {
+      // The message's selector is optional: without one the SDK watches around the form.
       if (!value.selector) need("selector", "Choose the form");
-      if (!value.successSelector) need("successSelector", "Enter the success message’s selector");
     }
     if (value.formSuccess === "CALLBACK" && !value.successEvent) {
       need("successEvent", "Choose your form plugin");

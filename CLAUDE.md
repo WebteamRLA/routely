@@ -531,11 +531,11 @@ Application-level rules enforced in `experiment.service.ts`:
 ## 7. The SDK
 
 `packages/sdk` — vanilla TypeScript, **zero runtime dependencies**, one IIFE bundle.
-Currently **9.89 kB gzipped (27.27 kB raw) against a 10 kB budget the build enforces** (it exits
-non-zero if exceeded; `npm run sdk:build`, 2026-11-05). The budget was 6 kB until the user raised it
+Currently **10.17 kB gzipped (28.04 kB raw) against a 10.5 kB budget the build enforces** (it exits
+non-zero if exceeded; `npm run sdk:build`, 2026-11-10). The budget was 6 kB until the user raised it
 for v4 (decision D3), then 8 kB. It went to 10 kB on 2026-11-05 for custom events and the install
-check, because the bundle had 16 bytes left. **That rise was flagged to the user, not asked of them:
-confirm it before treating it as settled.** Installation is two script tags — an inline anti-flickering block and the
+check, and to 10.5 kB on 2026-11-10 (user decision) for the success message found without a
+selector. Installation is two script tags — an inline anti-flickering block and the
 tracking tag — pasted into `<head>`. The same pair works on every platform, which is what makes it
 framework-independent:
 

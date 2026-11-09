@@ -30,7 +30,9 @@ describe("eventDefinitionSchema", () => {
     expect(bad({ method: "FORM" })).toBe(true);
     expect(bad({ method: "FORM", formSuccess: "SUBMIT" })).toBe(true);
     expect(bad({ method: "FORM", formSuccess: "URL" })).toBe(true);
-    expect(bad({ method: "FORM", formSuccess: "ELEMENT", selector: "#f" })).toBe(true);
+    // A message needs only the form: without a selector the SDK watches around it.
+    expect(bad({ method: "FORM", formSuccess: "ELEMENT", selector: "#f" })).toBe(false);
+    expect(bad({ method: "FORM", formSuccess: "ELEMENT" })).toBe(true);
     expect(bad({ method: "FORM", formSuccess: "CALLBACK" })).toBe(true);
     expect(bad({ method: "CLICK", selector: "#a" })).toBe(false);
     expect(bad({ method: "FORM", formSuccess: "URL", successUrl: "https://a.test/t" })).toBe(false);

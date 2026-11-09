@@ -50,8 +50,10 @@ const watch = process.argv.includes("--watch");
  * This runs on every page of a customer's site, often on connections they do not control, so
  * the size is a product constraint rather than a nice-to-have. The build fails when it is
  * exceeded, which forces the trade-off to be made deliberately instead of drifting.
+ *
+ * 10.5 kB since 2026-11-10 (user decision: the success message found without a selector).
  */
-const MAX_GZIP_BYTES = 10 * 1024;
+const MAX_GZIP_BYTES = 10.5 * 1024;
 
 /**
  * ES2019 is the floor.

@@ -193,6 +193,7 @@ export interface EventTrigger {
   /** `form` only: what confirms the submission. See `FormSuccessMode` in the schema. */
   success?: "submit" | "url" | "element" | "callback";
   successUrl?: { url: string; match: UrlMatchType };
+  /** `element`: the success message. Absent: new visible text around the form counts (no errors). */
   successSelector?: string;
   /** A DOM or jQuery event name. */
   successEvent?: string;

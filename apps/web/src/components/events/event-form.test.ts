@@ -230,7 +230,13 @@ describe("formTrigger: what the Tag Manager tag is built from", () => {
 
   it("is null while incomplete, and for events the site's own code reports", () => {
     expect(formTrigger(form({ method: "CLICK", selector: "" }))).toBeNull();
-    expect(formTrigger(form({ method: "FORM", selector: "#f", success: "ELEMENT" }))).toBeNull();
+    expect(formTrigger(form({ method: "FORM", selector: "", success: "ELEMENT" }))).toBeNull();
+    expect(formTrigger(form({ method: "FORM", selector: "#f", success: "ELEMENT" }))).toEqual({
+      name: "cta",
+      kind: "form",
+      selector: "#f",
+      success: "element",
+    });
     expect(formTrigger(form({ method: "FORM", success: "DEVELOPER" }))).toBeNull();
     expect(formTrigger(form({ method: "CODE" }))).toBeNull();
     expect(formTrigger(form({ name: "has space", method: "CLICK", selector: "#a" }))).toBeNull();

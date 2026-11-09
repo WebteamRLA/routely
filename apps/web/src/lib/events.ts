@@ -175,8 +175,14 @@ export function toEventTrigger(source: TriggerSource): EventTrigger | null {
           }
         : null;
     case "ELEMENT":
-      return selector && source.successSelector
-        ? { ...base, kind: "form", success: "element", successSelector: source.successSelector }
+      // No message selector: the SDK watches around the form for a new message instead.
+      return selector
+        ? {
+            ...base,
+            kind: "form",
+            success: "element",
+            ...(source.successSelector ? { successSelector: source.successSelector } : {}),
+          }
         : null;
     case "CALLBACK":
       return source.successEvent

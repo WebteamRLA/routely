@@ -163,6 +163,49 @@ function watchForSuccess(selector: string, fire: () => void): void {
   setTimeout(() => observer.disconnect(), FORM_SUCCESS_WATCH_MS);
 }
 
+/** Elements that say a form failed: a field marked invalid, or anything named as an error. */
+const ERROR_SIGNS = '[aria-invalid="true"],[class*="error" i],[class*="invalid" i]';
+
+/** The visible lines of text in `scope`, ignoring a fragment too short to be a message. */
+function textLines(scope: Element): string[] {
+  return ((scope as HTMLElement).innerText || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 2);
+}
+
+/**
+ * A form with no success message chosen (user request 2026-11-10): after it is sent, watches the
+ * form and what surrounds it, and counts the first new visible text there — a "Thanks, we'll be in
+ * touch" that appears or replaces the form — while nothing there signals an error. A validation
+ * message also appears beside a form, which is why any visible error sign holds the count back.
+ * A best guess, not proof: the UI says so, and a chosen selector stays the exact way.
+ */
+function watchNearForm(form: Element, fire: () => void): void {
+  const scope = form.parentElement || form;
+  const before = new Set(textLines(scope));
+  const failed = () => {
+    try {
+      return [...scope.querySelectorAll(ERROR_SIGNS)].some((el) => el.getClientRects().length > 0);
+    } catch {
+      return false;
+    }
+  };
+  if (typeof MutationObserver === "undefined") return;
+  const observer = new MutationObserver(() => {
+    if (failed() || !textLines(scope).some((line) => !before.has(line))) return;
+    observer.disconnect();
+    fire();
+  });
+  observer.observe(scope, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    characterData: true,
+  });
+  setTimeout(() => observer.disconnect(), FORM_SUCCESS_WATCH_MS);
+}
+
 /** Reports a form confirmed by reaching a page: this page is it, and (when a form is named) that
  * form was submitted in this tab recently, so a visit from anywhere else is not a submission. */
 function checkSuccessPage(trigger: EventTrigger, href: string, fire: () => void): void {
@@ -273,8 +316,10 @@ export function startTriggers(context: EventContext, triggers: EventTrigger[], h
           } catch {
             // Without session storage the success page cannot tie back to this form.
           }
-        } else if (trigger.success === "element" && trigger.successSelector) {
-          watchForSuccess(trigger.successSelector, fire(trigger));
+        } else if (trigger.success === "element") {
+          const form = (event.target as Element).closest(trigger.selector!);
+          if (trigger.successSelector) watchForSuccess(trigger.successSelector, fire(trigger));
+          else if (form) watchNearForm(form, fire(trigger));
         } else if (trigger.success === "submit") {
           // A cancelled submit may be a failed validation or an AJAX send: nothing here can tell,
           // so it is not counted, and the project is told this form needs another confirmation.

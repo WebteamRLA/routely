@@ -668,11 +668,51 @@ function FormSuccess({
         "ELEMENT",
         "Success message",
         "A message appears on the same page after sending.",
+        <SuccessMessage form={form} errors={errors} patch={patch} />,
+      )}
+    </fieldset>
+  );
+}
+
+/**
+ * The success message, found without a selector by default (user request 2026-11-10): the SDK
+ * counts new text that appears around the chosen form after sending, unless an error shows. A
+ * selector, under Advanced, makes it exact.
+ */
+function SuccessMessage({
+  form,
+  errors,
+  patch,
+}: {
+  form: EventForm;
+  errors: Errors;
+  patch(next: Partial<EventForm>): void;
+}) {
+  const [advanced, setAdvanced] = useState(!!form.successSelector.trim());
+  return (
+    <>
+      <p className={help}>
+        No setup needed: after the form is sent, Routely counts it when a new message appears in or
+        next to the form within 15 seconds. It doesn’t count while an error shows.
+      </p>
+      <button
+        type="button"
+        aria-expanded={advanced}
+        onClick={() => setAdvanced(!advanced)}
+        className={cn(btn.link, "h-auto gap-1 self-start px-0")}
+      >
+        <ChevronDownIcon
+          size={14}
+          className={cn("transition-transform", !advanced && "-rotate-90")}
+        />
+        Advanced: enter the message’s CSS selector
+      </button>
+      {advanced ? (
         <Field
           id="ev-success-selector"
-          label="Success message selector"
+          label="Success message selector (optional)"
           error={errors.successSelector}
-          hint="The message must stay hidden until the form succeeds, and show within 15 seconds."
+          hint="For an exact match. The message must stay hidden until the form succeeds, and show within 15 seconds."
         >
           {(aria) => (
             <input
@@ -687,9 +727,9 @@ function FormSuccess({
               className={cn(input, mono)}
             />
           )}
-        </Field>,
-      )}
-    </fieldset>
+        </Field>
+      ) : null}
+    </>
   );
 }
 

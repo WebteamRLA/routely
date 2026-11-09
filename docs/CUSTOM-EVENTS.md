@@ -115,7 +115,11 @@ SDK hands selectors only to `closest()` and `querySelector()`.
 - **Form, `URL`.** The submit is remembered in `sessionStorage` for 30 minutes and counted on the
   success page. Same origin only.
 - **Form, `ELEMENT`.** After a submit, watches up to 15 s for the success element to go from hidden
-  to visible.
+  to visible. **With no selector** (the default since 2026-11-10, user request): watches the form's
+  parent and counts the first new visible line of text there, while nothing in it signals an error
+  (`aria-invalid="true"`, a class containing `error` or `invalid`). A best guess: a validation
+  message without those signs would count. Tested in headless Edge: a "Thanks" replacing the form
+  counts; an error message, or no message, does not.
 - **Form, `CALLBACK`.** Listens for a plugin's success event, on the DOM and through jQuery.
 - **Code.** `window.routely.track(name, properties?, { id? })`.
 
