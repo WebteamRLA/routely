@@ -134,6 +134,9 @@ SDK hands selectors only to `closest()` and `querySelector()`.
   means choosing one of the two.
 - **JavaScript**: one `<script>` snippet (`trackScript`), with the other examples under "More
   examples", showing only the call.
+  An element may be chosen (optional): the snippet then becomes a GTM Custom HTML tag (trigger: All
+  Pages) that reports clicks on it (`elementTrackScript`). The event stays `CODE`, so the pixel
+  never listens for that click; `selector` and `pageUrl` are kept only so the dialog shows them.
 
 ### Detected by Google Tag Manager instead (2026-11-10, not in the dialog)
 
