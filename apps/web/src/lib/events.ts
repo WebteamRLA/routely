@@ -192,23 +192,6 @@ export function toEventTrigger(source: TriggerSource): EventTrigger | null {
 }
 
 /**
- * A short script that reports clicks on the chosen element, for a site's `<head>` or a Google Tag
- * Manager Custom HTML tag (user request 2026-11-10, after Mida's `mdq.push(["track", …])`). It
- * reports through `routely.track`, whose queue holds calls until the Routely script loads. Where the
- * pixel also listens for the same element, the SDK's 500 ms burst rule makes the one click one
- * event. Plain ES5 for older Tag Manager containers.
- */
-export function clickTrackSnippet(name: string, selector: string): string {
-  const literal = (value: string) => JSON.stringify(value).replace(/</g, "\\u003C");
-  return `<script type="text/javascript">
-  window.routely = window.routely || { q: [], track: function () { this.q.push(arguments); } };
-  document.addEventListener("click", function (e) {
-    if (e.target.closest && e.target.closest(${literal(selector)})) window.routely.track(${literal(name)});
-  }, true);
-</script>`;
-}
-
-/**
  * The main JavaScript-event snippet, laid out to read without scrolling: the queue line (safe before
  * the Routely script loads, harmless when it is blocked) and the call, in a `<script>` tag for a
  * page or a Google Tag Manager Custom HTML tag.

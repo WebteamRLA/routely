@@ -127,10 +127,8 @@ SDK hands selectors only to `closest()` and `querySelector()`.
 
 ### What the event dialog offers (user requests 2026-11-10)
 
-- **Element click**: once an element is chosen, a short script under it
-  (`clickTrackSnippet` in `lib/events.ts`, after Mida's `mdq.push(["track", …])`) that reports clicks
-  on that element through `routely.track`, for a site's `<head>` or a GTM Custom HTML tag. With the
-  pixel also listening, the SDK's 500 ms burst rule makes one click one event.
+- **Element click**: the chosen element only; the pixel detects the click. (A short copyable click
+  script under the element was added and removed the same day at the user's request.)
 - **Form submission**: only **Success page** and **Success message**. `SUBMIT`, `CALLBACK` and the
   developer callback are no longer offered; events saved with them keep working, and editing one
   means choosing one of the two.

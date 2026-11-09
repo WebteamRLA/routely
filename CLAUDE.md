@@ -1004,9 +1004,8 @@ Working:
   Routely never signs in to GTM or changes a container.
 - **Custom events** (2026-11-05) — project Event Library; click, form and JavaScript tracking; real
   element picker on the editor bridge (frame, then proxy); `window.routely.track()`; events as goals
-  in both wizards, on the existing conversion and verdict path. 2026-11-10 (user requests): a click
-  event shows a short Mida-style script for the chosen element (`clickTrackSnippet`); forms offer
-  only Success page and Success message; the JavaScript option shows one `<script>` snippet. A
+  in both wizards, on the existing conversion and verdict path. 2026-11-10 (user requests): forms offer
+  only Success page and Success message (a message needs no selector); the JavaScript option shows one `<script>` snippet. A
   per-event Google Tag Manager install (`EventDefinition.install`, `lib/gtm-event.ts`, pixel leaves a
   `GTM` event out of its configuration) is built and tested but not offered in the dialog: everything
   saves as `MANUAL`. See `docs/CUSTOM-EVENTS.md`.

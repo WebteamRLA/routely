@@ -30,13 +30,7 @@ import {
   label as labelClass,
   mono,
 } from "@/components/rt/styles";
-import {
-  EVENT_TEMPLATES,
-  type EventMethodName,
-  METHOD_LABELS,
-  clickTrackSnippet,
-  trackScript,
-} from "@/lib/events";
+import { EVENT_TEMPLATES, type EventMethodName, METHOD_LABELS, trackScript } from "@/lib/events";
 import { isValidPageUrl, sameSiteMessage, withScheme } from "@/lib/launch-rules";
 import { isSameSite } from "@/lib/url";
 import { cn } from "@/lib/utils";
@@ -524,11 +518,7 @@ function ElementChooser({
         ) : null}
         {errors.selector ? <ErrorLine>{errors.selector}</ErrorLine> : null}
         {target === "click" && selector && !eventNameError(form.name) ? (
-          <Snippet
-            title="Track this element with the following JavaScript"
-            note="Optional: paste it into your site's <head> or a Google Tag Manager Custom HTML tag (trigger: All Pages). With the Routely script also on the page, a click still counts once."
-            code={clickTrackSnippet(form.name.trim(), selector)}
-          />
+          <GtmClickSetup name={form.name.trim()} selector={selector} />
         ) : null}
       </div>
 
@@ -730,6 +720,39 @@ function SuccessMessage({
         </Field>
       ) : null}
     </>
+  );
+}
+
+/**
+ * A click event through Google Tag Manager (user request 2026-11-10): the same one-line track
+ * script as a JavaScript event, fired by a GTM Click trigger on the chosen element. With the
+ * Routely script also detecting the click, the SDK's 500 ms burst rule keeps it one event.
+ */
+function GtmClickSetup({ name, selector }: { name: string; selector: string }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-[#EEF0F3] bg-[#FAFBFC] p-3.5">
+      <Snippet
+        title="Using Google Tag Manager? Add this as a Custom HTML tag"
+        code={trackScript(name)}
+      />
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <span className={labelClass}>Fire it with this trigger</span>
+        <ol className="m-0 flex list-decimal flex-col gap-1.5 pl-5 text-[13px] leading-[19px] text-[#374151]">
+          <li>
+            Triggering → New → <strong>Click – All Elements</strong> → <strong>Some Clicks</strong>.
+          </li>
+          <li>
+            Condition: <strong>Click Element</strong> · <strong>matches CSS selector</strong> · this
+            value:
+          </li>
+        </ol>
+        <CodeBlock code={`${selector}, ${selector} *`} label="Copy: trigger selector" />
+        <p className={help}>
+          Save, then Submit and Publish. The Routely script must be on the page too. A click still
+          counts once.
+        </p>
+      </div>
+    </div>
   );
 }
 
