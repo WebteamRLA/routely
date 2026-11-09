@@ -207,6 +207,26 @@ export function trackScript(name: string): string {
 }
 
 /**
+ * A JavaScript event tied to a chosen element (user request 2026-11-10): a Google Tag Manager Custom
+ * HTML tag (trigger: All Pages) that reports a click on that element, or on anything inside it,
+ * through `routely.track`. The event is saved as JavaScript, so the pixel never listens for the
+ * same click: this script is the only thing that counts it. Plain ES5 for older containers.
+ */
+export function elementTrackScript(name: string, selector: string): string {
+  const literal = (value: string) => JSON.stringify(value).replace(/</g, "\\u003C");
+  return `<script type="text/javascript">
+  window.routely = window.routely || {
+    q: [],
+    track: function () { this.q.push(arguments); },
+  };
+  document.addEventListener("click", function (e) {
+    var el = e.target && e.target.closest && e.target.closest(${literal(selector)});
+    if (el) window.routely.track(${literal(name)});
+  }, true);
+</script>`;
+}
+
+/**
  * The code a developer pastes after the action succeeds. The first line makes it safe wherever it
  * runs: before the SDK loads the call waits in a queue, and with the SDK blocked it does nothing,
  * so it can never break the customer's page.

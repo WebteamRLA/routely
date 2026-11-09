@@ -5,6 +5,7 @@ import {
   EVENT_TEMPLATES,
   type EventSignals,
   type TriggerSource,
+  elementTrackScript,
   eventStatus,
   submissionUnverified,
   toEventTrigger,
@@ -133,5 +134,29 @@ describe("trackSnippet", () => {
 
   it("escapes the name", () => {
     expect(trackSnippet(`a"b`)).toContain(`"a\\"b"`);
+  });
+});
+
+describe("elementTrackScript", () => {
+  function load(code: string) {
+    const tracked: unknown[][] = [];
+    let onClick: (e: { target: unknown }) => void = () => {};
+    const window = { routely: { track: (...args: unknown[]) => tracked.push(args) } };
+    const document = { addEventListener: (_t: string, fn: typeof onClick) => (onClick = fn) };
+    const inner = code.replace(/^<script[^>]*>/, "").replace(/<\/script>$/, "");
+    new Function("window", "document", inner)(window, document);
+    return { tracked, click: (target: unknown) => onClick({ target }) };
+  }
+  const el = (match: boolean) => ({ closest: (s: string) => (match && s === "#buy" ? {} : null) });
+
+  it("reports a click on the chosen element, and nothing else", () => {
+    const page = load(elementTrackScript("buy_clicked", "#buy"));
+    page.click(el(false));
+    page.click(el(true));
+    expect(page.tracked).toEqual([["buy_clicked"]]);
+  });
+
+  it("cannot be closed early by a selector", () => {
+    expect(elementTrackScript("x", "a[title='</script>']").match(/<\/script>/g)).toHaveLength(1);
   });
 });

@@ -122,7 +122,16 @@ export function toEventInput(websiteId: string, form: EventForm): Record<string,
     description: text(form.description),
     category: text(form.category),
   };
-  if (savesAsCode(form)) return { ...base, method: "CODE" };
+  if (savesAsCode(form)) {
+    // A JavaScript event may name the element its GTM script listens on, kept so the dialog
+    // shows it again. The pixel never listens for a JavaScript event, so it changes no counting.
+    const selector = form.method === "CODE" ? text(form.selector) : null;
+    return {
+      ...base,
+      method: "CODE",
+      ...(selector ? { selector, pageUrl: url(form.pageUrl) } : {}),
+    };
+  }
 
   const isForm = form.method === "FORM";
   const success = form.success as FormSuccessName;

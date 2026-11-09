@@ -30,7 +30,13 @@ import {
   label as labelClass,
   mono,
 } from "@/components/rt/styles";
-import { EVENT_TEMPLATES, type EventMethodName, METHOD_LABELS, trackScript } from "@/lib/events";
+import {
+  EVENT_TEMPLATES,
+  type EventMethodName,
+  METHOD_LABELS,
+  elementTrackScript,
+  trackScript,
+} from "@/lib/events";
 import { isValidPageUrl, sameSiteMessage, withScheme } from "@/lib/launch-rules";
 import { isSameSite } from "@/lib/url";
 import { cn } from "@/lib/utils";
@@ -449,7 +455,18 @@ function StepTwo({
         </>
       ) : null}
 
-      {form.method === "CODE" ? <CodeInstructions name={form.name.trim()} /> : null}
+      {form.method === "CODE" ? (
+        <>
+          <div className="flex flex-col gap-1">
+            <span className={labelClass}>Element (optional)</span>
+            <p className={help}>
+              Select the element it happens on to get a ready Google Tag Manager script for it.
+            </p>
+          </div>
+          {chooser("click")}
+          <CodeInstructions name={form.name.trim()} selector={form.selector.trim()} />
+        </>
+      ) : null}
     </ModalBody>
   );
 }
@@ -721,15 +738,23 @@ function SuccessMessage({
 }
 
 /** A JavaScript event: one snippet to start from, the other examples folded away until wanted. */
-function CodeInstructions({ name }: { name: string }) {
+function CodeInstructions({ name, selector = "" }: { name: string; selector?: string }) {
   const [more, setMore] = useState(false);
   return (
     <div className="flex flex-col gap-3">
-      <Snippet
-        title="Track this event with the following JavaScript"
-        note="Run it right after the action succeeds (a signup, a purchase), not when the button is pressed. It works on your page or in a Google Tag Manager Custom HTML tag."
-        code={trackScript(name)}
-      />
+      {selector ? (
+        <Snippet
+          title="Track this element with the following JavaScript"
+          note="Add it in Google Tag Manager as a Custom HTML tag with the All Pages trigger, then Submit and Publish. It counts each click on the selected element. The Routely script must be on the page too."
+          code={elementTrackScript(name, selector)}
+        />
+      ) : (
+        <Snippet
+          title="Track this event with the following JavaScript"
+          note="Run it right after the action succeeds (a signup, a purchase), not when the button is pressed. It works on your page or in a Google Tag Manager Custom HTML tag."
+          code={trackScript(name)}
+        />
+      )}
 
       <button
         type="button"

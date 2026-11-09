@@ -242,3 +242,21 @@ describe("formTrigger: what the Tag Manager tag is built from", () => {
     expect(formTrigger(form({ name: "has space", method: "CLICK", selector: "#a" }))).toBeNull();
   });
 });
+
+describe("a JavaScript event with an element", () => {
+  it("keeps the element its Tag Manager script listens on, and builds no pixel trigger", () => {
+    const seed = { method: "CODE" as const, selector: "#buy", pageUrl: "acme.com/shop" };
+    expect(input(seed)).toEqual({
+      websiteId: site,
+      name: "cta",
+      description: null,
+      category: null,
+      method: "CODE",
+      selector: "#buy",
+      pageUrl: "https://acme.com/shop",
+    });
+    expect(valid(input(seed))).toBe(true);
+    expect(formTrigger(form(seed))).toBeNull();
+    expect(input({ method: "CODE" })).not.toHaveProperty("selector");
+  });
+});

@@ -178,8 +178,9 @@ function storedFields(
     method: input.method,
     // Code reports itself; only a click or form has something for GTM to detect.
     install: input.method === "CODE" ? "MANUAL" : (input.install ?? "MANUAL"),
-    selector: input.method === "CODE" ? null : (input.selector ?? null),
-    pageUrl: input.method === "CODE" ? null : (input.pageUrl ?? null),
+    // A JavaScript event may keep the element its GTM script listens on; the pixel ignores it.
+    selector: input.selector ?? null,
+    pageUrl: input.pageUrl ?? null,
     pageMatch: input.method === "CODE" ? null : (input.pageMatch ?? null),
     formSuccess: success,
     successUrl: success === "URL" ? (input.successUrl ?? null) : null,
