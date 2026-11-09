@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
+import Script from "next/script";
 
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,11 @@ export const metadata: Metadata = {
     "Compare two versions of a page with redirect experiments and measure which one converts.",
 };
 
+// Routely's own Google Tag Manager container (our analytics, not a customer's — those install
+// the SDK through `lib/gtm.ts`). Production builds only, so local development sends nothing.
+const GTM_ID = "GTM-N9NQCT76";
+const loadGtm = process.env.NODE_ENV === "production";
+
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
@@ -32,6 +38,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={cn("font-sans antialiased", inter.variable, geistMono.variable)}>
         {children}
         <Toaster />
+        {loadGtm ? (
+          <>
+            <Script id="gtm-init" strategy="afterInteractive">
+              {`window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('js', new Date());`}
+            </Script>
+            <Script
+              id="gtm"
+              strategy="afterInteractive"
+              src={`https://www.googletagmanager.com/gtm.js?id=${GTM_ID}`}
+            />
+          </>
+        ) : null}
       </body>
     </html>
   );
